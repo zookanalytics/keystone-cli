@@ -3,13 +3,11 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Command } from 'commander';
 
+import exploreAgent from './templates/agents/explore.md' with { type: 'text' };
+import generalAgent from './templates/agents/general.md' with { type: 'text' };
+import architectAgent from './templates/agents/keystone-architect.md' with { type: 'text' };
 // Default templates
-import scaffoldWorkflow from '../.keystone/workflows/scaffold-feature.yaml' with { type: 'text' };
-import architectAgent from '../.keystone/workflows/agents/keystone-architect.md' with {
-  type: 'text',
-};
-import generalAgent from '../.keystone/workflows/agents/general.md' with { type: 'text' };
-import exploreAgent from '../.keystone/workflows/agents/explore.md' with { type: 'text' };
+import scaffoldWorkflow from './templates/scaffold-feature.yaml' with { type: 'text' };
 
 import { WorkflowDb } from './db/workflow-db.ts';
 import { WorkflowParser } from './parser/workflow-parser.ts';
@@ -70,6 +68,11 @@ model_mappings:
   "claude-*": anthropic
   "o1-*": openai
   "llama-*": groq
+
+# mcp_servers:
+#   filesystem:
+#     command: npx
+#     args: ["-y", "@modelcontextprotocol/server-filesystem", "."]
 
 storage:
   retention_days: 30
@@ -532,6 +535,59 @@ program
 
 // ===== keystone auth =====
 const auth = program.command('auth').description('Authentication management');
+
+auth
+  .command('login')
+  .description('Login to an authentication provider')
+  .option('-p, --provider <provider>', 'Authentication provider', 'github')
+  .option('-t, --token <token>', 'Personal Access Token (if not using interactive mode)')
+  .action(async (options) => {
+    const { AuthManager } = await import('./utils/auth-manager.ts');
+    const provider = options.provider.toLowerCase();
+
+    if (provider === 'github') {
+      let token = options.token;
+
+      if (!token) {
+        console.log('\nTo login with GitHub:');
+        console.log(
+          '1. Generate a Personal Access Token (Classic) with "copilot" scope (or full repo access).'
+        );
+        console.log('   https://github.com/settings/tokens/new');
+        console.log('2. Paste the token below:\n');
+
+        const prompt = 'Token: ';
+        process.stdout.write(prompt);
+        for await (const line of console) {
+          token = line.trim();
+          break;
+        }
+      }
+
+      if (token) {
+        AuthManager.save({ github_token: token });
+        // Force refresh of Copilot token to verify
+        try {
+          const copilotToken = await AuthManager.getCopilotToken();
+          if (copilotToken) {
+            console.log('\n✓ Successfully logged in to GitHub and retrieved Copilot token.');
+          } else {
+            console.error(
+              '\n✗ Saved GitHub token, but failed to retrieve Copilot token. Please check scopes.'
+            );
+          }
+        } catch (e) {
+          console.error('\n✗ Failed to verify token:', e instanceof Error ? e.message : e);
+        }
+      } else {
+        console.error('✗ No token provided.');
+        process.exit(1);
+      }
+    } else {
+      console.error(`✗ Unsupported provider: ${provider}`);
+      process.exit(1);
+    }
+  });
 
 auth
   .command('status')

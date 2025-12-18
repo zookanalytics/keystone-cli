@@ -45,6 +45,7 @@ export interface RunOptions {
   resumeRunId?: string;
   logger?: Logger;
   mcpManager?: MCPManager;
+  preventExit?: boolean; // Defaults to false
 }
 
 export interface StepContext {
@@ -76,9 +77,12 @@ export class WorkflowRunner {
   private restored = false;
   private logger: Logger;
   private mcpManager: MCPManager;
+  private options: RunOptions;
+  private signalHandler?: (signal: string) => void;
 
   constructor(workflow: Workflow, options: RunOptions = {}) {
     this.workflow = workflow;
+    this.options = options;
     this.db = new WorkflowDb(options.dbPath);
     this.secrets = this.loadSecrets();
     this.redactor = new Redactor(this.secrets);
@@ -257,7 +261,7 @@ export class WorkflowRunner {
    * Setup signal handlers for graceful shutdown
    */
   private setupSignalHandlers(): void {
-    const handleShutdown = async (signal: string) => {
+    const handler = async (signal: string) => {
       this.logger.log(`\n\n🛑 Received ${signal}. Cleaning up...`);
       try {
         await this.db.updateRunStatus(
@@ -267,15 +271,30 @@ export class WorkflowRunner {
           `Cancelled by user (${signal})`
         );
         this.logger.log('✓ Run status updated to failed');
-        this.db.close();
       } catch (error) {
         this.logger.error('Error during cleanup:', error);
       }
-      process.exit(130); // Standard exit code for SIGINT
+
+      // Only exit if not embedded
+      if (!this.options.preventExit) {
+        process.exit(130);
+      }
     };
 
-    process.on('SIGINT', () => handleShutdown('SIGINT'));
-    process.on('SIGTERM', () => handleShutdown('SIGTERM'));
+    this.signalHandler = handler;
+
+    process.on('SIGINT', handler);
+    process.on('SIGTERM', handler);
+  }
+
+  /**
+   * Remove signal handlers
+   */
+  private removeSignalHandlers(): void {
+    if (this.signalHandler) {
+      process.removeListener('SIGINT', this.signalHandler);
+      process.removeListener('SIGTERM', this.signalHandler);
+    }
   }
 
   /**
@@ -853,6 +872,7 @@ export class WorkflowRunner {
       await this.db.updateRunStatus(this.runId, 'failed', undefined, errorMsg);
       throw error;
     } finally {
+      this.removeSignalHandlers();
       await this.runFinally();
       await this.mcpManager.stopAll();
       this.db.close();

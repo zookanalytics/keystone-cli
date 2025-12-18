@@ -172,6 +172,7 @@ export class MCPServer {
             const runner = new WorkflowRunner(workflow, {
               inputs,
               logger,
+              preventExit: true,
             });
 
             // Note: This waits for completion. For long workflows, we might want to
@@ -337,6 +338,7 @@ export class MCPServer {
             const runner = new WorkflowRunner(workflow, {
               resumeRunId: run_id,
               logger,
+              preventExit: true,
             });
 
             let outputs: Record<string, unknown> | undefined;
