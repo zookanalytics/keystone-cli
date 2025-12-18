@@ -42,11 +42,19 @@ export const ConfigSchema = z.object({
   workflows_directory: z.string().default('workflows'),
   mcp_servers: z
     .record(
-      z.object({
-        command: z.string(),
-        args: z.array(z.string()).optional(),
-        env: z.record(z.string()).optional(),
-      })
+      z.discriminatedUnion('type', [
+        z.object({
+          type: z.literal('local').default('local'),
+          command: z.string(),
+          args: z.array(z.string()).optional(),
+          env: z.record(z.string()).optional(),
+        }),
+        z.object({
+          type: z.literal('remote'),
+          url: z.string().url(),
+          headers: z.record(z.string()).optional(),
+        }),
+      ])
     )
     .default({}),
 });

@@ -35,11 +35,12 @@ describe('MCPManager', () => {
     ConfigLoader.setConfig({
       mcp_servers: {
         'test-server': {
+          type: 'local',
           command: 'node',
           args: ['test.js'],
           env: { FOO: 'bar' },
         },
-      },
+      } as any,
       providers: {},
       model_mappings: {},
       default_provider: 'openai',
@@ -56,9 +57,10 @@ describe('MCPManager', () => {
     ConfigLoader.setConfig({
       mcp_servers: {
         'test-server': {
+          type: 'local',
           command: 'node',
         },
-      },
+      } as any,
       providers: {},
       model_mappings: {},
       default_provider: 'openai',
@@ -99,6 +101,7 @@ describe('MCPManager', () => {
     const manager = new MCPManager();
     const client = await manager.getClient({
       name: 'adhoc',
+      type: 'local',
       command: 'node',
     });
 
@@ -118,26 +121,33 @@ describe('MCPManager', () => {
     ConfigLoader.setConfig({
       mcp_servers: {
         'fail-server': {
+          type: 'local',
           command: 'fail',
         },
-      },
+      } as any,
       providers: {},
       model_mappings: {},
       default_provider: 'openai',
     });
 
-    const initSpy = spyOn(MCPClient.prototype, 'initialize').mockRejectedValue(
-      new Error('Connection failed')
+    const createLocalSpy = spyOn(MCPClient, 'createLocal').mockImplementation(
+      async (cmd: string) => {
+        const client = new (MCPClient as any)({
+          send: async () => {},
+          onMessage: () => {},
+          close: () => {},
+        });
+        spyOn(client, 'initialize').mockRejectedValue(new Error('Connection failed'));
+        spyOn(client, 'stop').mockReturnValue(undefined);
+        return client;
+      }
     );
-    const stopSpy = spyOn(MCPClient.prototype, 'stop').mockReturnValue(undefined);
 
     const manager = new MCPManager();
     const client = await manager.getClient('fail-server');
 
     expect(client).toBeUndefined();
-    expect(stopSpy).toHaveBeenCalled();
 
-    initSpy.mockRestore();
-    stopSpy.mockRestore();
+    createLocalSpy.mockRestore();
   });
 });

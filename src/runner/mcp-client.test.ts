@@ -38,7 +38,7 @@ describe('MCPClient', () => {
   });
 
   it('should initialize correctly', async () => {
-    const client = new MCPClient('node', ['server.js']);
+    const client = await MCPClient.createLocal('node', ['server.js']);
     const initPromise = client.initialize();
 
     // Simulate server response
@@ -56,7 +56,7 @@ describe('MCPClient', () => {
   });
 
   it('should list tools', async () => {
-    const client = new MCPClient('node');
+    const client = await MCPClient.createLocal('node');
     const listPromise = client.listTools();
 
     mockProcess.stdout.push(
@@ -75,7 +75,7 @@ describe('MCPClient', () => {
   });
 
   it('should call tool', async () => {
-    const client = new MCPClient('node');
+    const client = await MCPClient.createLocal('node');
     const callPromise = client.callTool('my-tool', { arg: 1 });
 
     mockProcess.stdout.push(
@@ -91,7 +91,7 @@ describe('MCPClient', () => {
   });
 
   it('should handle tool call error', async () => {
-    const client = new MCPClient('node');
+    const client = await MCPClient.createLocal('node');
     const callPromise = client.callTool('my-tool', {});
 
     mockProcess.stdout.push(
@@ -107,15 +107,15 @@ describe('MCPClient', () => {
 
   it('should timeout on request', async () => {
     // Set a very short timeout for testing
-    const client = new MCPClient('node', [], {}, 10);
+    const client = await MCPClient.createLocal('node', [], {}, 10);
     const requestPromise = client.initialize();
 
     // Don't push any response to stdout
     await expect(requestPromise).rejects.toThrow(/MCP request timeout/);
   });
 
-  it('should stop the process', () => {
-    const client = new MCPClient('node');
+  it('should stop the process', async () => {
+    const client = await MCPClient.createLocal('node');
     client.stop();
     expect(mockProcess.kill).toHaveBeenCalled();
   });

@@ -301,11 +301,20 @@ Keystone supports connecting to external MCP servers to give agents access to a 
 #### Global MCP Servers
 Define shared MCP servers in `.keystone/config.yaml` to reuse them across different workflows. Keystone ensures that multiple steps using the same global server will share a single running process.
 
+Keystone supports both local (stdio) and remote (SSE) MCP servers.
+
 ```yaml
 mcp_servers:
+  # Local server (stdio)
   filesystem:
+    type: local # Default
     command: npx
     args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/directory"]
+
+  # Remote server (SSE)
+  atlassian:
+    type: remote
+    url: https://mcp.atlassian.com/v1/sse
 ```
 
 #### Using MCP in Steps
