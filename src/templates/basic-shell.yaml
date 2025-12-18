@@ -11,7 +11,7 @@ outputs:
 steps:
   - id: create_message
     type: shell
-    run: echo "${{ inputs.greeting }}, ${{ inputs.name }}!"
+    run: echo "${{ escape(inputs.greeting) }}, ${{ escape(inputs.name) }}!"
     transform: "stdout.trim()"
 
   - id: print_message

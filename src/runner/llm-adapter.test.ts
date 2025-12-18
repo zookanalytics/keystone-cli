@@ -268,14 +268,6 @@ describe('CopilotAdapter', () => {
     await expect(adapter.chat([])).rejects.toThrow(/GitHub Copilot token not found/);
     spy.mockRestore();
   });
-
-  it('should throw error if token not found (duplicated)', async () => {
-    const spy = spyOn(AuthManager, 'getCopilotToken').mockResolvedValue(undefined);
-
-    const adapter = new CopilotAdapter();
-    await expect(adapter.chat([])).rejects.toThrow(/GitHub Copilot token not found/);
-    spy.mockRestore();
-  });
 });
 
 describe('getAdapter', () => {

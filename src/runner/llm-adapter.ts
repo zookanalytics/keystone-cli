@@ -141,19 +141,42 @@ export class AnthropicAdapter implements LLMAdapter {
           role: 'assistant',
           content: [
             ...(m.content ? [{ type: 'text' as const, text: m.content }] : []),
-            ...m.tool_calls.map((tc) => ({
-              type: 'tool_use' as const,
-              id: tc.id,
-              name: tc.function.name,
-              input: JSON.parse(tc.function.arguments),
-            })),
+            ...m.tool_calls.map((tc) => {
+              let input = {};
+              try {
+                input =
+                  typeof tc.function.arguments === 'string'
+                    ? JSON.parse(tc.function.arguments)
+                    : tc.function.arguments;
+              } catch (e) {
+                console.error(`Failed to parse tool arguments: ${tc.function.arguments}`);
+              }
+              return {
+                type: 'tool_use' as const,
+                id: tc.id,
+                name: tc.function.name,
+                input,
+              };
+            }),
           ],
         });
       } else {
-        anthropicMessages.push({
-          role: m.role as 'user' | 'assistant',
-          content: m.content || '',
-        });
+        const role = m.role as 'user' | 'assistant';
+        const lastMsg = anthropicMessages[anthropicMessages.length - 1];
+
+        if (
+          lastMsg &&
+          lastMsg.role === role &&
+          typeof lastMsg.content === 'string' &&
+          typeof m.content === 'string'
+        ) {
+          lastMsg.content += `\n\n${m.content}`;
+        } else {
+          anthropicMessages.push({
+            role,
+            content: m.content || '',
+          });
+        }
       }
     }
 

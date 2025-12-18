@@ -63,6 +63,16 @@ tools:
       expect(agent.tools[0].execution.id).toBe('tool-tool-without-id');
     });
 
+    it('should parse single-line frontmatter', () => {
+      const agentContent = '---name: single-line---\nPrompt';
+      const filePath = join(tempDir, 'single-line.md');
+      writeFileSync(filePath, agentContent);
+
+      const agent = parseAgent(filePath);
+      expect(agent.name).toBe('single-line');
+      expect(agent.systemPrompt).toBe('Prompt');
+    });
+
     it('should throw error for missing frontmatter', () => {
       const agentContent = 'Just some content without frontmatter';
       const filePath = join(tempDir, 'invalid-format.md');

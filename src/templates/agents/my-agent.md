@@ -1,1 +1,3 @@
----name: my-agent---
+---
+name: my-agent
+---

@@ -99,13 +99,6 @@ export class WorkflowDb {
       CREATE INDEX IF NOT EXISTS idx_steps_status ON step_executions(status);
       CREATE INDEX IF NOT EXISTS idx_steps_iteration ON step_executions(run_id, step_id, iteration_index);
     `);
-
-    // Migration: Add iteration_index if it doesn't exist
-    try {
-      this.db.exec('ALTER TABLE step_executions ADD COLUMN iteration_index INTEGER;');
-    } catch (e) {
-      // Ignore if column already exists
-    }
   }
 
   // ===== Workflow Runs =====

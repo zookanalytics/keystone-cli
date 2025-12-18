@@ -9,4 +9,4 @@ steps:
 
   - id: greet
     type: shell
-    run: echo "Hello, ${{ steps.ask_name.output }}!"
+    run: echo "Hello, ${{ escape(steps.ask_name.output) }}!"

@@ -6,7 +6,8 @@ import { type Agent, AgentSchema } from './schema';
 
 export function parseAgent(filePath: string): Agent {
   const content = readFileSync(filePath, 'utf8');
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n([\s\S]*))?$/);
+  // Flexible regex to handle both standard and single-line frontmatter
+  const match = content.match(/^---[\r\n]*([\s\S]*?)[\r\n]*---(?:\r?\n?([\s\S]*))?$/);
 
   if (!match) {
     throw new Error(`Invalid agent format in ${filePath}. Missing frontmatter.`);

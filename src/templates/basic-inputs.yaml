@@ -15,5 +15,5 @@ steps:
     type: shell
     run: |
       for i in $(seq 1 ${{ inputs.count }}); do
-        echo "Hello, ${{ inputs.user_name }}! (Attempt $i)"
+        echo "Hello, ${{ escape(inputs.user_name) }}! (Attempt $i)"
       done
