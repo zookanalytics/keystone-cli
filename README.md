@@ -124,18 +124,18 @@ model_mappings:
   "o1-*": openai
   "llama-*": groq
 
-  mcp_servers:
-    filesystem:
-      command: npx
-      args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/directory"]
-    github:
-      command: npx
-      args: ["-y", "@modelcontextprotocol/server-github"]
+mcp_servers:
+  filesystem:
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/directory"]
+  github:
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-github"]
       env:
         GITHUB_PERSONAL_ACCESS_TOKEN: "your-github-pat" # Or omit if GITHUB_TOKEN is in your .env
 
-
 storage:
+
   retention_days: 30
 ```
 
@@ -335,6 +335,8 @@ In these examples, the agent will have access to all tools provided by the MCP s
 
 ## 🛠️ CLI Commands
 
+| Command | Description |
+| :--- | :--- |
 | `init` | Initialize a new Keystone project |
 | `run <workflow>` | Execute a workflow (use `-i key=val` for inputs) |
 | `resume <run_id>` | Resume a failed or paused workflow |
