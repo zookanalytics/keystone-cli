@@ -1,12 +1,19 @@
 import { afterAll, beforeAll, describe, expect, it, mock } from 'bun:test';
-import { OpenAIAdapter, CopilotAdapter, AnthropicAdapter } from './llm-adapter';
-import { MCPClient } from './mcp-client';
-import { executeLlmStep } from './llm-executor';
-import type { LlmStep, Step } from '../parser/schema';
-import type { ExpressionContext } from '../expression/evaluator';
-import type { StepResult } from './step-executor';
+import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { mkdirSync, writeFileSync, unlinkSync } from 'node:fs';
+import type { ExpressionContext } from '../expression/evaluator';
+import type { LlmStep, Step } from '../parser/schema';
+import {
+  AnthropicAdapter,
+  CopilotAdapter,
+  type LLMMessage,
+  type LLMResponse,
+  type LLMTool,
+  OpenAIAdapter,
+} from './llm-adapter';
+import { executeLlmStep } from './llm-executor';
+import { MCPClient, type MCPResponse } from './mcp-client';
+import type { StepResult } from './step-executor';
 
 interface MockToolCall {
   function: {
@@ -54,16 +61,16 @@ Test system prompt`;
       };
     });
 
-    OpenAIAdapter.prototype.chat = mockChat as any;
-    CopilotAdapter.prototype.chat = mockChat as any;
-    AnthropicAdapter.prototype.chat = mockChat as any;
+    OpenAIAdapter.prototype.chat = mockChat as unknown as typeof originalOpenAIChat;
+    CopilotAdapter.prototype.chat = mockChat as unknown as typeof originalCopilotChat;
+    AnthropicAdapter.prototype.chat = mockChat as unknown as typeof originalAnthropicChat;
 
     // Use mock.module for MCPClient
     const originalInitialize = MCPClient.prototype.initialize;
     const originalListTools = MCPClient.prototype.listTools;
     const originalStop = MCPClient.prototype.stop;
 
-    const mockInitialize = mock(async () => ({}) as any);
+    const mockInitialize = mock(async () => ({}) as MCPResponse);
     const mockListTools = mock(async () => [
       {
         name: 'mcp-tool',
@@ -141,16 +148,16 @@ Test system prompt`;
       };
     });
 
-    OpenAIAdapter.prototype.chat = mockChat as any;
-    CopilotAdapter.prototype.chat = mockChat as any;
-    AnthropicAdapter.prototype.chat = mockChat as any;
+    OpenAIAdapter.prototype.chat = mockChat as unknown as typeof originalOpenAIChat;
+    CopilotAdapter.prototype.chat = mockChat as unknown as typeof originalCopilotChat;
+    AnthropicAdapter.prototype.chat = mockChat as unknown as typeof originalAnthropicChat;
 
     const originalInitialize = MCPClient.prototype.initialize;
     const originalListTools = MCPClient.prototype.listTools;
     const originalCallTool = MCPClient.prototype.callTool;
     const originalStop = MCPClient.prototype.stop;
 
-    const mockInitialize = mock(async () => ({}) as any);
+    const mockInitialize = mock(async () => ({}) as MCPResponse);
     const mockListTools = mock(async () => [
       {
         name: 'mcp-tool',

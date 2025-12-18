@@ -3,11 +3,18 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ExpressionContext } from '../expression/evaluator';
 import type { LlmStep, Step } from '../parser/schema';
-import { AnthropicAdapter, CopilotAdapter, OpenAIAdapter } from './llm-adapter';
-import { MCPClient } from './mcp-client';
-import { executeLlmStep } from './llm-executor';
-import { MCPManager } from './mcp-manager';
 import { ConfigLoader } from '../utils/config-loader';
+import {
+  AnthropicAdapter,
+  CopilotAdapter,
+  type LLMMessage,
+  type LLMResponse,
+  type LLMTool,
+  OpenAIAdapter,
+} from './llm-adapter';
+import { executeLlmStep } from './llm-executor';
+import { MCPClient, type MCPResponse } from './mcp-client';
+import { MCPManager } from './mcp-manager';
 import type { StepResult } from './step-executor';
 
 // Mock adapters
@@ -302,9 +309,7 @@ You are a test agent.`;
     const context: ExpressionContext = { inputs: {}, steps: {} };
     const executeStepFn = mock(async () => ({ status: 'success' as const, output: 'ok' }));
 
-    const initSpy = spyOn(MCPClient.prototype, 'initialize').mockResolvedValue(
-      {} as unknown as any
-    );
+    const initSpy = spyOn(MCPClient.prototype, 'initialize').mockResolvedValue({} as MCPResponse);
     const listSpy = spyOn(MCPClient.prototype, 'listTools').mockResolvedValue([
       { name: 'mcp-tool', inputSchema: {} },
     ]);
@@ -317,7 +322,7 @@ You are a test agent.`;
     const originalAnthropicChatInner = AnthropicAdapter.prototype.chat;
     let toolErrorCaptured = false;
 
-    const mockChat = mock(async (messages: any[]) => {
+    const mockChat = mock(async (messages: LLMMessage[]) => {
       const toolResultMessage = messages.find((m) => m.role === 'tool');
       if (toolResultMessage?.content?.includes('Error: Tool failed')) {
         toolErrorCaptured = true;
@@ -331,7 +336,7 @@ You are a test agent.`;
           ],
         },
       };
-    }) as any;
+    }) as unknown as typeof originalOpenAIChat;
 
     OpenAIAdapter.prototype.chat = mockChat;
     CopilotAdapter.prototype.chat = mockChat;
@@ -377,21 +382,19 @@ You are a test agent.`;
     const context: ExpressionContext = { inputs: {}, steps: {} };
     const executeStepFn = mock(async () => ({ status: 'success' as const, output: 'ok' }));
 
-    const initSpy = spyOn(MCPClient.prototype, 'initialize').mockResolvedValue(
-      {} as unknown as any
-    );
+    const initSpy = spyOn(MCPClient.prototype, 'initialize').mockResolvedValue({} as MCPResponse);
     const listSpy = spyOn(MCPClient.prototype, 'listTools').mockResolvedValue([
       { name: 'global-tool', description: 'A global tool', inputSchema: {} },
     ]);
 
     let toolFound = false;
     const originalOpenAIChatInner = OpenAIAdapter.prototype.chat;
-    const mockChat = mock(async (_messages: any[], options: any) => {
-      if (options.tools?.some((t: any) => t.function.name === 'global-tool')) {
+    const mockChat = mock(async (_messages: LLMMessage[], options: { tools?: LLMTool[] }) => {
+      if (options.tools?.some((t: LLMTool) => t.function.name === 'global-tool')) {
         toolFound = true;
       }
       return { message: { role: 'assistant', content: 'hello' } };
-    }) as any;
+    }) as unknown as typeof originalOpenAIChat;
 
     OpenAIAdapter.prototype.chat = mockChat;
 
@@ -499,15 +502,13 @@ You are a test agent.`;
     const context: ExpressionContext = { inputs: {}, steps: {} };
     const executeStepFn = mock(async () => ({ status: 'success' as const, output: 'ok' }));
 
-    const initSpy = spyOn(MCPClient.prototype, 'initialize').mockResolvedValue(
-      {} as unknown as any
-    );
+    const initSpy = spyOn(MCPClient.prototype, 'initialize').mockResolvedValue({} as MCPResponse);
     const listSpy = spyOn(MCPClient.prototype, 'listTools').mockResolvedValue([]);
 
     const originalOpenAIChatInner = OpenAIAdapter.prototype.chat;
     const mockChat = mock(async () => ({
       message: { role: 'assistant', content: 'hello' },
-    })) as any;
+    })) as unknown as typeof originalOpenAIChat;
     OpenAIAdapter.prototype.chat = mockChat;
 
     const managerSpy = spyOn(manager, 'getGlobalServers');

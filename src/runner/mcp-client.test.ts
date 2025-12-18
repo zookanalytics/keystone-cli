@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
-import { MCPClient } from './mcp-client';
 import * as child_process from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { Readable, Writable } from 'node:stream';
+import { MCPClient } from './mcp-client';
 
 interface MockProcess extends EventEmitter {
   stdout: Readable;

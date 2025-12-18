@@ -7,7 +7,7 @@ interface MCPTool {
   inputSchema: unknown;
 }
 
-interface MCPResponse {
+export interface MCPResponse {
   id?: number;
   result?: {
     tools?: MCPTool[];

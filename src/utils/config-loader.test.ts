@@ -1,6 +1,6 @@
-import { describe, expect, it, afterEach } from 'bun:test';
-import { ConfigLoader } from './config-loader';
+import { afterEach, describe, expect, it } from 'bun:test';
 import type { Config } from '../parser/config-schema';
+import { ConfigLoader } from './config-loader';
 
 describe('ConfigLoader', () => {
   afterEach(() => {

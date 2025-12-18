@@ -1,5 +1,5 @@
-import { MCPClient } from './mcp-client';
 import { ConfigLoader } from '../utils/config-loader';
+import { MCPClient } from './mcp-client';
 import type { Logger } from './workflow-runner';
 
 export interface MCPServerConfig {

@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
-import { MCPManager } from './mcp-manager';
-import { MCPClient } from './mcp-client';
-import { ConfigLoader } from '../utils/config-loader';
 import * as child_process from 'node:child_process';
-import { Readable, Writable } from 'node:stream';
 import { EventEmitter } from 'node:events';
+import { Readable, Writable } from 'node:stream';
+import { ConfigLoader } from '../utils/config-loader';
+import { MCPClient } from './mcp-client';
+import { MCPManager } from './mcp-manager';
 
 describe('MCPManager', () => {
   let spawnSpy: ReturnType<typeof spyOn>;
