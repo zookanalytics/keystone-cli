@@ -374,7 +374,7 @@ describe('step-executor', () => {
       const step: WorkflowStep = {
         id: 'w1',
         type: 'workflow',
-        workflow: 'child.yaml',
+        path: 'child.yaml',
       };
       // @ts-ignore
       const executeWorkflowFn = mock(() =>
@@ -392,7 +392,7 @@ describe('step-executor', () => {
       const step: WorkflowStep = {
         id: 'w1',
         type: 'workflow',
-        workflow: 'child.yaml',
+        path: 'child.yaml',
       };
       const result = await executeStep(step, context);
       expect(result.status).toBe('failed');

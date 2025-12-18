@@ -541,29 +541,21 @@ const auth = program.command('auth').description('Authentication management');
 auth
   .command('login')
   .description('Login to an authentication provider')
-  .option('-p, --provider <provider>', 'Authentication provider', 'github')
-  .option('-t, --token <token>', 'Personal Access Token (if not using interactive mode)')
-  .action(async (options) => {
+  .argument('[provider]', 'Authentication provider (github, openai, anthropic)', 'github')
+  .option(
+    '-p, --provider <provider>',
+    'Authentication provider (deprecated, use positional argument)'
+  )
+  .option('-t, --token <token>', 'Manual token or API key')
+  .action(async (providerArg, options) => {
     const { AuthManager } = await import('./utils/auth-manager.ts');
-    const provider = options.provider.toLowerCase();
+    const provider = (options.provider || providerArg).toLowerCase();
 
     if (provider === 'github') {
       let token = options.token;
 
       if (!token) {
-        console.log('\nTo login with GitHub:');
-        console.log(
-          '1. Generate a Personal Access Token (Classic) with "copilot" scope (or full repo access).'
-        );
-        console.log('   https://github.com/settings/tokens/new');
-        console.log('2. Paste the token below:\n');
-
-        const prompt = 'Token: ';
-        process.stdout.write(prompt);
-        for await (const line of console) {
-          token = line.trim();
-          break;
-        }
+        token = await AuthManager.loginWithDeviceFlow();
       }
 
       if (token) {
@@ -583,6 +575,31 @@ auth
         }
       } else {
         console.error('✗ No token provided.');
+        process.exit(1);
+      }
+    } else if (provider === 'openai' || provider === 'anthropic') {
+      let key = options.token;
+
+      if (!key) {
+        const prompt = `${provider === 'openai' ? 'OpenAI' : 'Anthropic'} API Key: `;
+        process.stdout.write(prompt);
+        for await (const line of console) {
+          key = line.trim();
+          break;
+        }
+      }
+
+      if (key) {
+        const data: AuthData = {};
+        if (provider === 'openai') {
+          data.openai_api_key = key;
+        } else {
+          data.anthropic_api_key = key;
+        }
+        AuthManager.save(data);
+        console.log(`\n✓ Successfully saved ${provider} API key.`);
+      } else {
+        console.error('✗ No API key provided.');
         process.exit(1);
       }
     } else {
@@ -617,7 +634,27 @@ auth
       }
     }
 
-    if (!auth.github_token && !provider) {
+    if (!provider || provider === 'openai') {
+      if (auth.openai_api_key) {
+        console.log('  ✓ OpenAI API key configured');
+      } else if (provider) {
+        console.log(
+          '  ⊘ OpenAI API key not configured. Run "keystone auth login openai" to configure.'
+        );
+      }
+    }
+
+    if (!provider || provider === 'anthropic') {
+      if (auth.anthropic_api_key) {
+        console.log('  ✓ Anthropic API key configured');
+      } else if (provider) {
+        console.log(
+          '  ⊘ Anthropic API key not configured. Run "keystone auth login anthropic" to configure.'
+        );
+      }
+    }
+
+    if (!auth.github_token && !auth.openai_api_key && !auth.anthropic_api_key && !provider) {
       console.log('  ⊘ Not logged in. Run "keystone auth login" to authenticate.');
     }
   });
@@ -641,7 +678,19 @@ auth
         copilot_expires_at: undefined,
       });
       console.log('✓ Successfully logged out of GitHub.');
-    } else {
+    }
+
+    if (!provider || provider === 'openai') {
+      AuthManager.save({ openai_api_key: undefined });
+      console.log('✓ Successfully removed OpenAI API key.');
+    }
+
+    if (!provider || provider === 'anthropic') {
+      AuthManager.save({ anthropic_api_key: undefined });
+      console.log('✓ Successfully removed Anthropic API key.');
+    }
+
+    if (provider && !['github', 'copilot', 'openai', 'anthropic'].includes(provider)) {
       console.error(`✗ Unknown provider: ${provider}`);
       process.exit(1);
     }
@@ -733,6 +782,16 @@ _keystone() {
             'logout:Logout and clear authentication tokens'
           )
           _describe -t auth_commands 'auth command' auth_commands
+
+          if [[ $words[2] == "login" || $words[2] == "status" || $words[2] == "logout" ]]; then
+            local -a providers
+            providers=(
+              'github:GitHub'
+              'openai:OpenAI'
+              'anthropic:Anthropic'
+            )
+            _describe -t providers 'provider' providers
+          fi
           ;;
       esac
       ;;

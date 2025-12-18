@@ -80,6 +80,11 @@ Add your API keys to the generated `.env` file:
 OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
 ```
+Alternatively, you can use the built-in authentication management:
+```bash
+keystone auth login openai
+keystone auth login anthropic
+```
 
 ### 3. Run a Workflow
 ```bash
@@ -175,7 +180,7 @@ You can add any OpenAI-compatible provider (Groq, Together AI, Perplexity, Local
 Keystone supports using your GitHub Copilot subscription directly. To authenticate (using the GitHub Device Flow):
 
 ```bash
-keystone auth login
+keystone auth login github
 ```
 
 Then, you can use Copilot in your configuration:
@@ -187,9 +192,17 @@ providers:
     default_model: gpt-4o
 ```
 
-Authentication tokens for Copilot are managed automatically after the initial login. For other providers, API keys should be stored in a `.env` file in your project root:
+Authentication tokens for Copilot are managed automatically after the initial login. 
+
+### API Key Management
+
+For other providers, you can either store API keys in a `.env` file in your project root:
 - `OPENAI_API_KEY`
 - `ANTHROPIC_API_KEY`
+
+Or use the `keystone auth login` command to securely store them in your local machine's configuration:
+- `keystone auth login openai`
+- `keystone auth login anthropic`
 
 ---
 
@@ -376,9 +389,9 @@ In these examples, the agent will have access to all tools provided by the MCP s
 | `logs <run_id>` | View logs and step status for a specific run |
 | `graph <workflow>` | Generate a Mermaid diagram of the workflow |
 | `config` | Show current configuration and providers |
-| `auth status` | Show authentication status |
-| `auth login` | Login to an authentication provider (GitHub) |
-| `auth logout` | Logout and clear authentication tokens |
+| `auth status [provider]` | Show authentication status |
+| `auth login [provider]` | Login to an authentication provider (github, openai, anthropic) |
+| `auth logout [provider]` | Logout and clear authentication tokens |
 | `ui` | Open the interactive TUI dashboard |
 | `mcp` | Start the Keystone MCP server |
 | `completion [shell]` | Generate shell completion script (zsh, bash) |

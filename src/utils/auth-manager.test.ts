@@ -149,4 +149,90 @@ describe('AuthManager', () => {
       consoleSpy.mockRestore();
     });
   });
+
+  describe('loginWithDeviceFlow()', () => {
+    it('should complete the device flow and return access token', async () => {
+      // 1. Mock first fetch for device code
+      // 2. Mock second fetch for polling (success)
+      let fetchCount = 0;
+      global.fetch = mock((): Promise<Response> => {
+        fetchCount++;
+        if (fetchCount === 1) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                device_code: 'dev-123',
+                user_code: 'ABCD-1234',
+                verification_uri: 'https://github.com/login/device',
+                interval: 0.1, // Short interval for testing
+              }),
+              { status: 200 }
+            )
+          );
+        }
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              access_token: 'gho_test_token',
+            }),
+            { status: 200 }
+          )
+        );
+      });
+
+      const consoleSpy = spyOn(console, 'log').mockImplementation(() => {});
+
+      const token = await AuthManager.loginWithDeviceFlow();
+
+      expect(token).toBe('gho_test_token');
+      expect(fetchCount).toBe(2);
+      consoleSpy.mockRestore();
+    });
+
+    it('should handle polling until authorized', async () => {
+      let fetchCount = 0;
+      global.fetch = mock((): Promise<Response> => {
+        fetchCount++;
+        if (fetchCount === 1) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                device_code: 'dev-123',
+                user_code: 'ABCD-1234',
+                verification_uri: 'https://github.com/login/device',
+                interval: 0.01,
+              }),
+              { status: 200 }
+            )
+          );
+        }
+        if (fetchCount === 2) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                error: 'authorization_pending',
+              }),
+              { status: 200 }
+            )
+          );
+        }
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              access_token: 'gho_polled_token',
+            }),
+            { status: 200 }
+          )
+        );
+      });
+
+      const consoleSpy = spyOn(console, 'log').mockImplementation(() => {});
+
+      const token = await AuthManager.loginWithDeviceFlow();
+
+      expect(token).toBe('gho_polled_token');
+      expect(fetchCount).toBe(3);
+      consoleSpy.mockRestore();
+    });
+  });
 });
