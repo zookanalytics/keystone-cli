@@ -180,6 +180,13 @@ async function executeFileStep(
         throw new Error('Content is required for write operation');
       }
       const content = ExpressionEvaluator.evaluateString(step.content, context);
+
+      // Ensure parent directory exists
+      const fs = await import('node:fs/promises');
+      const pathModule = await import('node:path');
+      const dir = pathModule.dirname(path);
+      await fs.mkdir(dir, { recursive: true });
+
       const bytes = await Bun.write(path, content);
       return {
         output: { path, bytes },
@@ -193,8 +200,13 @@ async function executeFileStep(
       }
       const content = ExpressionEvaluator.evaluateString(step.content, context);
 
-      // Use Node.js fs for efficient append operation
+      // Ensure parent directory exists
       const fs = await import('node:fs/promises');
+      const pathModule = await import('node:path');
+      const dir = pathModule.dirname(path);
+      await fs.mkdir(dir, { recursive: true });
+
+      // Use Node.js fs for efficient append operation
       await fs.appendFile(path, content, 'utf-8');
 
       return {
