@@ -1,0 +1,5 @@
+name: invalid-workflow
+steps:
+  - id: step1
+    type: shell
+    # Missing 'run' property

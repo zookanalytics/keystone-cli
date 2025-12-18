@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Bun
+bun.lockb
+
+# Environment
+.env
+.env.local
+
+# Keystone State
+*.db
+*.db-shm
+*.db-wal
+
+# Build
+dist/
+*.tsbuildinfo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
