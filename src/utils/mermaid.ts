@@ -13,7 +13,7 @@ export function generateMermaidGraph(workflow: Workflow): string {
     let label = `${step.id}\\n(${step.type})`;
 
     // Add specific details based on type
-    if (step.type === 'llm') label = `${step.id}\\n🤖 ${step.agent}`;
+    if (step.type === 'llm') label = `${step.id}\\n🤖 ${step.agent}\\n(${step.type})`;
     if (step.foreach) label += '\\n(📚 Loop)';
     if (step.if) label += '\\n❓ Conditional';
 
@@ -76,9 +76,8 @@ export function renderWorkflowAsAscii(workflow: Workflow): string {
   const nodeHeight = 3;
 
   for (const step of workflow.steps) {
-    let label = step.id;
-    if (step.type === 'llm') label = `AI: ${step.agent}`;
-    else label = `${step.id} (${step.type})`;
+    let label = `${step.id} (${step.type})`;
+    if (step.type === 'llm') label = `${step.id} (AI: ${step.agent})`;
 
     if (step.if) label = `IF ${label}`;
     if (step.foreach) label = `LOOP ${label}`;
@@ -169,9 +168,9 @@ export function renderWorkflowAsAscii(workflow: Workflow): string {
     draw(startX, endY, '+');
     draw(endX, endY, '+');
 
-    const labelX = x + Math.floor((w - node.label.length) / 2);
+    const labelX = x + Math.floor((w - (node.label?.length || 0)) / 2);
     const labelY = y + Math.floor(h / 2);
-    drawText(labelX, labelY, node.label);
+    drawText(labelX, labelY, node.label || '');
   }
 
   // Draw Edges

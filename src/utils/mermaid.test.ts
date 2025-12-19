@@ -16,7 +16,7 @@ describe('mermaid', () => {
     const graph = generateMermaidGraph(workflow);
     expect(graph).toContain('graph TD');
     expect(graph).toContain('s1["s1\\n(shell)"]:::shell');
-    expect(graph).toContain('s2["s2\\n🤖 my-agent"]:::ai');
+    expect(graph).toContain('s2["s2\\n🤖 my-agent\\n(llm)"]:::ai');
     expect(graph).toContain('s3["s3\\n(human)\\n❓ Conditional"]:::human');
     expect(graph).toContain('s1 --> s2');
     expect(graph).toContain('s2 --> s3');
@@ -43,7 +43,7 @@ describe('mermaid', () => {
     const ascii = renderWorkflowAsAscii(workflow);
     expect(ascii).toBeDefined();
     expect(ascii).toContain('s1');
-    expect(ascii).toContain('AI: my-agent');
+    expect(ascii).toContain('s2 (AI: my-agent)');
     expect(ascii).toContain('|');
     expect(ascii).toContain('-');
     expect(ascii).toContain('>');
