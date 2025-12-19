@@ -28,10 +28,4 @@ model_mappings:
   "o1-*": copilot
   "llama-*": groq
 
-mcp_servers:
-  atlassian:
-    type: local
-    command: npx
-    args: ["-y", "mcp-remote", "https://mcp.atlassian.com/v1/sse"]
-    oauth:
-      scope: tools:read
+mcp_servers: {}
