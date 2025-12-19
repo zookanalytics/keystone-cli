@@ -27,6 +27,7 @@
     "@jsep-plugin/object": "^1.2.2",
     "@types/react": "^19.2.7",
     "commander": "^12.1.0",
+    "dagre": "^0.8.5",
     "ink": "^6.5.1",
     "ink-select-input": "3.1.2",
     "ink-spinner": "^5.0.0",
@@ -37,6 +38,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
+    "@types/dagre": "^0.7.53",
     "@types/js-yaml": "^4.0.9"
   },
   "engines": {

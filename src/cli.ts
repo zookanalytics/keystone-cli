@@ -12,7 +12,7 @@ import scaffoldWorkflow from './templates/scaffold-feature.yaml' with { type: 't
 import { WorkflowDb } from './db/workflow-db.ts';
 import { WorkflowParser } from './parser/workflow-parser.ts';
 import { ConfigLoader } from './utils/config-loader.ts';
-import { generateMermaidGraph, renderMermaidAsAscii } from './utils/mermaid.ts';
+import { generateMermaidGraph, renderWorkflowAsAscii } from './utils/mermaid.ts';
 import { WorkflowRegistry } from './utils/workflow-registry.ts';
 
 import pkg from '../package.json' with { type: 'json' };
@@ -204,12 +204,11 @@ program
     try {
       const resolvedPath = WorkflowRegistry.resolvePath(workflowPath);
       const workflow = WorkflowParser.loadWorkflow(resolvedPath);
-      const mermaid = generateMermaidGraph(workflow);
-
-      const ascii = await renderMermaidAsAscii(mermaid);
+      const ascii = renderWorkflowAsAscii(workflow);
       if (ascii) {
         console.log(`\n${ascii}\n`);
       } else {
+        const mermaid = generateMermaidGraph(workflow);
         console.log('\n```mermaid');
         console.log(mermaid);
         console.log('```\n');
@@ -614,11 +613,15 @@ const auth = program.command('auth').description('Authentication management');
 auth
   .command('login')
   .description('Login to an authentication provider')
-  .option('-p, --provider <provider>', 'Authentication provider', 'github')
+  .argument('[provider]', 'Authentication provider', 'github')
+  .option(
+    '-p, --provider <provider>',
+    'Authentication provider (deprecated, use positional argument)'
+  )
   .option('-t, --token <token>', 'Personal Access Token (if not using interactive mode)')
-  .action(async (options) => {
+  .action(async (providerArg, options) => {
     const { AuthManager } = await import('./utils/auth-manager.ts');
-    const provider = options.provider.toLowerCase();
+    const provider = (options.provider || providerArg).toLowerCase();
 
     if (provider === 'github') {
       let token = options.token;
@@ -675,6 +678,31 @@ auth
         console.error('✗ No token provided.');
         process.exit(1);
       }
+    } else if (provider === 'openai' || provider === 'anthropic') {
+      let key = options.token; // Use --token if provided as the API key
+
+      if (!key) {
+        console.log(`\n🔑 Login to ${provider.toUpperCase()}`);
+        console.log(`   Please provide your ${provider.toUpperCase()} API key.\n`);
+        const prompt = 'API Key: ';
+        process.stdout.write(prompt);
+        for await (const line of console) {
+          key = line.trim();
+          break;
+        }
+      }
+
+      if (key) {
+        if (provider === 'openai') {
+          AuthManager.save({ openai_api_key: key });
+        } else {
+          AuthManager.save({ anthropic_api_key: key });
+        }
+        console.log(`\n✓ Successfully saved ${provider.toUpperCase()} API key.`);
+      } else {
+        console.error('✗ No API key provided.');
+        process.exit(1);
+      }
     } else {
       console.error(`✗ Unsupported provider: ${provider}`);
       process.exit(1);
@@ -702,13 +730,33 @@ auth
         }
       } else if (provider) {
         console.log(
-          `  ⊘ Not logged into GitHub. Run "keystone auth login --provider github" to authenticate.`
+          `  ⊘ Not logged into GitHub. Run "keystone auth login github" to authenticate.`
         );
       }
     }
 
-    if (!auth.github_token && !provider) {
-      console.log('  ⊘ Not logged in. Run "keystone auth login" to authenticate.');
+    if (!provider || provider === 'openai') {
+      if (auth.openai_api_key) {
+        console.log('  ✓ OpenAI API key configured');
+      } else if (provider) {
+        console.log(
+          `  ⊘ OpenAI API key not configured. Run "keystone auth login openai" to authenticate.`
+        );
+      }
+    }
+
+    if (!provider || provider === 'anthropic') {
+      if (auth.anthropic_api_key) {
+        console.log('  ✓ Anthropic API key configured');
+      } else if (provider) {
+        console.log(
+          `  ⊘ Anthropic API key not configured. Run "keystone auth login anthropic" to authenticate.`
+        );
+      }
+    }
+
+    if (!auth.github_token && !auth.openai_api_key && !auth.anthropic_api_key && !provider) {
+      console.log('  ⊘ No providers configured. Run "keystone auth login" to authenticate.');
     }
   });
 
@@ -731,6 +779,12 @@ auth
         copilot_expires_at: undefined,
       });
       console.log('✓ Successfully logged out of GitHub.');
+    } else if (provider === 'openai') {
+      AuthManager.save({ openai_api_key: undefined });
+      console.log('✓ Successfully cleared OpenAI API key.');
+    } else if (provider === 'anthropic') {
+      AuthManager.save({ anthropic_api_key: undefined });
+      console.log('✓ Successfully cleared Anthropic API key.');
     } else {
       console.error(`✗ Unknown provider: ${provider}`);
       process.exit(1);

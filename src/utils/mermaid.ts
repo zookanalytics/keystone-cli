@@ -1,3 +1,4 @@
+import dagre from 'dagre';
 import type { Workflow } from '../parser/schema';
 
 export function generateMermaidGraph(workflow: Workflow): string {
@@ -59,29 +60,163 @@ export function generateMermaidGraph(workflow: Workflow): string {
 }
 
 /**
- * Renders a Mermaid graph as ASCII using mermaid-ascii.art
+ * Renders a workflow as a local ASCII graph using dagre for layout.
  */
-export async function renderMermaidAsAscii(mermaid: string): Promise<string | null> {
-  try {
-    const response = await fetch('https://mermaid-ascii.art', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: `mermaid=${encodeURIComponent(mermaid)}`,
-    });
+export async function renderMermaidAsAscii(_mermaid: string): Promise<string | null> {
+  // We no longer use the mermaid string for ASCII, we use the workflow object directly.
+  return null;
+}
 
-    if (!response.ok) {
-      return null;
+export function renderWorkflowAsAscii(workflow: Workflow): string {
+  const g = new dagre.graphlib.Graph();
+  g.setGraph({ rankdir: 'LR', nodesep: 2, edgesep: 1, ranksep: 4 });
+  g.setDefaultEdgeLabel(() => ({}));
+
+  const nodeWidth = 24;
+  const nodeHeight = 3;
+
+  for (const step of workflow.steps) {
+    let label = step.id;
+    if (step.type === 'llm') label = `AI: ${step.agent}`;
+    else label = `${step.id} (${step.type})`;
+
+    if (step.if) label = `IF ${label}`;
+    if (step.foreach) label = `LOOP ${label}`;
+
+    const width = Math.max(nodeWidth, label.length + 4);
+    g.setNode(step.id, { label, width, height: nodeHeight });
+
+    if (step.needs) {
+      for (const need of step.needs) {
+        g.setEdge(need, step.id);
+      }
     }
-
-    const ascii = await response.text();
-    if (ascii.includes('Failed to render diagram')) {
-      return null;
-    }
-
-    return ascii;
-  } catch {
-    return null;
   }
+
+  dagre.layout(g);
+
+  // Canvas dimensions
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+
+  for (const v of g.nodes()) {
+    const node = g.node(v);
+    minX = Math.min(minX, node.x - node.width / 2);
+    minY = Math.min(minY, node.y - node.height / 2);
+    maxX = Math.max(maxX, node.x + node.width / 2);
+    maxY = Math.max(maxY, node.y + node.height / 2);
+  }
+
+  for (const e of g.edges()) {
+    const edge = g.edge(e);
+    for (const p of edge.points) {
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x);
+      maxY = Math.max(maxY, p.y);
+    }
+  }
+
+  const canvasWidth = Math.ceil(maxX - minX) + 10;
+  const canvasHeight = Math.ceil(maxY - minY) + 4;
+  const canvas = Array.from({ length: canvasHeight }, () => Array(canvasWidth).fill(' '));
+
+  const offsetX = Math.floor(-minX) + 2;
+  const offsetY = Math.floor(-minY) + 1;
+
+  // Helper to draw at coordinates
+  const draw = (x: number, y: number, char: string) => {
+    const ix = Math.floor(x) + offsetX;
+    const iy = Math.floor(y) + offsetY;
+    if (iy >= 0 && iy < canvas.length && ix >= 0 && ix < canvas[0].length) {
+      canvas[iy][ix] = char;
+    }
+  };
+
+  const drawText = (x: number, y: number, text: string) => {
+    const startX = Math.floor(x);
+    const startY = Math.floor(y);
+    for (let i = 0; i < text.length; i++) {
+      draw(startX + i, startY, text[i]);
+    }
+  };
+
+  // Draw Nodes
+  for (const v of g.nodes()) {
+    const node = g.node(v);
+    const x = node.x - node.width / 2;
+    const y = node.y - node.height / 2;
+    const w = node.width;
+    const h = node.height;
+
+    const startX = Math.floor(x);
+    const startY = Math.floor(y);
+    const endX = startX + Math.floor(w) - 1;
+    const endY = startY + Math.floor(h) - 1;
+
+    for (let i = startX; i <= endX; i++) {
+      draw(i, startY, '-');
+      draw(i, endY, '-');
+    }
+    for (let i = startY; i <= endY; i++) {
+      draw(startX, i, '|');
+      draw(endX, i, '|');
+    }
+    draw(startX, startY, '+');
+    draw(endX, startY, '+');
+    draw(startX, endY, '+');
+    draw(endX, endY, '+');
+
+    const labelX = x + Math.floor((w - node.label.length) / 2);
+    const labelY = y + Math.floor(h / 2);
+    drawText(labelX, labelY, node.label);
+  }
+
+  // Draw Edges
+  for (const e of g.edges()) {
+    const edge = g.edge(e);
+    const points = edge.points;
+
+    for (let i = 0; i < points.length - 1; i++) {
+      const p1 = points[i];
+      const p2 = points[i + 1];
+
+      const x1 = Math.floor(p1.x);
+      const y1 = Math.floor(p1.y);
+      const x2 = Math.floor(p2.x);
+      const y2 = Math.floor(p2.y);
+
+      if (x1 === x2) {
+        for (let y = Math.min(y1, y2); y <= Math.max(y1, y2); y++) draw(x1, y, '|');
+      } else if (y1 === y2) {
+        for (let x = Math.min(x1, x2); x <= Math.max(x1, x2); x++) draw(x, y1, '-');
+      } else {
+        const xStep = x2 > x1 ? 1 : -1;
+        const yStep = y2 > y1 ? 1 : -1;
+
+        if (x1 !== x2) {
+          for (let x = x1; x !== x2; x += xStep) {
+            draw(x, y1, '-');
+          }
+          draw(x2, y1, '+');
+        }
+        if (y1 !== y2) {
+          for (let y = y1 + yStep; y !== y2; y += yStep) {
+            draw(x2, y, '|');
+          }
+        }
+      }
+    }
+
+    const lastPoint = points[points.length - 1];
+    const prevPoint = points[points.length - 2];
+    if (lastPoint.x > prevPoint.x) draw(lastPoint.x, lastPoint.y, '>');
+    else if (lastPoint.x < prevPoint.x) draw(lastPoint.x, lastPoint.y, '<');
+    else if (lastPoint.y > prevPoint.y) draw(lastPoint.x, lastPoint.y, 'v');
+    else if (lastPoint.y < prevPoint.y) draw(lastPoint.x, lastPoint.y, '^');
+  }
+
+  return canvas.map((row) => row.join('').trimEnd()).join('\n');
 }

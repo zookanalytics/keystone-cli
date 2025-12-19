@@ -136,8 +136,8 @@ mcp_servers:
   github:
     command: npx
     args: ["-y", "@modelcontextprotocol/server-github"]
-      env:
-        GITHUB_PERSONAL_ACCESS_TOKEN: "your-github-pat" # Or omit if GITHUB_TOKEN is in your .env
+    env:
+      GITHUB_PERSONAL_ACCESS_TOKEN: "your-github-pat" # Or omit if GITHUB_TOKEN is in your .env
 
 storage:
 
@@ -327,7 +327,7 @@ You are a software developer. You can use tools to explore the codebase.
 Keystone can itself act as an MCP server, allowing other agents (like Claude Desktop or GitHub Copilot) to discover and run your workflows as tools.
 
 ```bash
-keystone mcp
+keystone mcp start
 ```
 
 > **Note:** Workflow execution via the Keystone MCP server is synchronous. This provides a better experience for agents as they receive the final results directly, though it means the connection remains open for the duration of the workflow run.
@@ -396,7 +396,8 @@ In these examples, the agent will have access to all tools provided by the MCP s
 | `auth login [provider]` | Login to an authentication provider (github, openai, anthropic) |
 | `auth logout [provider]` | Logout and clear authentication tokens |
 | `ui` | Open the interactive TUI dashboard |
-| `mcp` | Start the Keystone MCP server |
+| `mcp start` | Start the Keystone MCP server |
+| `mcp login <server>` | Login to a remote MCP server |
 | `completion [shell]` | Generate shell completion script (zsh, bash) |
 | `prune [--days N]` | Cleanup old run data from the database |
 

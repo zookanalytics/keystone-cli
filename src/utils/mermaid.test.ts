@@ -1,6 +1,6 @@
-import { describe, expect, it, mock, spyOn } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 import type { Workflow } from '../parser/schema';
-import { generateMermaidGraph, renderMermaidAsAscii } from './mermaid';
+import { generateMermaidGraph, renderWorkflowAsAscii } from './mermaid';
 
 describe('mermaid', () => {
   it('should generate a mermaid graph from a workflow', () => {
@@ -31,45 +31,21 @@ describe('mermaid', () => {
     expect(graph).toContain('(📚 Loop)');
   });
 
-  it('should render mermaid as ascii', async () => {
-    const originalFetch = global.fetch;
-    // @ts-ignore
-    global.fetch = mock(() =>
-      Promise.resolve(
-        new Response('ascii graph', {
-          status: 200,
-        })
-      )
-    );
+  it('should render workflow as ascii', () => {
+    const workflow: Workflow = {
+      name: 'test',
+      steps: [
+        { id: 's1', type: 'shell', run: 'echo 1', needs: [] },
+        { id: 's2', type: 'llm', agent: 'my-agent', prompt: 'hi', needs: ['s1'] },
+      ],
+    } as unknown as Workflow;
 
-    const result = await renderMermaidAsAscii('graph TD\n  A --> B');
-    expect(result).toBe('ascii graph');
-
-    global.fetch = originalFetch;
-  });
-
-  it('should return null if API returns error', async () => {
-    const fetchSpy = spyOn(global, 'fetch').mockResolvedValue(
-      new Response('Error', { status: 500 })
-    );
-    const result = await renderMermaidAsAscii('graph TD; A-->B');
-    expect(result).toBeNull();
-    fetchSpy.mockRestore();
-  });
-
-  it('should return null if API returns failure message', async () => {
-    const fetchSpy = spyOn(global, 'fetch').mockResolvedValue(
-      new Response('Failed to render diagram', { status: 200 })
-    );
-    const result = await renderMermaidAsAscii('graph TD; A-->B');
-    expect(result).toBeNull();
-    fetchSpy.mockRestore();
-  });
-
-  it('should return null if fetch throws', async () => {
-    const fetchSpy = spyOn(global, 'fetch').mockRejectedValue(new Error('Network error'));
-    const result = await renderMermaidAsAscii('graph TD; A-->B');
-    expect(result).toBeNull();
-    fetchSpy.mockRestore();
+    const ascii = renderWorkflowAsAscii(workflow);
+    expect(ascii).toBeDefined();
+    expect(ascii).toContain('s1');
+    expect(ascii).toContain('AI: my-agent');
+    expect(ascii).toContain('|');
+    expect(ascii).toContain('-');
+    expect(ascii).toContain('>');
   });
 });
