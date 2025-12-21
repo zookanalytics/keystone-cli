@@ -11,6 +11,7 @@ steps:
     type: llm
     agent: keystone-architect
     needs: [get_requirements]
+    allowClarification: true
     prompt: |
       The user wants to build the following:
       <user_requirements>

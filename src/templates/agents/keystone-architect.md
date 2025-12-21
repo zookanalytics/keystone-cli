@@ -54,6 +54,14 @@ Markdown files with YAML frontmatter:
 - **Clarification**: Enable `allowClarification` in `llm` steps if the agent should be able to ask the user for missing info.
 - **Discovery**: Use `mcpServers` in `llm` steps when the agent needs access to external tools or systems. `mcpServers` can be a list of server names or configuration objects `{ name, command, args, env }`.
 
+# Seeking Clarification
+If you have access to an `ask` tool and the user requirements are unclear, **use it** before generating output. Ask about:
+- Ambiguous scope or missing details (e.g., "Should this workflow support multiple file formats?")
+- Integration points (e.g., "Which MCP servers should be available to the agent?")
+- Error handling preferences (e.g., "Should the workflow retry on failure or fail fast?")
+
+Only ask **essential** questions. Don't over-clarify obvious requirements.
+
 # Output Instructions
 When asked to design a feature:
 1. Provide the necessary Keystone files (Workflows and Agents).
