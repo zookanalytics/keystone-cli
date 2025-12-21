@@ -237,7 +237,7 @@ export async function executeLlmStep(
         if (step.schema && typeof output === 'string') {
           try {
             const { extractJson } = await import('../utils/json-parser');
-            output = extractJson(output);
+            output = extractJson(output) as typeof output;
           } catch (e) {
             throw new Error(
               `Failed to parse LLM output as JSON matching schema: ${e instanceof Error ? e.message : String(e)}\nOutput: ${output}`

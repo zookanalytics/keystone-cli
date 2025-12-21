@@ -81,7 +81,7 @@ describe('MCPServer', () => {
       },
     });
 
-    expect(JSON.parse(response.result.content[0].text).status).toBe('success');
+    expect(JSON.parse(response?.result?.content?.[0]?.text || '{}').status).toBe('success');
   });
 
   it('should handle run_workflow failure', async () => {
@@ -130,7 +130,7 @@ describe('MCPServer', () => {
       },
     });
 
-    const result = JSON.parse(response?.result?.content?.[0]?.text);
+    const result = JSON.parse(response?.result?.content?.[0]?.text || '{}');
     expect(result.status).toBe('paused');
     expect(result.run_id).toBe('run123');
     expect(result.message).toBe('Input needed');
@@ -163,7 +163,7 @@ describe('MCPServer', () => {
       },
     });
 
-    expect(JSON.parse(response.result.content[0].text).status).toBe('success');
+    expect(JSON.parse(response?.result?.content?.[0]?.text || '{}').status).toBe('success');
 
     // Verify DB was updated
     const steps = db.getStepsByRun(runId);
@@ -187,7 +187,7 @@ describe('MCPServer', () => {
       params: { name: 'get_run_logs', arguments: { run_id: runId } },
     });
 
-    const summary = JSON.parse(response?.result?.content?.[0]?.text);
+    const summary = JSON.parse(response?.result?.content?.[0]?.text || '{}');
     expect(summary.workflow).toBe('test-wf');
     expect(summary.steps).toHaveLength(1);
     expect(summary.steps[0].step).toBe('s1');
@@ -276,7 +276,7 @@ describe('MCPServer', () => {
       },
     });
 
-    const result = JSON.parse(response?.result?.content?.[0]?.text);
+    const result = JSON.parse(response?.result?.content?.[0]?.text || '{}');
     expect(result.status).toBe('running');
     expect(result.run_id).toBe('async-run-123');
     expect(result.hint).toContain('get_run_status');
@@ -294,7 +294,7 @@ describe('MCPServer', () => {
       params: { name: 'get_run_status', arguments: { run_id: runId } },
     });
 
-    const status = JSON.parse(response?.result?.content?.[0]?.text);
+    const status = JSON.parse(response?.result?.content?.[0]?.text || '{}');
     expect(status.run_id).toBe(runId);
     expect(status.workflow).toBe('test-wf');
     expect(status.status).toBe('running');
@@ -313,7 +313,7 @@ describe('MCPServer', () => {
       params: { name: 'get_run_status', arguments: { run_id: runId } },
     });
 
-    const status = JSON.parse(response?.result?.content?.[0]?.text);
+    const status = JSON.parse(response?.result?.content?.[0]?.text || '{}');
     expect(status.status).toBe('completed');
     expect(status.outputs).toEqual({ output: 'done' });
     expect(status.hint).toBeUndefined();
@@ -331,7 +331,7 @@ describe('MCPServer', () => {
       params: { name: 'get_run_status', arguments: { run_id: runId } },
     });
 
-    const status = JSON.parse(response?.result?.content?.[0]?.text);
+    const status = JSON.parse(response?.result?.content?.[0]?.text || '{}');
     expect(status.status).toBe('failed');
     expect(status.error).toBe('Something went wrong');
   });
@@ -348,7 +348,7 @@ describe('MCPServer', () => {
       params: { name: 'get_run_status', arguments: { run_id: runId } },
     });
 
-    const status = JSON.parse(response?.result?.content?.[0]?.text);
+    const status = JSON.parse(response?.result?.content?.[0]?.text || '{}');
     expect(status.status).toBe('paused');
     expect(status.hint).toContain('answer_human_input');
   });
