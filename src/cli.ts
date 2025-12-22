@@ -457,8 +457,7 @@ program
           const RESET = '\x1b[0m';
           const color = statusColors[step.status] || '';
           const status = `${color}${step.status.toUpperCase().padEnd(10)}${RESET}`;
-          const iteration =
-            step.iteration_index !== null ? ` [${step.iteration_index}]` : '';
+          const iteration = step.iteration_index !== null ? ` [${step.iteration_index}]` : '';
           console.log(`  ${(step.step_id + iteration).padEnd(25)}  ${status}`);
 
           // Show error if present

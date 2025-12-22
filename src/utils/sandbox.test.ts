@@ -31,4 +31,3 @@ describe('SafeSandbox', () => {
     await expect(promise).rejects.toThrow();
   });
 });
-
