@@ -86,7 +86,11 @@ const DANGEROUS_PATTERNS: RegExp[] = [
   /\bdd\s+.*\bof=\//, // dd write operation to root paths
   /chmod\s+[0-7]{3,4}\s+\/(?!tmp)/, // chmod on root paths (except /tmp)
   /mkfs\./, // Filesystem formatting commands
-  /\$\{[^}]+\}/, // Parameter expansion (can be used for obfuscation)
+  // Targeted parameter expansion patterns (not all ${} usage)
+  /\$\{IFS[}:]/, // IFS manipulation (common injection technique)
+  /\$\{[^}]*\$\([^}]*\}/, // Command substitution inside parameter expansion
+  /\$\{[^}]*:-[^}]*\$\(/, // Default value with command substitution
+  /\$\{[^}]*[`][^}]*\}/, // Backtick inside parameter expansion
   /\\x[0-9a-fA-F]{2}/, // Hex escaping attempts
   /\\[0-7]{3}/, // Octal escaping attempts
   /<<<\s*/, // Here-strings (can be used for injection)

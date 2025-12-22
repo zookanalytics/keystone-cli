@@ -278,8 +278,8 @@ Keystone supports several specialized step types:
   - `inputType: confirm`: Simple Enter-to-continue prompt.
   - `inputType: text`: Prompt for a string input, available via `${{ steps.id.output }}`.
 - `workflow`: Trigger another workflow as a sub-step.
-- `script`: Run arbitrary JavaScript in a secure sandbox (`isolated-vm` with fallback to `node:vm`).
-  - `allowInsecure`: Boolean (default `false`). If `true`, allows the use of `node:vm` if `isolated-vm` is unavailable or fails.
+- `script`: Run arbitrary JavaScript in a sandbox. On Bun, uses `node:vm` (since `isolated-vm` requires V8).
+  - ⚠️ **Security Note:** The `node:vm` sandbox is not secure against malicious code. Only run scripts from trusted sources.
 - `sleep`: Pause execution for a specified duration.
 
 All steps support common features like `needs` (dependencies), `if` (conditionals), `retry`, `timeout`, `foreach` (parallel iteration), `concurrency` (max parallel items for foreach), and `transform` (post-process output using expressions).
@@ -432,7 +432,7 @@ In these examples, the agent will have access to all tools provided by the MCP s
 | `validate [path]` | Check workflow files for errors |
 | `workflows` | List available workflows |
 | `history` | Show recent workflow runs |
-| `logs <run_id>` | View logs and step status for a specific run |
+| `logs <run_id>` | View logs, outputs, and errors for a specific run (`-v` for full output) |
 | `graph <workflow>` | Generate a Mermaid diagram of the workflow |
 | `config` | Show current configuration and providers |
 | `auth status [provider]` | Show authentication status |

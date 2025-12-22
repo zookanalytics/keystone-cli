@@ -112,5 +112,31 @@ describe('shell-executor', () => {
 
       await expect(executeShell(step, context)).rejects.toThrow(/Security Error/);
     });
+
+    it('should allow legitimate shell variable expansion like ${HOME}', async () => {
+      const step: ShellStep = {
+        id: 'test',
+        type: 'shell',
+        needs: [],
+        run: 'echo ${HOME}',
+      };
+
+      // Should NOT throw - ${HOME} is legitimate
+      const result = await executeShell(step, context);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout.trim()).toBe(Bun.env.HOME || '');
+    });
+
+    it('should still block dangerous parameter expansion like ${IFS}', async () => {
+      const step: ShellStep = {
+        id: 'test',
+        type: 'shell',
+        needs: [],
+        run: 'echo ${IFS}',
+      };
+
+      await expect(executeShell(step, context)).rejects.toThrow(/Security Error/);
+    });
   });
 });
+

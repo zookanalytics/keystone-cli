@@ -211,11 +211,12 @@ export async function executeLlmStep(
       total_tokens: 0,
     };
 
+    // Create redactor once outside the loop for performance (regex compilation)
+    const redactor = new Redactor(context.secrets || {});
+    const redactionBuffer = new RedactionBuffer(redactor);
+
     while (iterations < maxIterations) {
       iterations++;
-
-      const redactor = new Redactor(context.secrets || {});
-      const redactionBuffer = new RedactionBuffer(redactor);
 
       const response = await adapter.chat(messages, {
         model: resolvedModel,

@@ -25,7 +25,7 @@ class RedactingLogger implements Logger {
   constructor(
     private inner: Logger,
     private redactor: Redactor
-  ) {}
+  ) { }
 
   log(msg: string): void {
     this.inner.log(this.redactor.redact(msg));
@@ -224,21 +224,36 @@ export class WorkflowRunner {
           }
         }
 
-        // We need to know the total expected items to decide if the whole step is complete
-        // Evaluate the foreach expression again
+        // Use persisted foreach items from parent step for deterministic resume
+        // This ensures the resume uses the same array as the initial run
         let expectedCount = -1;
-        try {
-          const baseContext = this.buildContext();
-          const foreachExpr = stepDef.foreach;
-          if (foreachExpr) {
-            const foreachItems = ExpressionEvaluator.evaluate(foreachExpr, baseContext);
-            if (Array.isArray(foreachItems)) {
-              expectedCount = foreachItems.length;
+        const parentExec = stepExecutions.find((e) => e.iteration_index === null);
+        if (parentExec?.output) {
+          try {
+            const parsed = JSON.parse(parentExec.output);
+            if (parsed.__foreachItems && Array.isArray(parsed.__foreachItems)) {
+              expectedCount = parsed.__foreachItems.length;
             }
+          } catch {
+            // Parse error, fall through to expression evaluation
           }
-        } catch (e) {
-          // If we can't evaluate yet (dependencies not met?), we can't be sure it's complete
-          allSuccess = false;
+        }
+
+        // Fallback to expression evaluation if persisted items not found
+        if (expectedCount === -1) {
+          try {
+            const baseContext = this.buildContext();
+            const foreachExpr = stepDef.foreach;
+            if (foreachExpr) {
+              const foreachItems = ExpressionEvaluator.evaluate(foreachExpr, baseContext);
+              if (Array.isArray(foreachItems)) {
+                expectedCount = foreachItems.length;
+              }
+            }
+          } catch (e) {
+            // If we can't evaluate yet (dependencies not met?), we can't be sure it's complete
+            allSuccess = false;
+          }
         }
 
         // Check if we have all items (no gaps)
@@ -670,6 +685,10 @@ export class WorkflowRunner {
       await this.db.createStep(parentStepExecId, this.runId, step.id);
       await this.db.startStep(parentStepExecId);
 
+      // Persist the foreach items in parent step for deterministic resume
+      // This ensures resume uses the same array even if expression would evaluate differently
+      await this.db.completeStep(parentStepExecId, 'pending', { __foreachItems: items });
+
       try {
         // Initialize results array with existing context or empty slots
         const existingContext = this.stepContexts.get(step.id) as ForeachStepContext;
@@ -908,7 +927,7 @@ export class WorkflowRunner {
     this.logger.log(`Run ID: ${this.runId}`);
     this.logger.log(
       '\n⚠️  Security Warning: Only run workflows from trusted sources.\n' +
-        '   Workflows can execute arbitrary shell commands and access your environment.\n'
+      '   Workflows can execute arbitrary shell commands and access your environment.\n'
     );
 
     // Apply defaults and validate inputs

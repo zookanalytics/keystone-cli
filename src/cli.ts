@@ -422,7 +422,8 @@ program
   .command('logs')
   .description('Show logs for a workflow run')
   .argument('<run_id>', 'Run ID')
-  .action((runId) => {
+  .option('-v, --verbose', 'Show full output without truncation')
+  .action((runId, options) => {
     try {
       const db = new WorkflowDb();
       const run = db.getRun(runId);
@@ -435,13 +436,68 @@ program
       console.log(`\n📋 Workflow: ${run.workflow_name}`);
       console.log(`Status: ${run.status}`);
       console.log(`Started: ${new Date(run.started_at).toLocaleString()}`);
+      if (run.completed_at) {
+        console.log(`Completed: ${new Date(run.completed_at).toLocaleString()}`);
+      }
+      if (run.error) {
+        console.log(`\n❌ Error: ${run.error}`);
+      }
 
       const steps = db.getStepsByRun(runId);
       if (steps.length > 0) {
         console.log('\nSteps:');
         for (const step of steps) {
-          const status = step.status.toUpperCase().padEnd(10);
-          console.log(`  ${step.step_id.padEnd(20)}  ${status}`);
+          const statusColors: Record<string, string> = {
+            success: '\x1b[32m', // green
+            failed: '\x1b[31m', // red
+            pending: '\x1b[33m', // yellow
+            skipped: '\x1b[90m', // gray
+            suspended: '\x1b[35m', // magenta
+          };
+          const RESET = '\x1b[0m';
+          const color = statusColors[step.status] || '';
+          const status = `${color}${step.status.toUpperCase().padEnd(10)}${RESET}`;
+          const iteration =
+            step.iteration_index !== null ? ` [${step.iteration_index}]` : '';
+          console.log(`  ${(step.step_id + iteration).padEnd(25)}  ${status}`);
+
+          // Show error if present
+          if (step.error) {
+            console.log(`    ❌ Error: ${step.error}`);
+          }
+
+          // Show output if present
+          if (step.output) {
+            try {
+              const output = JSON.parse(step.output);
+              let outputStr = JSON.stringify(output, null, 2);
+              if (!options.verbose && outputStr.length > 500) {
+                outputStr = `${outputStr.substring(0, 500)}... (use --verbose for full output)`;
+              }
+              // Indent output
+              const indentedOutput = outputStr
+                .split('\n')
+                .map((line: string) => `      ${line}`)
+                .join('\n');
+              console.log(`    📤 Output:\n${indentedOutput}`);
+            } catch {
+              console.log(`    📤 Output: ${step.output.substring(0, 200)}`);
+            }
+          }
+
+          // Show usage if present
+          if (step.usage) {
+            try {
+              const usage = JSON.parse(step.usage);
+              if (usage.total_tokens) {
+                console.log(
+                  `    📊 Tokens: ${usage.total_tokens} (prompt: ${usage.prompt_tokens}, completion: ${usage.completion_tokens})`
+                );
+              }
+            } catch {
+              // Ignore parse errors
+            }
+          }
         }
       }
 

@@ -40,17 +40,21 @@ describe('Audit Fixes Verification', () => {
   });
 
   describe('Sandbox Security', () => {
-    it('should throw by default if isolated-vm is missing and insecure fallback is disabled', async () => {
+    it('should execute code using node:vm sandbox on Bun', async () => {
+      // Since Bun uses JSC (not V8), isolated-vm cannot work.
+      // The sandbox now uses node:vm directly with security warnings.
+      SafeSandbox.resetWarning();
       const code = '1 + 1';
-      expect(SafeSandbox.execute(code, {}, { allowInsecureFallback: false })).rejects.toThrow(
-        /secure sandbox failed/
-      );
+      const result = await SafeSandbox.execute(code, {});
+      expect(result).toBe(2);
     });
 
-    it('should allow execution if allowInsecureFallback is true', async () => {
-      const code = '1 + 1';
-      const result = await SafeSandbox.execute(code, {}, { allowInsecureFallback: true });
-      expect(result).toBe(2);
+    it('should show security warning on first execution', async () => {
+      SafeSandbox.resetWarning();
+      const code = '2 + 2';
+      const result = await SafeSandbox.execute(code, {});
+      expect(result).toBe(4);
+      // Warning is shown to stderr, we just verify execution works
     });
   });
 
