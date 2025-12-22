@@ -42,28 +42,22 @@ export const ConfigSchema = z.object({
   workflows_directory: z.string().default('workflows'),
   mcp_servers: z
     .record(
-      z.discriminatedUnion('type', [
+      z.union([
+        // Local MCP server (command-based) - type is optional, defaults to 'local'
         z.object({
-          type: z.literal('local').default('local'),
+          type: z.literal('local').optional().default('local'),
           command: z.string(),
           args: z.array(z.string()).optional(),
           env: z.record(z.string()).optional(),
           url: z.string().url().optional(),
-          oauth: z
-            .object({
-              scope: z.string().optional(),
-            })
-            .optional(),
+          oauth: z.union([z.object({ scope: z.string().optional() }), z.literal(false)]).optional(),
         }),
+        // Remote MCP server (URL-based)
         z.object({
           type: z.literal('remote'),
           url: z.string().url(),
           headers: z.record(z.string()).optional(),
-          oauth: z
-            .object({
-              scope: z.string().optional(),
-            })
-            .optional(),
+          oauth: z.union([z.object({ scope: z.string().optional() }), z.literal(false)]).optional(),
         }),
       ])
     )
