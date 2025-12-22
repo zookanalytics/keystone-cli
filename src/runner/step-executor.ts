@@ -1,9 +1,11 @@
+import type { MemoryDb } from '../db/memory-db.ts';
 import type { ExpressionContext } from '../expression/evaluator.ts';
 import { ExpressionEvaluator } from '../expression/evaluator.ts';
 // Removed synchronous file I/O imports - using Bun's async file API instead
 import type {
   FileStep,
   HumanStep,
+  MemoryStep,
   RequestStep,
   ScriptStep,
   ShellStep,
@@ -11,6 +13,7 @@ import type {
   Step,
   WorkflowStep,
 } from '../parser/schema.ts';
+import { getAdapter } from './llm-adapter.ts';
 import { detectShellInjectionRisk, executeShell } from './shell-executor.ts';
 import type { Logger } from './workflow-runner.ts';
 
@@ -50,6 +53,7 @@ export async function executeStep(
   logger: Logger = console,
   executeWorkflowFn?: (step: WorkflowStep, context: ExpressionContext) => Promise<StepResult>,
   mcpManager?: MCPManager,
+  memoryDb?: MemoryDb,
   workflowDir?: string,
   dryRun?: boolean
 ): Promise<StepResult> {
@@ -75,11 +79,15 @@ export async function executeStep(
         result = await executeLlmStep(
           step,
           context,
-          (s, c) => executeStep(s, c, logger, executeWorkflowFn, mcpManager, workflowDir, dryRun),
+          (s, c) =>
+            executeStep(s, c, logger, executeWorkflowFn, mcpManager, memoryDb, workflowDir, dryRun),
           logger,
           mcpManager,
           workflowDir
         );
+        break;
+      case 'memory':
+        result = await executeMemoryStep(step, context, logger, memoryDb);
         break;
       case 'workflow':
         if (!executeWorkflowFn) {
@@ -495,7 +503,7 @@ async function executeScriptStep(
         env: context.env,
       },
       {
-        allowInsecureFallback: step.allowInsecure,
+        timeout: step.timeout,
       }
     );
 
@@ -503,6 +511,73 @@ async function executeScriptStep(
       output: result,
       status: 'success',
     };
+  } catch (error) {
+    return {
+      output: null,
+      status: 'failed',
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Execute a memory operation (search or store)
+ */
+async function executeMemoryStep(
+  step: MemoryStep,
+  context: ExpressionContext,
+  logger: Logger,
+  memoryDb?: MemoryDb
+): Promise<StepResult> {
+  if (!memoryDb) {
+    throw new Error('Memory database not initialized');
+  }
+
+  try {
+    const { adapter, resolvedModel } = getAdapter(step.model || 'local');
+    if (!adapter.embed) {
+      throw new Error(`Provider for model ${step.model || 'local'} does not support embeddings`);
+    }
+
+    if (step.op === 'store') {
+      const text = step.text ? ExpressionEvaluator.evaluateString(step.text, context) : '';
+      if (!text) {
+        throw new Error('Text is required for memory store operation');
+      }
+
+      logger.log(
+        `  💾 Storing in memory: ${text.substring(0, 50)}${text.length > 50 ? '...' : ''}`
+      );
+      const embedding = await adapter.embed(text, resolvedModel);
+      const metadata = step.metadata
+        ? // biome-ignore lint/suspicious/noExplicitAny: metadata typing
+          (ExpressionEvaluator.evaluateObject(step.metadata, context) as Record<string, any>)
+        : {};
+
+      const id = await memoryDb.store(text, embedding, metadata);
+      return {
+        output: { id, status: 'stored' },
+        status: 'success',
+      };
+    }
+
+    if (step.op === 'search') {
+      const query = step.query ? ExpressionEvaluator.evaluateString(step.query, context) : '';
+      if (!query) {
+        throw new Error('Query is required for memory search operation');
+      }
+
+      logger.log(`  🔍 Recalling memory: "${query}"`);
+      const embedding = await adapter.embed(query, resolvedModel);
+      const results = await memoryDb.search(embedding, step.limit);
+
+      return {
+        output: results,
+        status: 'success',
+      };
+    }
+
+    throw new Error(`Unknown memory operation: ${step.op}`);
   } catch (error) {
     return {
       output: null,

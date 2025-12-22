@@ -124,6 +124,13 @@ export class WorkflowDb {
       CREATE INDEX IF NOT EXISTS idx_steps_status ON step_executions(status);
       CREATE INDEX IF NOT EXISTS idx_steps_iteration ON step_executions(run_id, step_id, iteration_index);
     `);
+
+    // Ensure usage column exists (migration for older databases)
+    try {
+      this.db.exec('ALTER TABLE step_executions ADD COLUMN usage TEXT;');
+    } catch (e) {
+      // Ignore if column already exists
+    }
   }
 
   // ===== Workflow Runs =====
@@ -278,6 +285,18 @@ export class WorkflowDb {
       LIMIT ? OFFSET ?
     `);
     return stmt.all(runId, limit, offset) as StepExecution[];
+  }
+
+  async getSuccessfulRuns(workflowName: string, limit = 3): Promise<WorkflowRun[]> {
+    return await this.withRetry(() => {
+      const stmt = this.db.prepare(`
+        SELECT * FROM workflow_runs
+        WHERE workflow_name = ? AND status = 'completed'
+        ORDER BY started_at DESC
+        LIMIT ?
+      `);
+      return stmt.all(workflowName, limit) as WorkflowRun[];
+    });
   }
 
   close(): void {

@@ -149,6 +149,5 @@ describe('shell-executor', () => {
       expect(result.exitCode).toBe(0);
       expect(result.stdout.trim()).toBe('match');
     });
-
   });
 });

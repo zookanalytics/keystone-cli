@@ -1,12 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
+import { MemoryDb } from '../db/memory-db.ts';
 import { type RunStatus, WorkflowDb } from '../db/workflow-db.ts';
 import type { ExpressionContext } from '../expression/evaluator.ts';
 import { ExpressionEvaluator } from '../expression/evaluator.ts';
 import type { Step, Workflow, WorkflowStep } from '../parser/schema.ts';
 import { WorkflowParser } from '../parser/workflow-parser.ts';
+import { extractJson } from '../utils/json-parser.ts';
 import { Redactor } from '../utils/redactor.ts';
 import { WorkflowRegistry } from '../utils/workflow-registry.ts';
+import { type LLMMessage, getAdapter } from './llm-adapter.ts';
 import { MCPManager } from './mcp-manager.ts';
 import { withRetry } from './retry.ts';
 import { type StepResult, WorkflowSuspendedError, executeStep } from './step-executor.ts';
@@ -25,7 +28,7 @@ class RedactingLogger implements Logger {
   constructor(
     private inner: Logger,
     private redactor: Redactor
-  ) { }
+  ) {}
 
   log(msg: string): void {
     this.inner.log(this.redactor.redact(msg));
@@ -43,6 +46,7 @@ class RedactingLogger implements Logger {
 export interface RunOptions {
   inputs?: Record<string, unknown>;
   dbPath?: string;
+  memoryDbPath?: string;
   resumeRunId?: string;
   logger?: Logger;
   mcpManager?: MCPManager;
@@ -50,6 +54,8 @@ export interface RunOptions {
   workflowDir?: string;
   resumeInputs?: Record<string, unknown>;
   dryRun?: boolean;
+  debug?: boolean;
+  getAdapter?: typeof getAdapter;
 }
 
 export interface StepContext {
@@ -78,6 +84,7 @@ export interface ForeachStepContext extends StepContext {
 export class WorkflowRunner {
   private workflow: Workflow;
   private db: WorkflowDb;
+  private memoryDb: MemoryDb;
   private runId: string;
   private stepContexts: Map<string, StepContext | ForeachStepContext> = new Map();
   private inputs: Record<string, unknown>;
@@ -97,6 +104,7 @@ export class WorkflowRunner {
     this.workflow = workflow;
     this.options = options;
     this.db = new WorkflowDb(options.dbPath);
+    this.memoryDb = new MemoryDb(options.memoryDbPath);
     this.secrets = this.loadSecrets();
     this.redactor = new Redactor(this.secrets);
     // Wrap the logger with a redactor to prevent secret leakage in logs
@@ -353,6 +361,7 @@ export class WorkflowRunner {
       await this.mcpManager.stopAll();
 
       this.db.close();
+      this.memoryDb.close();
     } catch (err) {
       this.logger.error(`Error during stop/cleanup: ${err}`);
     }
@@ -556,6 +565,39 @@ export class WorkflowRunner {
   }
 
   /**
+   * Retrieve past successful runs and format them as few-shot examples
+   */
+  private async getFewShotExamples(workflowName: string): Promise<string> {
+    try {
+      const runs = await this.db.getSuccessfulRuns(workflowName, 3);
+      if (!runs || runs.length === 0) return '';
+
+      let examples = 'Here are examples of how you successfully handled this task in the past:\n';
+
+      for (const [index, run] of runs.entries()) {
+        examples += `\nExample ${index + 1}:\n`;
+        try {
+          // Pretty print JSON inputs/outputs
+          const inputs = JSON.stringify(JSON.parse(run.inputs), null, 2);
+          const outputs = run.outputs ? JSON.stringify(JSON.parse(run.outputs), null, 2) : '{}';
+
+          examples += `Input: ${inputs}\n`;
+          examples += `Output: ${outputs}\n`;
+        } catch (e) {
+          // Fallback for raw strings if parsing fails
+          examples += `Input: ${run.inputs}\n`;
+          examples += `Output: ${run.outputs || '{}'}\n`;
+        }
+      }
+
+      return examples;
+    } catch (error) {
+      this.logger.warn(`Failed to retrieve few-shot examples: ${error}`);
+      return '';
+    }
+  }
+
+  /**
    * Execute a single step instance and return the result
    * Does NOT update global stepContexts
    */
@@ -564,15 +606,32 @@ export class WorkflowRunner {
     context: ExpressionContext,
     stepExecId: string
   ): Promise<StepContext> {
+    let stepToExecute = step;
+
+    // Inject few-shot examples if enabled
+    if (step.type === 'llm' && step.learn) {
+      const examples = await this.getFewShotExamples(this.workflow.name);
+      if (examples) {
+        stepToExecute = {
+          ...step,
+          prompt: `${examples}\n\n${step.prompt}`,
+        };
+        this.logger.log(
+          `  🧠 Injected few-shot examples from ${examples.split('Example').length - 1} past runs`
+        );
+      }
+    }
+
     await this.db.startStep(stepExecId);
 
     const operation = async () => {
       const result = await executeStep(
-        step,
+        stepToExecute,
         context,
         this.logger,
         this.executeSubWorkflow.bind(this),
         this.mcpManager,
+        this.memoryDb,
         this.options.workflowDir,
         this.options.dryRun
       );
@@ -614,6 +673,17 @@ export class WorkflowRunner {
         result.usage
       );
 
+      // Auto-Learning logic
+      if (step.learn && result.status === 'success') {
+        try {
+          await this.learnFromStep(step, result, context);
+        } catch (error) {
+          this.logger.warn(
+            `  ⚠️ Failed to learn from step ${step.id}: ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
+      }
+
       // Ensure outputs is always an object for consistent access
       let outputs: Record<string, unknown>;
       if (
@@ -635,6 +705,104 @@ export class WorkflowRunner {
         usage: result.usage,
       };
     } catch (error) {
+      // Reflexion (Self-Correction) logic
+      if (step.reflexion) {
+        const { limit = 3, hint } = step.reflexion;
+        const currentAttempt = (context.reflexionAttempts as number) || 0;
+
+        if (currentAttempt < limit) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          this.logger.log(
+            `  🔧 Reflexion triggered for step ${step.id} (Attempt ${currentAttempt + 1}/${limit})`
+          );
+
+          try {
+            // Get corrected command from Mechanic
+            const fixedStep = await this.getFixFromReflexion(step, errorMsg, hint);
+
+            // Merge fixed properties
+            const newStep = { ...step, ...fixedStep };
+
+            // Retry with new step definition
+            const nextContext = {
+              ...context,
+              reflexionAttempts: currentAttempt + 1,
+            };
+
+            return this.executeStepInternal(newStep, nextContext, stepExecId);
+          } catch (healError) {
+            this.logger.error(
+              `  ✗ Reflexion failed: ${healError instanceof Error ? healError.message : String(healError)}`
+            );
+            // Fall through to auto-heal or failure
+          }
+        }
+      }
+
+      // Auto-heal logic
+      if (step.auto_heal && typeof step.auto_heal === 'object') {
+        const autoHeal = step.auto_heal;
+        // Limit recursion/loops
+        const maxAttempts = autoHeal.maxAttempts || 1;
+        const currentAttempt = (context.autoHealAttempts as number) || 0;
+
+        if (currentAttempt < maxAttempts) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          this.logger.log(
+            `  🩹 Auto-healing triggered for step ${step.id} (Attempt ${currentAttempt + 1}/${maxAttempts})`
+          );
+
+          try {
+            // Get fix from agent
+            const fixedStep = await this.getFixFromAgent(step, errorMsg, context);
+
+            // Merge fixed properties into the step
+            const newStep = { ...step, ...fixedStep };
+
+            // Retry with new step definition
+            const nextContext = {
+              ...context,
+              autoHealAttempts: currentAttempt + 1,
+            };
+
+            return this.executeStepInternal(newStep, nextContext, stepExecId);
+          } catch (healError) {
+            this.logger.error(
+              `  ✗ Auto-heal failed: ${healError instanceof Error ? healError.message : String(healError)}`
+            );
+            // Fall through to normal failure
+          }
+        }
+      }
+
+      // Debug REPL logic
+      if (this.options.debug) {
+        try {
+          const { DebugRepl } = await import('./debug-repl.ts');
+          const repl = new DebugRepl(context, step, error);
+          const action = await repl.start();
+
+          if (action.type === 'retry') {
+            this.logger.log(`  ↻ Retrying step ${step.id} after manual intervention`);
+            // We use the modified step if provided, else original
+            const stepToRun = action.modifiedStep || step;
+            return this.executeStepInternal(stepToRun, context, stepExecId);
+          }
+          if (action.type === 'skip') {
+            this.logger.log(`  ⏭️ Skipping step ${step.id} manually`);
+            await this.db.completeStep(stepExecId, 'skipped', null, undefined, undefined);
+            return {
+              output: null,
+              outputs: {},
+              status: 'skipped',
+            };
+          }
+          // if 'continue_failure', fall through
+        } catch (replError) {
+          this.logger.error(`  ✗ Debug REPL error: ${replError}`);
+        }
+      }
+
       const errorMsg = error instanceof Error ? error.message : String(error);
       const redactedErrorMsg = this.redactor.redact(errorMsg);
       this.logger.error(`  ✗ Step ${step.id} failed: ${redactedErrorMsg}`);
@@ -646,6 +814,176 @@ export class WorkflowRunner {
         outputs: {},
         status: 'failed',
       };
+    }
+  }
+
+  /**
+   * Consult an agent to fix a failing step
+   */
+  private async getFixFromAgent(
+    step: Step,
+    error: string,
+    context: ExpressionContext
+  ): Promise<Partial<Step>> {
+    const { auto_heal } = step;
+    if (!auto_heal) throw new Error('Auto-heal not configured');
+
+    const prompt = `
+The following step failed during execution:
+\`\`\`json
+${JSON.stringify(step, null, 2)}
+\`\`\`
+
+Error:
+${error}
+
+Please analyze the error and provide a fixed version of the step configuration.
+Return ONLY a valid JSON object containing the fields that need to be changed.
+For example, if the command was wrong, return:
+{ "run": "correct command" }
+
+Do not change the 'id' or 'type' or 'auto_heal' fields.
+`;
+
+    // Create a synthetic step to invoke the agent
+    const agentStep: Step = {
+      id: `${step.id}-healer`,
+      type: 'llm',
+      agent: auto_heal.agent,
+      model: auto_heal.model,
+      prompt,
+      schema: {
+        type: 'object',
+        description: 'Partial step configuration with fixed values',
+        additionalProperties: true,
+      },
+    } as import('../parser/schema.ts').LlmStep;
+
+    this.logger.log(`  🚑 Consulting agent ${auto_heal.agent} for a fix...`);
+
+    // Execute the agent step
+    // We use a fresh context but share secrets/env
+    const result = await executeStep(
+      agentStep,
+      context,
+      this.logger,
+      this.executeSubWorkflow.bind(this),
+      this.mcpManager,
+      this.memoryDb,
+      this.options.workflowDir,
+      this.options.dryRun
+    );
+
+    if (result.status !== 'success' || !result.output) {
+      throw new Error(`Healer agent failed: ${result.error || 'No output'}`);
+    }
+
+    return result.output as Partial<Step>;
+  }
+
+  /**
+   * Automatically learn from a successful step outcome
+   */
+  private async learnFromStep(
+    step: Step,
+    result: StepResult,
+    _context: ExpressionContext
+  ): Promise<void> {
+    const getAdapterFn = this.options.getAdapter || getAdapter;
+    const { adapter } = getAdapterFn('local'); // Default for embedding
+    if (!adapter.embed) return;
+
+    // Combine input context (if relevant) and output
+    // For now, let's keep it simple: "Step: ID\nGoal: description\nOutput: result"
+
+    // We can try to construct a summary of what happened
+    let textToEmbed = `Step ID: ${step.id} (${step.type})\n`;
+
+    if (step.type === 'llm') {
+      // biome-ignore lint/suspicious/noExplicitAny: generic access
+      textToEmbed += `Task Context/Prompt:\n${(step as any).prompt}\n\n`;
+    } else if (step.type === 'shell') {
+      // biome-ignore lint/suspicious/noExplicitAny: generic access
+      textToEmbed += `Command:\n${(step as any).run}\n\n`;
+    }
+
+    textToEmbed += `Successful Outcome:\n${JSON.stringify(result.output, null, 2)}`;
+
+    const embedding = await adapter.embed(textToEmbed, 'local');
+    await this.memoryDb.store(textToEmbed, embedding, {
+      stepId: step.id,
+      workflow: this.workflow.name,
+      timestamp: new Date().toISOString(),
+    });
+
+    this.logger.log(`  ✨ Learned from step ${step.id}`);
+  }
+
+  /**
+   * Consult the built-in "Mechanic" agent to fix a failing step
+   */
+  private async getFixFromReflexion(
+    step: Step,
+    error: string,
+    hint?: string
+  ): Promise<Partial<Step>> {
+    const systemPrompt = `You are the "Mechanic", an expert coding assistant built into the Keystone CLI.
+Your job is to fix failing shell commands or scripts by analyzing the error output and the user's original intent.
+
+Rules:
+1. Analyze the failing command and the error message which comes from stdout/stderr.
+2. If a "Hint" is provided, prioritize it as the primary strategy for the fix.
+3. Return ONLY a valid JSON object containing the fields that need to be changed in the step configuration.
+4. Do NOT verify the fix yourself; just provide the corrected configuration.
+5. Common fixes include: 
+   - Installing missing dependencies (e.g. pip install, npm install)
+   - Fixing syntax errors
+   - Creating missing directories
+   - Adjusting flags or arguments`;
+
+    // biome-ignore lint/suspicious/noExplicitAny: generic access
+    const runCommand = (step as any).run;
+    const userContent = `The following step failed:
+\`\`\`json
+${JSON.stringify({ type: step.type, run: runCommand }, null, 2)}
+\`\`\`
+
+Error Output:
+${error}
+
+${hint ? `Hint from User: "${hint}"` : ''}
+
+Please provide the fixed step configuration as JSON.`;
+
+    const messages: LLMMessage[] = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userContent },
+    ];
+
+    try {
+      // Use the default model (gpt-4o) or configured default for the Mechanic
+      // We'll use gpt-4o as a strong default for this reasoning task
+      const getAdapterFn = this.options.getAdapter || getAdapter;
+      const { adapter, resolvedModel } = getAdapterFn('gpt-4o');
+      this.logger.log(`  🤖 Mechanic is analyzing the failure using ${resolvedModel}...`);
+
+      const response = await adapter.chat(messages, {
+        model: resolvedModel,
+      });
+
+      const content = response.message.content;
+      if (!content) {
+        throw new Error('Mechanic returned empty response');
+      }
+
+      try {
+        const fixedConfig = extractJson(content) as Partial<Step>;
+        return fixedConfig;
+      } catch (e) {
+        throw new Error(`Failed to parse Mechanic's response as JSON: ${content}`);
+      }
+    } catch (err) {
+      throw new Error(`Mechanic unavailable: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -941,7 +1279,7 @@ export class WorkflowRunner {
     this.logger.log(`Run ID: ${this.runId}`);
     this.logger.log(
       '\n⚠️  Security Warning: Only run workflows from trusted sources.\n' +
-      '   Workflows can execute arbitrary shell commands and access your environment.\n'
+        '   Workflows can execute arbitrary shell commands and access your environment.\n'
     );
 
     // Apply defaults and validate inputs

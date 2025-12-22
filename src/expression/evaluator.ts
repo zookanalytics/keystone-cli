@@ -32,6 +32,8 @@ export interface ExpressionContext {
   index?: number;
   env?: Record<string, string>;
   output?: unknown;
+  autoHealAttempts?: number;
+  reflexionAttempts?: number;
 }
 
 type ASTNode = jsep.Expression;

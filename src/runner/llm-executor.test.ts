@@ -28,7 +28,8 @@ import {
 import { executeLlmStep } from './llm-executor';
 import { MCPClient, type MCPResponse } from './mcp-client';
 import { MCPManager } from './mcp-manager';
-import type { StepResult } from './step-executor';
+import { type StepResult, executeStep } from './step-executor';
+import type { Logger } from './workflow-runner';
 
 // Mock adapters
 const originalOpenAIChat = OpenAIAdapter.prototype.chat;
@@ -129,16 +130,18 @@ describe('llm-executor', () => {
     };
   };
 
-  beforeAll(() => {
+  beforeAll(async () => {
     // Mock spawn to avoid actual process creation
     const mockProcess = Object.assign(new EventEmitter(), {
-      stdout: new Readable({ read() { } }),
+      stdout: new Readable({
+        read() {},
+      }),
       stdin: new Writable({
         write(_chunk, _encoding, cb: (error?: Error | null) => void) {
           cb();
         },
       }),
-      kill: mock(() => { }),
+      kill: mock(() => {}),
     });
     spawnSpy = spyOn(child_process, 'spawn').mockReturnValue(
       mockProcess as unknown as child_process.ChildProcess
@@ -257,22 +260,24 @@ You are a test agent.`;
       return { status: 'success' as const, output: 'ok' };
     };
 
-    const logger = {
-      log: mock(() => { }),
-      error: mock(() => { }),
-      warn: mock(() => { }),
+    const logger: Logger = {
+      log: mock(() => {}),
+      error: mock(() => {}),
+      warn: mock(() => {}),
     };
 
     await executeLlmStep(
       step,
       context,
       executeStepFn as unknown as (step: Step, context: ExpressionContext) => Promise<StepResult>,
-      logger as any
+      logger
     );
 
     // Check if logger.log was called with arguments
     // The tool call from mockChat is { name: 'test-tool', arguments: '{"val": 123}' }
-    expect(logger.log).toHaveBeenCalledWith(expect.stringContaining('🛠️  Tool Call: test-tool {"val":123}'));
+    expect(logger.log).toHaveBeenCalledWith(
+      expect.stringContaining('🛠️  Tool Call: test-tool {"val":123}')
+    );
   });
 
   it('should support schema for JSON output', async () => {
@@ -458,7 +463,7 @@ You are a test agent.`;
       spyOn(client, 'stop').mockReturnValue(undefined);
       return client;
     });
-    const consoleSpy = spyOn(console, 'error').mockImplementation(() => { });
+    const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
 
     await executeLlmStep(
       step,
@@ -645,7 +650,7 @@ You are a test agent.`;
     };
     const context: ExpressionContext = { inputs: {}, steps: {} };
     const executeStepFn = mock(async () => ({ status: 'success' as const, output: 'ok' }));
-    const consoleSpy = spyOn(console, 'error').mockImplementation(() => { });
+    const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
 
     await executeLlmStep(
       step,

@@ -16,6 +16,21 @@ const RetrySchema = z.object({
   baseDelay: z.number().int().min(0).default(1000),
 });
 
+// ===== Auto-Heal Schema =====
+
+const AutoHealSchema = z.object({
+  agent: z.string(),
+  model: z.string().optional(),
+  maxAttempts: z.number().int().min(1).default(1),
+});
+
+// ===== Reflexion Schema =====
+
+const ReflexionSchema = z.object({
+  limit: z.number().int().min(1).default(3),
+  hint: z.string().optional(),
+});
+
 // ===== Base Step Schema =====
 
 const BaseStepSchema = z.object({
@@ -25,10 +40,13 @@ const BaseStepSchema = z.object({
   if: z.string().optional(),
   timeout: z.number().int().positive().optional(),
   retry: RetrySchema.optional(),
+  auto_heal: AutoHealSchema.optional(),
+  reflexion: ReflexionSchema.optional(),
   foreach: z.string().optional(),
   // Accept both number and string (for expressions or YAML number-as-string)
   concurrency: z.union([z.number().int().positive(), z.string()]).optional(),
   transform: z.string().optional(),
+  learn: z.boolean().optional(),
 });
 
 // ===== Step Type Schemas =====
@@ -117,6 +135,16 @@ const ScriptStepSchema = BaseStepSchema.extend({
   allowInsecure: z.boolean().optional().default(false),
 });
 
+const MemoryStepSchema = BaseStepSchema.extend({
+  type: z.literal('memory'),
+  op: z.enum(['search', 'store']),
+  query: z.string().optional(), // for search
+  text: z.string().optional(), // for store
+  model: z.string().optional().default('local'), // embedding model
+  metadata: z.record(z.any()).optional(),
+  limit: z.number().int().positive().optional().default(5),
+});
+
 // ===== Discriminated Union for Steps =====
 
 // biome-ignore lint/suspicious/noExplicitAny: Recursive Zod type
@@ -130,8 +158,18 @@ export const StepSchema: z.ZodType<any> = z.lazy(() =>
     HumanStepSchema,
     SleepStepSchema,
     ScriptStepSchema,
+    MemoryStepSchema,
   ])
 );
+
+// ===== Evaluation Schema =====
+
+const EvalSchema = z.object({
+  scorer: z.enum(['llm', 'script']),
+  agent: z.string().optional(),
+  prompt: z.string().optional(),
+  run: z.string().optional(), // for script scorer
+});
 
 // ===== Workflow Schema =====
 
@@ -144,6 +182,7 @@ export const WorkflowSchema = z.object({
   concurrency: z.union([z.number().int().positive(), z.string()]).optional(),
   steps: z.array(StepSchema),
   finally: z.array(StepSchema).optional(),
+  eval: EvalSchema.optional(),
 });
 
 // ===== Agent Schema =====
@@ -170,6 +209,7 @@ export type RequestStep = z.infer<typeof RequestStepSchema>;
 export type HumanStep = z.infer<typeof HumanStepSchema>;
 export type SleepStep = z.infer<typeof SleepStepSchema>;
 export type ScriptStep = z.infer<typeof ScriptStepSchema>;
+export type MemoryStep = z.infer<typeof MemoryStepSchema>;
 export type Workflow = z.infer<typeof WorkflowSchema>;
 export type AgentTool = z.infer<typeof AgentToolSchema>;
 export type Agent = z.infer<typeof AgentSchema>;

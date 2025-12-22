@@ -25,6 +25,8 @@ Keystone allows you to define complex automation workflows using a simple YAML s
 - 🛠️ **Extensible:** Support for shell, file, HTTP request, LLM, and sub-workflow steps.
 - 🔌 **MCP Support:** Integrated Model Context Protocol server.
 - 🛡️ **Secret Redaction:** Automatically redacts environment variables and secrets from logs and outputs.
+- 🧠 **Semantic Memory:** Store and retrieve step outputs using vector embeddings/RAG.
+- 🎯 **Prompt Optimization:** Automatically optimize prompts using iterative evaluation (DSPy-style).
 
 ---
 
@@ -281,10 +283,26 @@ Keystone supports several specialized step types:
 - `script`: Run arbitrary JavaScript in a sandbox. On Bun, uses `node:vm` (since `isolated-vm` requires V8).
   - ⚠️ **Security Note:** The `node:vm` sandbox is not secure against malicious code. Only run scripts from trusted sources.
 - `sleep`: Pause execution for a specified duration.
+- `memory`: Store or retrieve information from the semantic memory vector database.
 
-All steps support common features like `needs` (dependencies), `if` (conditionals), `retry`, `timeout`, `foreach` (parallel iteration), `concurrency` (max parallel items for foreach), and `transform` (post-process output using expressions).
+All steps support common features like `needs` (dependencies), `if` (conditionals), `retry`, `timeout`, `foreach` (parallel iteration), `concurrency` (max parallel items for foreach), `transform` (post-process output using expressions), `learn` (auto-index for few-shot), and `reflexion` (self-correction loop).
 
 Workflows also support a top-level `concurrency` field to limit how many steps can run in parallel across the entire workflow.
+
+### Self-Healing Steps
+Steps can be configured to automatically recover from failures using an LLM agent.
+
+```yaml
+- id: build
+  type: shell
+  run: bun build
+  auto_heal:
+    agent: debugger_agent
+    maxAttempts: 3
+    model: gpt-4o # Optional override
+```
+
+When a step fails, the specified agent is invoked with the error details. The agent proposes a fix (e.g., a corrected command), and the step is automatically retried.
 
 #### Example: Transform & Foreach Concurrency
 ```yaml
@@ -427,7 +445,8 @@ In these examples, the agent will have access to all tools provided by the MCP s
 | Command | Description |
 | :--- | :--- |
 | `init` | Initialize a new Keystone project |
-| `run <workflow>` | Execute a workflow (use `-i key=val` for inputs, `--dry-run` to test) |
+| `run <workflow>` | Execute a workflow (use `-i key=val` for inputs, `--dry-run` to test, `--debug` for REPL) |
+| `optimize <workflow>` | Optimize a specific step in a workflow (requires --target) |
 | `resume <run_id>` | Resume a failed or paused workflow |
 | `validate [path]` | Check workflow files for errors |
 | `workflows` | List available workflows |

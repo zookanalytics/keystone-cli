@@ -282,7 +282,9 @@ export async function executeLlmStep(
           displayArgs = argsStr.length > 100 ? `${argsStr.substring(0, 100)}...` : argsStr;
         }
 
-        logger.log(`  🛠️  Tool Call: ${toolCall.function.name}${displayArgs ? ` ${displayArgs}` : ''}`);
+        logger.log(
+          `  🛠️  Tool Call: ${toolCall.function.name}${displayArgs ? ` ${displayArgs}` : ''}`
+        );
         const toolInfo = allTools.find((t) => t.name === toolCall.function.name);
 
         if (!toolInfo) {

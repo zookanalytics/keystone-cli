@@ -226,6 +226,7 @@ program
   .argument('<workflow>', 'Workflow name or path to workflow file')
   .option('-i, --input <key=value...>', 'Input values')
   .option('--dry-run', 'Show what would be executed without actually running it')
+  .option('--debug', 'Enable interactive debug mode on failure')
   .action(async (workflowPath, options) => {
     // Parse inputs
     const inputs: Record<string, unknown> = {};
@@ -269,6 +270,7 @@ program
         inputs,
         workflowDir: dirname(resolvedPath),
         dryRun: !!options.dryRun,
+        debug: !!options.debug,
       });
 
       const outputs = await runner.run();
@@ -283,6 +285,65 @@ program
         '✗ Failed to execute workflow:',
         error instanceof Error ? error.message : error
       );
+      process.exit(1);
+    }
+  });
+
+// ===== keystone optimize =====
+program
+  .command('optimize')
+  .description('Automatically optimize prompts using DSPy-lite (iterative self-improvement)')
+  .argument('<workflow>', 'Workflow name or path to workflow file')
+  .option('--target <step_id>', 'Step ID to optimize')
+  .option('-i, --input <key=value...>', 'Input values')
+  .option('--iterations <number>', 'Number of optimization loops', '5')
+  .action(async (workflowPath, options) => {
+    if (!options.target) {
+      console.error('✗ --target <step_id> is required');
+      process.exit(1);
+    }
+
+    // Parse inputs
+    const inputs: Record<string, unknown> = {};
+    if (options.input) {
+      for (const pair of options.input) {
+        const index = pair.indexOf('=');
+        if (index > 0) {
+          const key = pair.slice(0, index);
+          const value = pair.slice(index + 1);
+          try {
+            inputs[key] = JSON.parse(value);
+          } catch {
+            inputs[key] = value;
+          }
+        }
+      }
+    }
+
+    try {
+      const resolvedPath = WorkflowRegistry.resolvePath(workflowPath);
+      const workflow = WorkflowParser.loadWorkflow(resolvedPath);
+
+      const { OptimizationRunner } = await import('./runner/optimization-runner.ts');
+      const optimizer = new OptimizationRunner(workflow, {
+        workflowPath: resolvedPath,
+        targetStepId: options.target,
+        inputs,
+        iterations: Number.parseInt(options.iterations, 10),
+      });
+
+      const { bestPrompt, bestScore } = await optimizer.optimize();
+
+      console.log('\n✅ Optimization Complete!');
+      console.log(`🏆 Best Score: ${bestScore}/100`);
+      console.log('\nFinal Optimized Prompt:');
+      console.log('---');
+      console.log(bestPrompt);
+      console.log('---');
+
+      process.exit(0);
+    } catch (error) {
+      console.error('✗ Optimization failed:', error instanceof Error ? error.message : error);
       process.exit(1);
     }
   });

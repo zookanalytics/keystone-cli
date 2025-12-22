@@ -96,4 +96,35 @@ describe('WorkflowDb', () => {
     const run = db.getRun(runId);
     expect(run).toBeDefined();
   });
+
+  it('should retrieve successful runs', async () => {
+    // pending run
+    await db.createRun('run-s1', 'my-wf', { i: 1 });
+
+    // successful run
+    await db.createRun('run-s2', 'my-wf', { i: 2 });
+    await db.updateRunStatus('run-s2', 'completed', { o: 2 });
+    await new Promise((r) => setTimeout(r, 10));
+
+    // failed run
+    await db.createRun('run-s3', 'my-wf', { i: 3 });
+    await db.updateRunStatus('run-s3', 'failed', undefined, 'err');
+    await new Promise((r) => setTimeout(r, 10));
+
+    // another successful run
+    await db.createRun('run-s4', 'my-wf', { i: 4 });
+    await db.updateRunStatus('run-s4', 'completed', { o: 4 });
+
+    const runs = await db.getSuccessfulRuns('my-wf', 5);
+    expect(runs).toHaveLength(2);
+    // ordered by started_at DESC, so run-s4 then run-s2
+    expect(runs[0].id).toBe('run-s4');
+    expect(JSON.parse(runs[0].outputs || '{}')).toEqual({ o: 4 });
+    expect(runs[1].id).toBe('run-s2');
+
+    // Limit check
+    const limitedOne = await db.getSuccessfulRuns('my-wf', 1);
+    expect(limitedOne).toHaveLength(1);
+    expect(limitedOne[0].id).toBe('run-s4');
+  });
 });

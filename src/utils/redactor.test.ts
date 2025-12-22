@@ -87,7 +87,9 @@ describe('Redactor', () => {
       LONG: 'this-is-long-enough', // non-sensitive, long value
     });
     const text = 'pwd: abc, other: def, long: this-is-long-enough';
-    expect(mixedRedactor.redact(text)).toBe('pwd: ***REDACTED***, other: def, long: ***REDACTED***');
+    expect(mixedRedactor.redact(text)).toBe(
+      'pwd: ***REDACTED***, other: def, long: ***REDACTED***'
+    );
   });
 
   it('should ignore non-sensitive values shorter than 10 characters', () => {
@@ -97,5 +99,47 @@ describe('Redactor', () => {
     });
     const text = 'S1 is 123456789 and S2 is 1234567890';
     expect(thresholdRedactor.redact(text)).toBe('S1 is 123456789 and S2 is ***REDACTED***');
+  });
+});
+
+describe('RedactionBuffer', () => {
+  const redactor = new Redactor({ SECRET: 'super-secret-value' });
+
+  it(' should redact secrets across chunks', () => {
+    const buffer = new (require('./redactor').RedactionBuffer)(redactor);
+    const chunk1 = 'This is sup';
+    const chunk2 = 'er-secret-value in parts.';
+
+    const out1 = buffer.process(chunk1);
+    const out2 = buffer.process(chunk2);
+    const out3 = buffer.flush();
+
+    expect(out1 + out2 + out3).toContain('***REDACTED***');
+    expect(out1 + out2 + out3).not.toContain('super-secret-value');
+  });
+
+  it('should not leak partial secrets in process()', () => {
+    const buffer = new (require('./redactor').RedactionBuffer)(redactor);
+    // Secret is 18 chars long.
+    // 'super-s' is 7 chars.
+    const chunk = 'super-s';
+    const output = buffer.process(chunk);
+
+    // Should not output anything if it could be the start of a secret
+    expect(output).toBe('');
+    expect(buffer.flush()).toBe('super-s');
+  });
+
+  it('should handle multiple secrets in stream', () => {
+    const multiRedactor = new Redactor({ S1: 'secret-one', S2: 'secret-two' });
+    const buffer = new (require('./redactor').RedactionBuffer)(multiRedactor);
+
+    const text = 'S1: secret-one, S2: secret-two';
+    const out1 = buffer.process(text.substring(0, 15));
+    const out2 = buffer.process(text.substring(15));
+    const out3 = buffer.flush();
+
+    const full = out1 + out2 + out3;
+    expect(full).toBe('S1: ***REDACTED***, S2: ***REDACTED***');
   });
 });

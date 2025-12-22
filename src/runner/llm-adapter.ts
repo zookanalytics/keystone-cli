@@ -1,3 +1,4 @@
+import { pipeline } from '@xenova/transformers';
 import { AuthManager, COPILOT_HEADERS } from '../utils/auth-manager';
 import { ConfigLoader } from '../utils/config-loader';
 
@@ -48,6 +49,7 @@ export interface LLMAdapter {
       onStream?: (chunk: string) => void;
     }
   ): Promise<LLMResponse>;
+  embed?(text: string, model?: string): Promise<number[]>;
 }
 
 export class OpenAIAdapter implements LLMAdapter {
@@ -159,6 +161,32 @@ export class OpenAIAdapter implements LLMAdapter {
       message: data.choices[0].message,
       usage: data.usage,
     };
+  }
+
+  async embed(text: string, model = 'text-embedding-3-small'): Promise<number[]> {
+    const response = await fetch(`${this.baseUrl}/embeddings`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        input: text,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(
+        `OpenAI Embeddings API error: ${response.status} ${response.statusText} - ${error}`
+      );
+    }
+
+    const data = (await response.json()) as {
+      data: { embedding: number[] }[];
+    };
+    return data.data[0].embedding;
   }
 }
 
@@ -524,7 +552,33 @@ export class CopilotAdapter implements LLMAdapter {
   }
 }
 
+export class LocalEmbeddingAdapter implements LLMAdapter {
+  // biome-ignore lint/suspicious/noExplicitAny: transformers pipeline type
+  private static extractor: any = null;
+
+  async chat(): Promise<LLMResponse> {
+    throw new Error('LocalEmbeddingAdapter only supports embeddings');
+  }
+
+  async embed(text: string, model = 'Xenova/all-MiniLM-L6-v2'): Promise<number[]> {
+    const modelToUse = model === 'local' ? 'Xenova/all-MiniLM-L6-v2' : model;
+    if (!LocalEmbeddingAdapter.extractor) {
+      LocalEmbeddingAdapter.extractor = await pipeline('feature-extraction', modelToUse);
+    }
+    const output = await LocalEmbeddingAdapter.extractor(text, {
+      pooling: 'mean',
+      normalize: true,
+    });
+    return Array.from(output.data);
+  }
+}
+
 export function getAdapter(model: string): { adapter: LLMAdapter; resolvedModel: string } {
+  if (model === 'local' || model.startsWith('local:')) {
+    const resolvedModel = model === 'local' ? 'Xenova/all-MiniLM-L6-v2' : model.substring(6);
+    return { adapter: new LocalEmbeddingAdapter(), resolvedModel };
+  }
+
   const providerName = ConfigLoader.getProviderForModel(model);
   const config = ConfigLoader.load();
   const providerConfig = config.providers[providerName];
