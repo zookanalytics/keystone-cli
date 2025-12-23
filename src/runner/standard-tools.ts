@@ -38,19 +38,21 @@ export const STANDARD_TOOLS: AgentTool[] = [
       id: 'std_read_file_lines',
       type: 'script',
       run: `
-        const fs = require('node:fs');
-        const path = require('node:path');
-        const filePath = args.path;
-        const start = args.start || 1;
-        const count = args.count || 100;
-
-        if (!fs.existsSync(filePath)) {
-          throw new Error('File not found: ' + filePath);
-        }
-
-        const content = fs.readFileSync(filePath, 'utf8');
-        const lines = content.split('\\n');
-        return lines.slice(start - 1, start - 1 + count).join('\\n');
+        (function() {
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const filePath = args.path;
+          const start = args.start || 1;
+          const count = args.count || 100;
+  
+          if (!fs.existsSync(filePath)) {
+            throw new Error('File not found: ' + filePath);
+          }
+  
+          const content = fs.readFileSync(filePath, 'utf8');
+          const lines = content.split('\\n');
+          return lines.slice(start - 1, start - 1 + count).join('\\n');
+        })();
       `,
       allowInsecure: true,
     },
@@ -91,18 +93,20 @@ export const STANDARD_TOOLS: AgentTool[] = [
       id: 'std_list_files',
       type: 'script',
       run: `
-        const fs = require('node:fs');
-        const path = require('node:path');
-        const dir = args.path || '.';
-        if (fs.existsSync(dir)) {
-          const files = fs.readdirSync(dir, { withFileTypes: true });
-          return files.map(f => ({
-            name: f.name,
-            type: f.isDirectory() ? 'directory' : 'file',
-            size: f.isFile() ? fs.statSync(path.join(dir, f.name)).size : undefined
-          }));
-        }
-        throw new Error('Directory not found: ' + dir);
+        (function() {
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const dir = args.path || '.';
+          if (fs.existsSync(dir)) {
+            const files = fs.readdirSync(dir, { withFileTypes: true });
+            return files.map(f => ({
+              name: f.name,
+              type: f.isDirectory() ? 'directory' : 'file',
+              size: f.isFile() ? fs.statSync(path.join(dir, f.name)).size : undefined
+            }));
+          }
+          throw new Error('Directory not found: ' + dir);
+        })();
       `,
       allowInsecure: true,
     },
@@ -122,16 +126,18 @@ export const STANDARD_TOOLS: AgentTool[] = [
       id: 'std_search_files',
       type: 'script',
       run: `
-        const fs = require('node:fs');
-        const path = require('node:path');
-        const { globSync } = require('glob');
-        const dir = args.dir || '.';
-        const pattern = args.pattern;
-        try {
-          return globSync(pattern, { cwd: dir, nodir: true });
-        } catch (e) {
-          throw new Error('Search failed: ' + e.message);
-        }
+        (function() {
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const { globSync } = require('glob');
+          const dir = args.dir || '.';
+          const pattern = args.pattern;
+          try {
+            return globSync(pattern, { cwd: dir, nodir: true });
+          } catch (e) {
+            throw new Error('Search failed: ' + e.message);
+          }
+        })();
       `,
       allowInsecure: true,
     },
@@ -156,42 +162,44 @@ export const STANDARD_TOOLS: AgentTool[] = [
       id: 'std_search_content',
       type: 'script',
       run: `
-        const fs = require('node:fs');
-        const path = require('node:path');
-        const { globSync } = require('glob');
-        const dir = args.dir || '.';
-        const pattern = args.pattern || '**/*';
-        const query = args.query;
-        if (query.length > 500) {
-          throw new Error('Search query exceeds maximum length of 500 characters');
-        }
-        const isRegex = query.startsWith('/') && query.endsWith('/');
-        let regex;
-        try {
-          regex = isRegex ? new RegExp(query.slice(1, -1)) : new RegExp(query.replace(/[.*+?^$\\{}()|[\\]\\\\]/g, '\\\\$&'), 'i');
-        } catch (e) {
-          throw new Error('Invalid regular expression: ' + e.message);
-        }
-
-        const files = globSync(pattern, { cwd: dir, nodir: true });
-        const results = [];
-        for (const file of files) {
-          const fullPath = path.join(dir, file);
-          const content = fs.readFileSync(fullPath, 'utf8');
-          const lines = content.split('\\n');
-          for (let i = 0; i < lines.length; i++) {
-            if (regex.test(lines[i])) {
-              results.push({
-                file,
-                line: i + 1,
-                content: lines[i].trim()
-              });
-            }
-            if (results.length > 100) break; // Limit results
+        (function() {
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const { globSync } = require('glob');
+          const dir = args.dir || '.';
+          const pattern = args.pattern || '**/*';
+          const query = args.query;
+          if (query.length > 500) {
+            throw new Error('Search query exceeds maximum length of 500 characters');
           }
-          if (results.length > 100) break;
-        }
-        return results;
+          const isRegex = query.startsWith('/') && query.endsWith('/');
+          let regex;
+          try {
+            regex = isRegex ? new RegExp(query.slice(1, -1)) : new RegExp(query.replace(/[.*+?^$\\{}()|[\\]\\\\]/g, '\\\\$&'), 'i');
+          } catch (e) {
+            throw new Error('Invalid regular expression: ' + e.message);
+          }
+  
+          const files = globSync(pattern, { cwd: dir, nodir: true });
+          const results = [];
+          for (const file of files) {
+            const fullPath = path.join(dir, file);
+            const content = fs.readFileSync(fullPath, 'utf8');
+            const lines = content.split('\\n');
+            for (let i = 0; i < lines.length; i++) {
+              if (regex.test(lines[i])) {
+                results.push({
+                  file,
+                  line: i + 1,
+                  content: lines[i].trim()
+                });
+              }
+              if (results.length > 100) break; // Limit results
+            }
+            if (results.length > 100) break;
+          }
+          return results;
+        })();
       `,
       allowInsecure: true,
     },
