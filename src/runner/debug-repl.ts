@@ -8,6 +8,8 @@ import { type ExpressionContext, ExpressionEvaluator } from '../expression/evalu
 import type { Step } from '../parser/schema.ts';
 import { extractJson } from '../utils/json-parser.ts';
 
+import { ConsoleLogger, type Logger } from '../utils/logger.ts';
+
 export type DebugAction =
   | { type: 'retry'; modifiedStep?: Step }
   | { type: 'skip' }
@@ -18,22 +20,23 @@ export class DebugRepl {
     private context: ExpressionContext,
     private step: Step,
     private error: unknown,
+    private logger: Logger = new ConsoleLogger(),
     private inputStream: NodeJS.ReadableStream = process.stdin,
     private outputStream: NodeJS.WritableStream = process.stdout
   ) {}
 
   public async start(): Promise<DebugAction> {
-    console.log(`\n❌ Step '${this.step.id}' failed.`);
-    console.log(
+    this.logger.error(`\n❌ Step '${this.step.id}' failed.`);
+    this.logger.error(
       `   Error: ${this.error instanceof Error ? this.error.message : String(this.error)}`
     );
-    console.log('\nEntering Debug Mode. Available commands:');
-    console.log('  > context      (view current inputs/outputs involved in this step)');
-    console.log('  > retry        (re-run step, optionally with edited definition)');
-    console.log('  > edit         (edit the step definition in your $EDITOR)');
-    console.log('  > skip         (skip this step and proceed)');
-    console.log('  > eval <code>  (run JS expression against context)');
-    console.log('  > exit         (resume failure/exit)');
+    this.logger.log('\nEntering Debug Mode. Available commands:');
+    this.logger.log('  > context      (view current inputs/outputs involved in this step)');
+    this.logger.log('  > retry        (re-run step, optionally with edited definition)');
+    this.logger.log('  > edit         (edit the step definition in your $EDITOR)');
+    this.logger.log('  > skip         (skip this step and proceed)');
+    this.logger.log('  > eval <code>  (run JS expression against context)');
+    this.logger.log('  > exit         (resume failure/exit)');
 
     const rl = readline.createInterface({
       input: this.inputStream,
@@ -52,7 +55,7 @@ export class DebugRepl {
         switch (cmd) {
           case 'context':
             // Show meaningful context context
-            console.log(JSON.stringify(this.context, null, 2));
+            this.logger.log(JSON.stringify(this.context, null, 2));
             break;
 
           case 'retry':
@@ -76,12 +79,12 @@ export class DebugRepl {
               const newStep = this.editStep(this.step);
               if (newStep) {
                 this.step = newStep;
-                console.log('✓ Step definition updated in memory. Type "retry" to run it.');
+                this.logger.log('✓ Step definition updated in memory. Type "retry" to run it.');
               } else {
-                console.log('No changes made.');
+                this.logger.log('No changes made.');
               }
             } catch (e) {
-              console.error(`Error editing step: ${e}`);
+              this.logger.error(`Error editing step: ${e}`);
             }
             break;
           }
@@ -89,13 +92,13 @@ export class DebugRepl {
           case 'eval':
             try {
               if (!argStr) {
-                console.log('Usage: eval <expression>');
+                this.logger.log('Usage: eval <expression>');
               } else {
                 const result = ExpressionEvaluator.evaluateExpression(argStr, this.context);
-                console.log(result);
+                this.logger.log(String(result));
               }
             } catch (e) {
-              console.error(`Eval error: ${e instanceof Error ? e.message : String(e)}`);
+              this.logger.error(`Eval error: ${e instanceof Error ? e.message : String(e)}`);
             }
             break;
 
@@ -103,7 +106,7 @@ export class DebugRepl {
             break;
 
           default:
-            console.log(`Unknown command: ${cmd}`);
+            this.logger.log(`Unknown command: ${cmd}`);
             break;
         }
 
@@ -115,18 +118,31 @@ export class DebugRepl {
   }
 
   private editStep(step: Step): Step | null {
-    const editor = process.env.EDITOR || 'vim'; // Default to vim if not set
-    const tempFile = path.join(os.tmpdir(), `keystone-step-${step.id}-${Date.now()}.json`);
+    const editorEnv = process.env.EDITOR || 'vim'; // Default to vim if not set
+    // Validate editor name to prevent shell injection (allow alphanumeric, dash, underscore, slash, and spaces for args)
+    // We strictly block semicolon, pipe, ampersand, backtick, $ to prevent command injection
+    const safeEditor = /^[\w./\s-]+$/.test(editorEnv) ? editorEnv : 'vi';
+    if (safeEditor !== editorEnv) {
+      this.logger.warn(
+        `Warning: $EDITOR value "${editorEnv}" contains unsafe characters. Falling back to "vi".`
+      );
+    }
+    // Sanitize step ID to prevent path traversal
+    const sanitizedId = step.id.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const tempFile = path.join(os.tmpdir(), `keystone-step-${sanitizedId}-${Date.now()}.json`);
 
     // Write step to temp file
     fs.writeFileSync(tempFile, JSON.stringify(step, null, 2));
 
     // Spawn editor
     try {
+      // Parse editor string into command and args (e.g. "code --wait", "subl -w")
+      const [editorCmd, ...editorArgs] = parseShellCommand(safeEditor);
+
       // Use stdio: 'inherit' to let the editor take over the terminal
-      const result = spawnSync(editor, [tempFile], {
+      // Note: shell: false for security - prevents injection via $EDITOR
+      const result = spawnSync(editorCmd, [...editorArgs, tempFile], {
         stdio: 'inherit',
-        shell: true,
       });
 
       if (result.error) {
@@ -142,12 +158,12 @@ export class DebugRepl {
         const newStep = JSON.parse(content);
         // Basic validation: must have id and type
         if (!newStep.id || !newStep.type) {
-          console.error('Invalid step definition: missing id or type');
+          this.logger.error('Invalid step definition: missing id or type');
           return null;
         }
         return newStep as Step;
       } catch (e) {
-        console.error('Failed to parse JSON from editor. Changes discarded.');
+        this.logger.error('Failed to parse JSON from editor. Changes discarded.');
         return null;
       }
     } finally {
@@ -156,4 +172,54 @@ export class DebugRepl {
       }
     }
   }
+}
+
+/**
+ * Parses a shell command string into arguments, respecting quotes.
+ * Handles single quotes and double quotes.
+ * Example: 'code --wait' -> ['code', '--wait']
+ * Example: 'my-editor "some arg"' -> ['my-editor', 'some arg']
+ */
+export function parseShellCommand(command: string): string[] {
+  const args: string[] = [];
+  let currentArg = '';
+  let inDoubleQuote = false;
+  let inSingleQuote = false;
+
+  for (let i = 0; i < command.length; i++) {
+    const char = command[i];
+
+    if (inDoubleQuote) {
+      if (char === '"') {
+        inDoubleQuote = false;
+      } else {
+        currentArg += char;
+      }
+    } else if (inSingleQuote) {
+      if (char === "'") {
+        inSingleQuote = false;
+      } else {
+        currentArg += char;
+      }
+    } else {
+      if (char === '"') {
+        inDoubleQuote = true;
+      } else if (char === "'") {
+        inSingleQuote = true;
+      } else if (char === ' ') {
+        if (currentArg.length > 0) {
+          args.push(currentArg);
+          currentArg = '';
+        }
+      } else {
+        currentArg += char;
+      }
+    }
+  }
+
+  if (currentArg.length > 0) {
+    args.push(currentArg);
+  }
+
+  return args;
 }

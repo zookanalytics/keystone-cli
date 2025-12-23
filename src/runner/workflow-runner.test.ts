@@ -457,10 +457,10 @@ describe('WorkflowRunner', () => {
 
     // Check DB status - parent should be 'paused' and step should be 'suspended'
     const db = new WorkflowDb(resumeDbPath);
-    const run = db.getRun(runId);
+    const run = await db.getRun(runId);
     expect(run?.status).toBe('paused');
 
-    const steps = db.getStepsByRun(runId);
+    const steps = await db.getStepsByRun(runId);
     const parentStep = steps.find(
       (s: { step_id: string; iteration_index: number | null }) =>
         s.step_id === 'process' && s.iteration_index === null
@@ -481,8 +481,8 @@ describe('WorkflowRunner', () => {
     expect(outputs.results).toEqual(['ok', 'ok']);
 
     const finalDb = new WorkflowDb(resumeDbPath);
-    const finalRun = finalDb.getRun(runId);
-    expect(finalRun?.status).toBe('completed');
+    const finalRun = await finalDb.getRun(runId);
+    expect(finalRun?.status).toBe('success');
     finalDb.close();
 
     if (existsSync(resumeDbPath)) rmSync(resumeDbPath);

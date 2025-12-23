@@ -166,7 +166,7 @@ describe('MCPServer', () => {
     expect(JSON.parse(response?.result?.content?.[0]?.text || '{}').status).toBe('success');
 
     // Verify DB was updated
-    const steps = db.getStepsByRun(runId);
+    const steps = await db.getStepsByRun(runId);
     expect(steps[0].status).toBe('success');
     expect(steps[0].output).toBeDefined();
     if (steps[0].output) {
@@ -301,10 +301,13 @@ describe('MCPServer', () => {
     expect(status.hint).toContain('still running');
   });
 
-  it('should call get_run_status tool for completed workflow', async () => {
-    const runId = 'completed-test-run';
+  it('should call get_run_status tool for success workflow', async () => {
+    const runId = 'success-test-run';
     await db.createRun(runId, 'test-wf', {});
-    await db.updateRunStatus(runId, 'completed', { output: 'done' });
+    await db.updateRunStatus(runId, 'success', { output: 'done' });
+
+    // Wait for the async run to finish and update DB
+    await new Promise((resolve) => setTimeout(resolve, 200));
 
     const response = await handleMessage({
       jsonrpc: '2.0',
@@ -314,7 +317,7 @@ describe('MCPServer', () => {
     });
 
     const status = JSON.parse(response?.result?.content?.[0]?.text || '{}');
-    expect(status.status).toBe('completed');
+    expect(status.status).toBe('success');
     expect(status.outputs).toEqual({ output: 'done' });
     expect(status.hint).toBeUndefined();
   });

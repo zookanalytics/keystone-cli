@@ -1,5 +1,5 @@
 import { Box, Newline, Text, render, useInput } from 'ink';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { WorkflowDb } from '../db/workflow-db.ts';
 
 interface Run {
@@ -14,39 +14,49 @@ const Dashboard = () => {
   const [runs, setRuns] = useState<Run[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const fetchData = useCallback(() => {
-    const db = new WorkflowDb();
+  // Reuse database connection instead of creating new one every 2 seconds
+  const db = useMemo(() => new WorkflowDb(), []);
+
+  // Cleanup database connection on unmount
+  useEffect(() => {
+    return () => db.close();
+  }, [db]);
+
+  const fetchData = useCallback(async () => {
     try {
-      const recentRuns = db.listRuns(10) as (Run & { outputs: string | null })[];
-      const runsWithUsage = recentRuns.map((run) => {
-        let total_tokens = 0;
-        try {
-          // Get steps to aggregate tokens if not in outputs (future-proofing)
-          const steps = db.getStepsByRun(run.id);
-          total_tokens = steps.reduce((sum, s) => {
-            if (s.usage) {
-              try {
-                const u = JSON.parse(s.usage);
-                return sum + (u.total_tokens || 0);
-              } catch (e) {
-                return sum;
+      const recentRuns = (await db.listRuns(10)) as (Run & { outputs: string | null })[];
+      const runsWithUsage = await Promise.all(
+        recentRuns.map(async (run) => {
+          let total_tokens = 0;
+          try {
+            // Get steps to aggregate tokens if not in outputs (future-proofing)
+            const steps = await db.getStepsByRun(run.id);
+            total_tokens = steps.reduce((sum, s) => {
+              if (s.usage) {
+                try {
+                  const u = JSON.parse(s.usage);
+                  return sum + (u.total_tokens || 0);
+                } catch (e) {
+                  return sum;
+                }
               }
-            }
-            return sum;
-          }, 0);
-        } catch (e) {
-          // Ignore write error
-        }
-        return { ...run, total_tokens };
-      });
+              return sum;
+            }, 0);
+          } catch (e) {
+            // Ignore read error
+          }
+          return { ...run, total_tokens };
+        })
+      );
       setRuns(runsWithUsage);
     } catch (error) {
+      // Dashboard is UI, console.error is acceptable but let's be consistent if possible.
+      // For now we keep it as is or could use a toast.
       console.error('Failed to fetch runs:', error);
     } finally {
       setLoading(false);
-      db.close();
     }
-  }, []);
+  }, [db]);
 
   useEffect(() => {
     fetchData();

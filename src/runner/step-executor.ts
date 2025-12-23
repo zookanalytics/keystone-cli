@@ -13,13 +13,17 @@ import type {
   Step,
   WorkflowStep,
 } from '../parser/schema.ts';
+import { ConsoleLogger, type Logger } from '../utils/logger.ts';
 import { getAdapter } from './llm-adapter.ts';
 import { detectShellInjectionRisk, executeShell } from './shell-executor.ts';
-import type { Logger } from './workflow-runner.ts';
 
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import * as readline from 'node:readline/promises';
 import { SafeSandbox } from '../utils/sandbox.ts';
 import { executeLlmStep } from './llm-executor.ts';
+import { validateRemoteUrl } from './mcp-client.ts';
 import type { MCPManager } from './mcp-manager.ts';
 
 export class WorkflowSuspendedError extends Error {
@@ -50,7 +54,7 @@ export interface StepResult {
 export async function executeStep(
   step: Step,
   context: ExpressionContext,
-  logger: Logger = console,
+  logger: Logger = new ConsoleLogger(),
   executeWorkflowFn?: (step: WorkflowStep, context: ExpressionContext) => Promise<StepResult>,
   mcpManager?: MCPManager,
   memoryDb?: MemoryDb,
@@ -158,7 +162,7 @@ async function executeShellStep(
   const command = ExpressionEvaluator.evaluateString(step.run, context);
   const isRisky = detectShellInjectionRisk(command);
 
-  if (isRisky) {
+  if (isRisky && !step.allowInsecure) {
     // Check if we have a resume approval
     const stepInputs = context.inputs
       ? (context.inputs as Record<string, unknown>)[step.id]
@@ -235,22 +239,34 @@ async function executeFileStep(
   _logger: Logger,
   dryRun?: boolean
 ): Promise<StepResult> {
-  const path = ExpressionEvaluator.evaluateString(step.path, context);
+  const rawPath = ExpressionEvaluator.evaluateString(step.path, context);
+
+  // Security: Prevent path traversal
+  const cwd = process.cwd();
+  const resolvedPath = path.resolve(cwd, rawPath);
+  const relativePath = path.relative(cwd, resolvedPath);
+
+  if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+    throw new Error(`Access denied: Path '${rawPath}' resolves outside the working directory.`);
+  }
+
+  // Use resolved path for operations
+  const targetPath = resolvedPath;
 
   if (dryRun && step.op !== 'read') {
     const opVerb = step.op === 'write' ? 'write to' : 'append to';
-    _logger.log(`[DRY RUN] Would ${opVerb} file: ${path}`);
+    _logger.log(`[DRY RUN] Would ${opVerb} file: ${targetPath}`);
     return {
-      output: { path, bytes: 0 },
+      output: { path: targetPath, bytes: 0 },
       status: 'success',
     };
   }
 
   switch (step.op) {
     case 'read': {
-      const file = Bun.file(path);
+      const file = Bun.file(targetPath);
       if (!(await file.exists())) {
-        throw new Error(`File not found: ${path}`);
+        throw new Error(`File not found: ${targetPath}`);
       }
       const content = await file.text();
       return {
@@ -266,14 +282,14 @@ async function executeFileStep(
       const content = ExpressionEvaluator.evaluateString(step.content, context);
 
       // Ensure parent directory exists
-      const fs = await import('node:fs/promises');
-      const pathModule = await import('node:path');
-      const dir = pathModule.dirname(path);
-      await fs.mkdir(dir, { recursive: true });
+      const dir = path.dirname(targetPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
 
-      const bytes = await Bun.write(path, content);
+      await Bun.write(targetPath, content);
       return {
-        output: { path, bytes },
+        output: { path: targetPath, bytes: content.length },
         status: 'success',
       };
     }
@@ -285,16 +301,15 @@ async function executeFileStep(
       const content = ExpressionEvaluator.evaluateString(step.content, context);
 
       // Ensure parent directory exists
-      const fs = await import('node:fs/promises');
-      const pathModule = await import('node:path');
-      const dir = pathModule.dirname(path);
-      await fs.mkdir(dir, { recursive: true });
+      const dir = path.dirname(targetPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
 
-      // Use Node.js fs for efficient append operation
-      await fs.appendFile(path, content, 'utf-8');
+      fs.appendFileSync(targetPath, content);
 
       return {
-        output: { path, bytes: content.length },
+        output: { path: targetPath, bytes: content.length },
         status: 'success',
       };
     }
@@ -313,6 +328,9 @@ async function executeRequestStep(
   _logger: Logger
 ): Promise<StepResult> {
   const url = ExpressionEvaluator.evaluateString(step.url, context);
+
+  // Validate URL to prevent SSRF
+  validateRemoteUrl(url);
 
   // Evaluate headers
   const headers: Record<string, string> = {};

@@ -57,8 +57,9 @@ export class AuthManager {
     const path = AuthManager.getAuthPath();
     const current = AuthManager.load();
     try {
-      writeFileSync(path, JSON.stringify({ ...current, ...data }, null, 2));
+      writeFileSync(path, JSON.stringify({ ...current, ...data }, null, 2), { mode: 0o600 });
     } catch (error) {
+      // Use ConsoleLogger as a safe fallback for top-level utility
       console.error(
         'Failed to save auth data:',
         error instanceof Error ? error.message : String(error)
@@ -196,6 +197,7 @@ export class AuthManager {
 
       return data.token;
     } catch (error) {
+      // Use ConsoleLogger as a safe fallback for top-level utility
       console.error('Error refreshing Copilot token:', error);
       return undefined;
     }

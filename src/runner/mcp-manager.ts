@@ -1,6 +1,6 @@
 import { ConfigLoader } from '../utils/config-loader';
+import { ConsoleLogger, type Logger } from '../utils/logger.ts';
 import { MCPClient } from './mcp-client';
-import type { Logger } from './workflow-runner';
 
 export interface MCPServerConfig {
   name: string;
@@ -20,9 +20,16 @@ export class MCPManager {
   private clients: Map<string, MCPClient> = new Map();
   private connectionPromises: Map<string, Promise<MCPClient | undefined>> = new Map();
   private sharedServers: Map<string, MCPServerConfig> = new Map();
+  private logger: Logger;
 
-  constructor() {
+  constructor(logger: Logger = new ConsoleLogger()) {
+    this.logger = logger;
     this.loadGlobalConfig();
+
+    // Ensure cleanup on process exit
+    process.on('exit', () => {
+      this.stopAll();
+    });
   }
 
   private loadGlobalConfig() {
@@ -39,14 +46,15 @@ export class MCPManager {
 
   async getClient(
     serverRef: string | MCPServerConfig,
-    logger: Logger = console
+    logger?: Logger
   ): Promise<MCPClient | undefined> {
+    const activeLogger = logger || this.logger;
     let config: MCPServerConfig;
 
     if (typeof serverRef === 'string') {
       const shared = this.sharedServers.get(serverRef);
       if (!shared) {
-        logger.error(`  ✗ Global MCP server not found: ${serverRef}`);
+        activeLogger.error(`  ✗ Global MCP server not found: ${serverRef}`);
         return undefined;
       }
       config = shared;
@@ -68,7 +76,7 @@ export class MCPManager {
 
     // Start a new connection and cache the promise
     const connectionPromise = (async () => {
-      logger.log(`  🔌 Connecting to MCP server: ${config.name} (${config.type || 'local'})`);
+      activeLogger.log(`  🔌 Connecting to MCP server: ${config.name} (${config.type || 'local'})`);
 
       let client: MCPClient;
       try {
@@ -91,7 +99,9 @@ export class MCPManager {
             headers.Authorization = `Bearer ${token}`;
           }
 
-          client = await MCPClient.createRemote(config.url, headers, config.timeout);
+          client = await MCPClient.createRemote(config.url, headers, config.timeout, {
+            logger: activeLogger,
+          });
         } else {
           if (!config.command) throw new Error('Local MCP server missing command');
 
@@ -118,7 +128,8 @@ export class MCPManager {
             config.command,
             config.args || [],
             env,
-            config.timeout
+            config.timeout,
+            activeLogger
           );
         }
 
@@ -126,7 +137,7 @@ export class MCPManager {
         this.clients.set(key, client);
         return client;
       } catch (error) {
-        logger.error(
+        activeLogger.error(
           `  ✗ Failed to connect to MCP server ${config.name}: ${error instanceof Error ? error.message : String(error)}`
         );
         return undefined;

@@ -18,7 +18,7 @@ You are the Keystone Architect. Your goal is to design and generate high-quality
 - **concurrency**: (Optional) Global concurrency limit for the workflow (number or expression).
 - **eval**: (Optional) Configuration for prompt optimization `{ scorer: 'llm'|'script', agent, prompt, run }`.
 - **steps**: Array of step objects. Each step MUST have an `id` and a `type`:
-  - **shell**: `{ id, type: 'shell', run, dir, env, transform }`
+  - **shell**: `{ id, type: 'shell', run, dir, env, allowInsecure, transform }` (Set `allowInsecure: true` to bypass risky command checks)
   - **llm**: `{ id, type: 'llm', agent, prompt, schema, provider, model, tools, maxIterations, useGlobalMcp, allowClarification, mcpServers }`
   - **workflow**: `{ id, type: 'workflow', path, inputs }`
   - **file**: `{ id, type: 'file', path, op: 'read'|'write'|'append', content }`
@@ -27,7 +27,7 @@ You are the Keystone Architect. Your goal is to design and generate high-quality
   - **sleep**: `{ id, type: 'sleep', duration }` (duration can be a number or expression string)
   - **script**: `{ id, type: 'script', run, allowInsecure }` (Executes JS in a secure sandbox; set allowInsecure to true to allow fallback to insecure VM)
   - **memory**: `{ id, type: 'memory', op: 'search'|'store', query, text, model, metadata, limit }`
-- **Common Step Fields**: `needs` (array of IDs), `if` (expression), `timeout` (ms), `retry` (`{ count, backoff: 'linear'|'exponential', baseDelay }`), `auto_heal` (`{ agent, maxAttempts, model }`), `reflexion` (`{ limit, hint }`), `learn` (boolean), `foreach`, `concurrency`, `transform`.
+- **Common Step Fields**: `needs` (array of IDs), `if` (expression), `timeout` (ms), `retry` (`{ count, backoff: 'linear'|'exponential', baseDelay }`), `auto_heal` (`{ agent, maxAttempts, model }`), `reflexion` (`{ limit, hint }`), `learn` (boolean, auto-index for few-shot), `foreach`, `concurrency`, `transform`.
 - **finally**: Optional array of steps to run at the end of the workflow, regardless of success or failure.
 - **IMPORTANT**: Steps run in **parallel** by default. To ensure sequential execution, a step must explicitly list the previous step's ID in its `needs` array.
 

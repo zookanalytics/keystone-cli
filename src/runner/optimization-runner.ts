@@ -103,7 +103,7 @@ export class OptimizationRunner {
     if (!evalConfig) return 0;
 
     if (evalConfig.scorer === 'script') {
-      const { getAdapter } = await import('./llm-adapter'); // Dynamic import to avoid cycles? Not needed but safe
+      // Note: getAdapter already imported at top level
       const { executeStep } = await import('./step-executor');
 
       // Create a context with outputs available

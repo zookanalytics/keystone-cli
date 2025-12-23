@@ -4,12 +4,12 @@ import { ExpressionEvaluator } from '../expression/evaluator';
 import { parseAgent, resolveAgentPath } from '../parser/agent-parser';
 import type { AgentTool, LlmStep, Step } from '../parser/schema';
 import { extractJson } from '../utils/json-parser';
+import { ConsoleLogger, type Logger } from '../utils/logger.ts';
 import { RedactionBuffer, Redactor } from '../utils/redactor';
 import { type LLMMessage, getAdapter } from './llm-adapter';
 import { MCPClient } from './mcp-client';
 import type { MCPManager, MCPServerConfig } from './mcp-manager';
 import type { StepResult } from './step-executor';
-import type { Logger } from './workflow-runner';
 
 interface ToolDefinition {
   name: string;
@@ -24,7 +24,7 @@ export async function executeLlmStep(
   step: LlmStep,
   context: ExpressionContext,
   executeStepFn: (step: Step, context: ExpressionContext) => Promise<StepResult>,
-  logger: Logger = console,
+  logger: Logger = new ConsoleLogger(),
   mcpManager?: MCPManager,
   workflowDir?: string
 ): Promise<StepResult> {

@@ -1,4 +1,5 @@
 import { Database } from 'bun:sqlite';
+import './sqlite-setup.ts';
 import {
   StepStatus as StepStatusConst,
   type StepStatusType,
@@ -7,7 +8,7 @@ import {
 } from '../types/status';
 
 // Re-export for backward compatibility - these map to the database column values
-export type RunStatus = WorkflowStatusType | 'pending' | 'completed';
+export type RunStatus = WorkflowStatusType | 'pending';
 export type StepStatus = StepStatusType;
 
 export interface WorkflowRun {
@@ -126,10 +127,13 @@ export class WorkflowDb {
     `);
 
     // Ensure usage column exists (migration for older databases)
-    try {
+    // Use PRAGMA table_info to check column existence - more reliable than catching errors
+    const columns = this.db.prepare('PRAGMA table_info(step_executions)').all() as {
+      name: string;
+    }[];
+    const hasUsageColumn = columns.some((col) => col.name === 'usage');
+    if (!hasUsageColumn) {
       this.db.exec('ALTER TABLE step_executions ADD COLUMN usage TEXT;');
-    } catch (e) {
-      // Ignore if column already exists
     }
   }
 
@@ -162,23 +166,40 @@ export class WorkflowDb {
         WHERE id = ?
       `);
       const completedAt =
-        status === 'completed' || status === 'failed' ? new Date().toISOString() : null;
+        status === 'success' || status === 'failed' ? new Date().toISOString() : null;
       stmt.run(status, outputs ? JSON.stringify(outputs) : null, error || null, completedAt, id);
     });
   }
 
-  getRun(id: string): WorkflowRun | null {
-    const stmt = this.db.prepare('SELECT * FROM workflow_runs WHERE id = ?');
-    return stmt.get(id) as WorkflowRun | null;
+  /**
+   * Helper for synchronous retries on SQLITE_BUSY
+   * Since bun:sqlite is synchronous, we use a busy-wait loop with sleep
+   */
+
+  /**
+   * Get a workflow run by ID
+   * @note Synchronous method - wrapped in sync retry logic
+   */
+  async getRun(id: string): Promise<WorkflowRun | null> {
+    return this.withRetry(() => {
+      const stmt = this.db.prepare('SELECT * FROM workflow_runs WHERE id = ?');
+      return stmt.get(id) as WorkflowRun | null;
+    });
   }
 
-  listRuns(limit = 50): WorkflowRun[] {
-    const stmt = this.db.prepare(`
-      SELECT * FROM workflow_runs
-      ORDER BY started_at DESC
-      LIMIT ?
-    `);
-    return stmt.all(limit) as WorkflowRun[];
+  /**
+   * List recent workflow runs
+   * @note Synchronous method - wrapped in sync retry logic
+   */
+  async listRuns(limit = 50): Promise<WorkflowRun[]> {
+    return this.withRetry(() => {
+      const stmt = this.db.prepare(`
+        SELECT * FROM workflow_runs
+        ORDER BY started_at DESC
+        LIMIT ?
+      `);
+      return stmt.all(limit) as WorkflowRun[];
+    });
   }
 
   /**
@@ -267,31 +288,47 @@ export class WorkflowDb {
     });
   }
 
-  getStepByIteration(runId: string, stepId: string, iterationIndex: number): StepExecution | null {
-    const stmt = this.db.prepare(`
-      SELECT * FROM step_executions
-      WHERE run_id = ? AND step_id = ? AND iteration_index = ?
-      ORDER BY started_at DESC
-      LIMIT 1
-    `);
-    return stmt.get(runId, stepId, iterationIndex) as StepExecution | null;
+  /**
+   * Get a step execution by run ID, step ID, and iteration index
+   * @note Synchronous method - wrapped in sync retry logic
+   */
+  async getStepByIteration(
+    runId: string,
+    stepId: string,
+    iterationIndex: number
+  ): Promise<StepExecution | null> {
+    return this.withRetry(() => {
+      const stmt = this.db.prepare(`
+        SELECT * FROM step_executions
+        WHERE run_id = ? AND step_id = ? AND iteration_index = ?
+        ORDER BY started_at DESC
+        LIMIT 1
+      `);
+      return stmt.get(runId, stepId, iterationIndex) as StepExecution | null;
+    });
   }
 
-  getStepsByRun(runId: string, limit = -1, offset = 0): StepExecution[] {
-    const stmt = this.db.prepare(`
-      SELECT * FROM step_executions
-      WHERE run_id = ?
-      ORDER BY started_at ASC, iteration_index ASC, rowid ASC
-      LIMIT ? OFFSET ?
-    `);
-    return stmt.all(runId, limit, offset) as StepExecution[];
+  /**
+   * Get all step executions for a workflow run
+   * @note Synchronous method - wrapped in sync retry logic
+   */
+  async getStepsByRun(runId: string, limit = -1, offset = 0): Promise<StepExecution[]> {
+    return this.withRetry(() => {
+      const stmt = this.db.prepare(`
+        SELECT * FROM step_executions
+        WHERE run_id = ?
+        ORDER BY started_at ASC, iteration_index ASC, rowid ASC
+        LIMIT ? OFFSET ?
+      `);
+      return stmt.all(runId, limit, offset) as StepExecution[];
+    });
   }
 
   async getSuccessfulRuns(workflowName: string, limit = 3): Promise<WorkflowRun[]> {
     return await this.withRetry(() => {
       const stmt = this.db.prepare(`
         SELECT * FROM workflow_runs
-        WHERE workflow_name = ? AND status = 'completed'
+        WHERE workflow_name = ? AND status = 'success'
         ORDER BY started_at DESC
         LIMIT ?
       `);

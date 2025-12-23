@@ -29,7 +29,7 @@ import { $ } from 'bun';
 import type { ExpressionContext } from '../expression/evaluator.ts';
 import { ExpressionEvaluator } from '../expression/evaluator.ts';
 import type { ShellStep } from '../parser/schema.ts';
-import type { Logger } from './workflow-runner.ts';
+import { ConsoleLogger, type Logger } from '../utils/logger.ts';
 
 /**
  * Escape a shell argument for safe use in shell commands
@@ -41,7 +41,7 @@ import type { Logger } from './workflow-runner.ts';
  *   - id: safe_echo
  *     type: shell
  *     # Use this pattern to safely interpolate user inputs:
- *     run: echo ${{ inputs.message }}  # Safe: expression evaluation happens first
+ *     run: echo ${{ escape(inputs.message) }}  # Safe: explicitly escaped
  *     # Avoid patterns like: sh -c "echo $USER_INPUT" where USER_INPUT is raw
  * ```
  */
@@ -98,9 +98,12 @@ const DANGEROUS_PATTERNS: RegExp[] = [
   /\d*>&-\s*/, // Closing file descriptors
 ];
 
+// Combine all patterns into single regex for O(m) matching instead of O(n×m)
+const COMBINED_DANGEROUS_PATTERN = new RegExp(DANGEROUS_PATTERNS.map((r) => r.source).join('|'));
+
 export function detectShellInjectionRisk(command: string): boolean {
-  // Check against pre-compiled patterns
-  return DANGEROUS_PATTERNS.some((pattern) => pattern.test(command));
+  // Use combined pattern for single-pass matching
+  return COMBINED_DANGEROUS_PATTERN.test(command);
 }
 
 /**
@@ -109,7 +112,7 @@ export function detectShellInjectionRisk(command: string): boolean {
 export async function executeShell(
   step: ShellStep,
   context: ExpressionContext,
-  logger: Logger = console
+  logger: Logger = new ConsoleLogger()
 ): Promise<ShellResult> {
   // Evaluate the command string
   const command = ExpressionEvaluator.evaluateString(step.run, context);

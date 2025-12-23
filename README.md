@@ -461,11 +461,38 @@ In these examples, the agent will have access to all tools provided by the MCP s
 | `mcp start` | Start the Keystone MCP server |
 | `mcp login <server>` | Login to a remote MCP server |
 | `completion [shell]` | Generate shell completion script (zsh, bash) |
-| `prune [--days N]` | Cleanup old run data from the database |
+| `maintenance [--days N]` | Perform database maintenance (prune old runs and vacuum) |
 
 ---
-
-## 📂 Project Structure
+ 
+ ## 🛡️ Security
+ 
+ ### Shell Execution
+ By default, Keystone analyzes shell commands for potentially dangerous patterns (like shell injection, `rm -rf`, piped commands). If a risk is detected:
+ - In interactive mode, the user is prompted for confirmation.
+ - In non-interactive mode, the step is suspended or failed.
+ 
+ You can bypass this check if you trust the command:
+ ```yaml
+ - id: deploy
+   type: shell
+   run: ./deploy.sh ${{ inputs.env }}
+   allowInsecure: true
+ ```
+ 
+ ### Expression Safety
+ Expressions `${{ }}` are evaluated using a safe AST parser (`jsep`) which:
+ - Prevents arbitrary code execution (no `eval` or `Function`).
+ - Whitelists safe global objects (`Math`, `JSON`, `Date`, etc.).
+ - Blocks access to sensitive properties (`constructor`, `__proto__`).
+ - Enforces a maximum template length to prevent ReDoS attacks.
+ 
+ ### Script Sandboxing
+ The `script` step uses Node.js `vm` module. While it provides isolation for variables, it is **not a security boundary** for malicious code. Only run scripts from trusted sources.
+ 
+ ---
+ 
+ ## 📂 Project Structure
 
 - `src/db/`: SQLite persistence layer.
 - `src/runner/`: The core execution engine, handles parallelization and retries.

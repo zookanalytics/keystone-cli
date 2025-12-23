@@ -7,6 +7,8 @@
 
 export class Redactor {
   private patterns: RegExp[] = [];
+  private combinedPattern: RegExp | null = null;
+  public readonly maxSecretLength: number;
 
   constructor(secrets: Record<string, string>) {
     // Keys that indicate high sensitivity - always redact their values regardless of length
@@ -75,6 +77,10 @@ export class Redactor {
 
     const uniqueSecrets = Array.from(secretsToRedact).sort((a, b) => b.length - a.length);
 
+    // Build regex patterns
+    // Optimization: Group secrets into a single combined regex where possible
+    const parts: string[] = [];
+
     for (const secret of uniqueSecrets) {
       // Escape special regex characters in the secret
       const escaped = secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -82,23 +88,22 @@ export class Redactor {
       // Use word boundaries if the secret starts/ends with an alphanumeric character
       // to avoid partial matches (e.g. redacting 'mark' in 'marketplace')
       // BUT only if length is small (< 5), otherwise matching inside strings is desirable
-      let pattern: RegExp;
       if (secret.length < 5) {
         const startBoundary = /^\w/.test(secret) ? '\\b' : '';
         const endBoundary = /\w$/.test(secret) ? '\\b' : '';
-        pattern = new RegExp(`${startBoundary}${escaped}${endBoundary}`, 'g');
+        parts.push(`${startBoundary}${escaped}${endBoundary}`);
       } else {
-        pattern = new RegExp(escaped, 'g');
+        parts.push(escaped);
       }
+    }
 
-      this.patterns.push(pattern);
+    if (parts.length > 0) {
+      this.combinedPattern = new RegExp(parts.join('|'), 'g');
     }
 
     // Capture the maximum length for buffering purposes
     this.maxSecretLength = uniqueSecrets.reduce((max, s) => Math.max(max, s.length), 0);
   }
-
-  public readonly maxSecretLength: number;
 
   /**
    * Redact all secrets from a string
@@ -108,11 +113,11 @@ export class Redactor {
       return text;
     }
 
-    let redacted = text;
-    for (const pattern of this.patterns) {
-      redacted = redacted.replace(pattern, '***REDACTED***');
+    if (!this.combinedPattern) {
+      return text;
     }
-    return redacted;
+
+    return text.replace(this.combinedPattern, '***REDACTED***');
   }
 
   /**

@@ -6,20 +6,18 @@ import type { ExpressionContext } from '../expression/evaluator.ts';
 import { ExpressionEvaluator } from '../expression/evaluator.ts';
 import type { Step, Workflow, WorkflowStep } from '../parser/schema.ts';
 import { WorkflowParser } from '../parser/workflow-parser.ts';
+import { StepStatus, type StepStatusType, WorkflowStatus } from '../types/status.ts';
 import { extractJson } from '../utils/json-parser.ts';
 import { Redactor } from '../utils/redactor.ts';
 import { WorkflowRegistry } from '../utils/workflow-registry.ts';
+import { ForeachExecutor } from './foreach-executor.ts';
 import { type LLMMessage, getAdapter } from './llm-adapter.ts';
 import { MCPManager } from './mcp-manager.ts';
 import { withRetry } from './retry.ts';
 import { type StepResult, WorkflowSuspendedError, executeStep } from './step-executor.ts';
 import { withTimeout } from './timeout.ts';
 
-export interface Logger {
-  log: (msg: string) => void;
-  error: (msg: string) => void;
-  warn: (msg: string) => void;
-}
+import { ConsoleLogger, type Logger } from '../utils/logger.ts';
 
 /**
  * A logger wrapper that redacts secrets from all log messages
@@ -41,6 +39,16 @@ class RedactingLogger implements Logger {
   warn(msg: string): void {
     this.inner.warn(this.redactor.redact(msg));
   }
+
+  info(msg: string): void {
+    this.inner.info(this.redactor.redact(msg));
+  }
+
+  debug(msg: string): void {
+    if (this.inner.debug) {
+      this.inner.debug(this.redactor.redact(msg));
+    }
+  }
 }
 
 export interface RunOptions {
@@ -56,12 +64,13 @@ export interface RunOptions {
   dryRun?: boolean;
   debug?: boolean;
   getAdapter?: typeof getAdapter;
+  depth?: number;
 }
 
 export interface StepContext {
   output?: unknown;
   outputs?: Record<string, unknown>;
-  status: 'success' | 'failed' | 'skipped' | 'pending' | 'suspended';
+  status: StepStatusType;
   error?: string;
   usage?: {
     prompt_tokens: number;
@@ -99,16 +108,26 @@ export class WorkflowRunner {
   private isStopping = false;
   private hasWarnedMemory = false;
   private static readonly MEMORY_WARNING_THRESHOLD = 1000;
+  private static readonly MAX_RECURSION_DEPTH = 10;
+  private depth = 0;
 
   constructor(workflow: Workflow, options: RunOptions = {}) {
     this.workflow = workflow;
     this.options = options;
+    this.depth = options.depth || 0;
+
+    if (this.depth > WorkflowRunner.MAX_RECURSION_DEPTH) {
+      throw new Error(
+        `Maximum workflow recursion depth (${WorkflowRunner.MAX_RECURSION_DEPTH}) exceeded.`
+      );
+    }
+
     this.db = new WorkflowDb(options.dbPath);
     this.memoryDb = new MemoryDb(options.memoryDbPath);
     this.secrets = this.loadSecrets();
     this.redactor = new Redactor(this.secrets);
     // Wrap the logger with a redactor to prevent secret leakage in logs
-    const rawLogger = options.logger || console;
+    const rawLogger = options.logger || new ConsoleLogger();
     this.logger = new RedactingLogger(rawLogger, this.redactor);
     this.mcpManager = options.mcpManager || new MCPManager();
 
@@ -137,13 +156,13 @@ export class WorkflowRunner {
    * Restore state from a previous run (for resume functionality)
    */
   private async restoreState(): Promise<void> {
-    const run = this.db.getRun(this.runId);
+    const run = await this.db.getRun(this.runId);
     if (!run) {
       throw new Error(`Run ${this.runId} not found`);
     }
 
     // Only allow resuming failed or paused runs
-    if (run.status !== 'failed' && run.status !== 'paused') {
+    if (run.status !== WorkflowStatus.FAILED && run.status !== WorkflowStatus.PAUSED) {
       throw new Error(
         `Cannot resume run with status '${run.status}'. Only 'failed' or 'paused' runs can be resumed.`
       );
@@ -152,18 +171,22 @@ export class WorkflowRunner {
     // Restore inputs from the previous run to ensure consistency
     // Merge with any resumeInputs provided (e.g. answers to human steps)
     try {
-      const storedInputs = JSON.parse(run.inputs);
-      this.inputs = { ...storedInputs, ...this.inputs };
+      if (!run.inputs || run.inputs === 'null' || run.inputs === '') {
+        this.logger.warn(`Run ${this.runId} has no persisted inputs`);
+        // Keep existing inputs
+      } else {
+        const storedInputs = JSON.parse(run.inputs);
+        this.inputs = { ...storedInputs, ...this.inputs };
+      }
     } catch (error) {
-      // Log warning but continue with default empty inputs instead of crashing
-      this.logger.warn(
-        `Failed to parse inputs from run ${this.runId}, using defaults: ${error instanceof Error ? error.message : String(error)}`
+      this.logger.error(
+        `CRITICAL: Failed to parse inputs from run ${this.runId}. Data may be corrupted. Using default/resume inputs. Error: ${error instanceof Error ? error.message : String(error)}`
       );
-      // Keep existing inputs (from resumeInputs or empty)
+      // Fallback: preserve existing inputs from resume options
     }
 
     // Load all step executions for this run
-    const steps = this.db.getStepsByRun(this.runId);
+    const steps = await this.db.getStepsByRun(this.runId);
 
     // Group steps by step_id to handle foreach loops (multiple executions per step_id)
     const stepExecutionsByStepId = new Map<string, typeof steps>();
@@ -202,7 +225,7 @@ export class WorkflowRunner {
         for (const exec of sortedExecs) {
           if (exec.iteration_index === null) continue; // Skip parent step record
 
-          if (exec.status === 'success' || exec.status === 'skipped') {
+          if (exec.status === StepStatus.SUCCESS || exec.status === StepStatus.SKIPPED) {
             let output: unknown = null;
             try {
               output = exec.output ? JSON.parse(exec.output) : null;
@@ -218,7 +241,7 @@ export class WorkflowRunner {
                 typeof output === 'object' && output !== null && !Array.isArray(output)
                   ? (output as Record<string, unknown>)
                   : {},
-              status: exec.status as 'success' | 'skipped',
+              status: exec.status as typeof StepStatus.SUCCESS | typeof StepStatus.SKIPPED,
             };
             outputs[exec.iteration_index] = output;
           } else {
@@ -227,7 +250,7 @@ export class WorkflowRunner {
             items[exec.iteration_index] = {
               output: null,
               outputs: {},
-              status: exec.status as 'failed' | 'pending' | 'success' | 'skipped' | 'suspended',
+              status: exec.status as StepStatusType,
             };
           }
         }
@@ -271,17 +294,17 @@ export class WorkflowRunner {
           !Array.from({ length: expectedCount }).some((_, i) => !items[i]);
 
         // Determine overall status based on iterations
-        let status: StepContext['status'] = 'success';
+        let status: StepContext['status'] = StepStatus.SUCCESS;
         if (allSuccess && hasAllItems) {
-          status = 'success';
-        } else if (items.some((item) => item?.status === 'suspended')) {
-          status = 'suspended';
+          status = StepStatus.SUCCESS;
+        } else if (items.some((item) => item?.status === StepStatus.SUSPENDED)) {
+          status = StepStatus.SUSPENDED;
         } else {
-          status = 'failed';
+          status = StepStatus.FAILED;
         }
 
         // Always restore what we have to allow partial expression evaluation
-        const mappedOutputs = this.aggregateOutputs(outputs);
+        const mappedOutputs = ForeachExecutor.aggregateOutputs(outputs);
         this.stepContexts.set(stepId, {
           output: outputs,
           outputs: mappedOutputs,
@@ -290,13 +313,17 @@ export class WorkflowRunner {
         } as ForeachStepContext);
 
         // Only mark as fully completed if all iterations completed successfully AND we have all items
-        if (status === 'success') {
+        if (status === StepStatus.SUCCESS) {
           completedStepIds.add(stepId);
         }
       } else {
         // Single execution step
         const exec = stepExecutions[0];
-        if (exec.status === 'success' || exec.status === 'skipped' || exec.status === 'suspended') {
+        if (
+          exec.status === StepStatus.SUCCESS ||
+          exec.status === StepStatus.SKIPPED ||
+          exec.status === StepStatus.SUSPENDED
+        ) {
           let output: unknown = null;
           try {
             output = exec.output ? JSON.parse(exec.output) : null;
@@ -312,7 +339,7 @@ export class WorkflowRunner {
                 : {},
             status: exec.status as StepContext['status'],
           });
-          if (exec.status !== 'suspended') {
+          if (exec.status !== StepStatus.SUSPENDED) {
             completedStepIds.add(stepId);
           }
         }
@@ -330,7 +357,7 @@ export class WorkflowRunner {
     const handler = async (signal: string) => {
       if (this.isStopping) return;
       this.logger.log(`\n\n🛑 Received ${signal}. Cleaning up...`);
-      await this.stop('failed', `Cancelled by user (${signal})`);
+      await this.stop(WorkflowStatus.FAILED, `Cancelled by user (${signal})`);
 
       // Only exit if not embedded
       if (!this.options.preventExit) {
@@ -347,7 +374,7 @@ export class WorkflowRunner {
   /**
    * Stop the runner and cleanup resources
    */
-  public async stop(status: RunStatus = 'failed', error?: string): Promise<void> {
+  public async stop(status: RunStatus = WorkflowStatus.FAILED, error?: string): Promise<void> {
     if (this.isStopping) return;
     this.isStopping = true;
 
@@ -398,9 +425,7 @@ export class WorkflowRunner {
       '_',
       'SHLVL',
       'LC_ALL',
-      'OLDPWD',
       'DISPLAY',
-      'TMPDIR',
       'SSH_AUTH_SOCK',
       'XPC_FLAGS',
       'XPC_SERVICE_NAME',
@@ -432,31 +457,6 @@ export class WorkflowRunner {
       }
     }
     return secrets;
-  }
-
-  /**
-   * Aggregate outputs from multiple iterations of a foreach step
-   */
-  private aggregateOutputs(outputs: unknown[]): Record<string, unknown> {
-    const mappedOutputs: Record<string, unknown> = { length: outputs.length };
-    const allKeys = new Set<string>();
-
-    for (const output of outputs) {
-      if (output && typeof output === 'object' && !Array.isArray(output)) {
-        for (const key of Object.keys(output)) {
-          allKeys.add(key);
-        }
-      }
-    }
-
-    for (const key of allKeys) {
-      mappedOutputs[key] = outputs.map((o) =>
-        o && typeof o === 'object' && !Array.isArray(o) && key in (o as Record<string, unknown>)
-          ? (o as Record<string, unknown>)[key]
-          : null
-      );
-    }
-    return mappedOutputs;
   }
 
   /**
@@ -622,7 +622,12 @@ export class WorkflowRunner {
       }
     }
 
-    await this.db.startStep(stepExecId);
+    const isRecursion =
+      (context.reflexionAttempts as number) > 0 || (context.autoHealAttempts as number) > 0;
+
+    if (!isRecursion) {
+      await this.db.startStep(stepExecId);
+    }
 
     const operation = async () => {
       const result = await executeStep(
@@ -654,10 +659,10 @@ export class WorkflowRunner {
         await this.db.incrementRetry(stepExecId);
       });
 
-      if (result.status === 'suspended') {
+      if (result.status === StepStatus.SUSPENDED) {
         await this.db.completeStep(
           stepExecId,
-          'suspended',
+          StepStatus.SUSPENDED,
           result.output,
           'Waiting for interaction',
           result.usage
@@ -674,7 +679,7 @@ export class WorkflowRunner {
       );
 
       // Auto-Learning logic
-      if (step.learn && result.status === 'success') {
+      if (step.learn && result.status === StepStatus.SUCCESS) {
         try {
           await this.learnFromStep(step, result, context);
         } catch (error) {
@@ -779,7 +784,7 @@ export class WorkflowRunner {
       if (this.options.debug) {
         try {
           const { DebugRepl } = await import('./debug-repl.ts');
-          const repl = new DebugRepl(context, step, error);
+          const repl = new DebugRepl(context, step, error, this.logger);
           const action = await repl.start();
 
           if (action.type === 'retry') {
@@ -790,11 +795,11 @@ export class WorkflowRunner {
           }
           if (action.type === 'skip') {
             this.logger.log(`  ⏭️ Skipping step ${step.id} manually`);
-            await this.db.completeStep(stepExecId, 'skipped', null, undefined, undefined);
+            await this.db.completeStep(stepExecId, StepStatus.SKIPPED, null, undefined, undefined);
             return {
               output: null,
               outputs: {},
-              status: 'skipped',
+              status: StepStatus.SKIPPED,
             };
           }
           // if 'continue_failure', fall through
@@ -1003,195 +1008,17 @@ Please provide the fixed step configuration as JSON.`;
     }
 
     if (step.foreach) {
-      const items = ExpressionEvaluator.evaluate(step.foreach, baseContext);
-      if (!Array.isArray(items)) {
-        throw new Error(`foreach expression must evaluate to an array: ${step.foreach}`);
-      }
+      const { ForeachExecutor } = await import('./foreach-executor.ts');
+      const executor = new ForeachExecutor(
+        this.db,
+        this.logger,
+        this.executeStepInternal.bind(this)
+      );
 
-      this.logger.log(`  ⤷ Executing step ${step.id} for ${items.length} items`);
+      const existingContext = this.stepContexts.get(step.id) as ForeachStepContext;
+      const result = await executor.execute(step, baseContext, this.runId, existingContext);
 
-      if (items.length > WorkflowRunner.MEMORY_WARNING_THRESHOLD && !this.hasWarnedMemory) {
-        this.logger.warn(
-          `  ⚠️  Warning: Large foreach loop detected (${items.length} items). This may consume significant memory and lead to instability.`
-        );
-        this.hasWarnedMemory = true;
-      }
-
-      // Evaluate concurrency if it's an expression, otherwise use the number directly
-      let concurrencyLimit = items.length;
-      if (step.concurrency !== undefined) {
-        if (typeof step.concurrency === 'string') {
-          concurrencyLimit = Number(ExpressionEvaluator.evaluate(step.concurrency, baseContext));
-          if (!Number.isInteger(concurrencyLimit) || concurrencyLimit <= 0) {
-            throw new Error(
-              `concurrency must evaluate to a positive integer, got: ${concurrencyLimit}`
-            );
-          }
-        } else {
-          concurrencyLimit = step.concurrency;
-        }
-      }
-
-      // Create parent step record in DB
-      const parentStepExecId = randomUUID();
-      await this.db.createStep(parentStepExecId, this.runId, step.id);
-      await this.db.startStep(parentStepExecId);
-
-      // Persist the foreach items in parent step for deterministic resume
-      // This ensures resume uses the same array even if expression would evaluate differently
-      await this.db.completeStep(parentStepExecId, 'pending', { __foreachItems: items });
-
-      try {
-        // Initialize results array with existing context or empty slots
-        const existingContext = this.stepContexts.get(step.id) as ForeachStepContext;
-        const itemResults: StepContext[] = existingContext?.items || new Array(items.length);
-
-        // Ensure array is correct length if items changed (unlikely in resume but safe)
-        if (itemResults.length !== items.length) {
-          itemResults.length = items.length;
-        }
-
-        // Worker pool implementation for true concurrency
-        let currentIndex = 0;
-        let aborted = false;
-        const workers = new Array(Math.min(concurrencyLimit, items.length))
-          .fill(null)
-          .map(async () => {
-            while (currentIndex < items.length && !aborted) {
-              const i = currentIndex++; // Capture index atomically
-              const item = items[i];
-
-              // Skip if already successful or skipped in previous run or by another worker
-              if (
-                itemResults[i] &&
-                (itemResults[i].status === 'success' || itemResults[i].status === 'skipped')
-              ) {
-                continue;
-              }
-
-              const itemContext = this.buildContext(item, i);
-
-              // Check DB again for robustness (in case itemResults wasn't fully restored)
-              const existingExec = this.db.getStepByIteration(this.runId, step.id, i);
-              if (
-                existingExec &&
-                (existingExec.status === 'success' || existingExec.status === 'skipped')
-              ) {
-                let output: unknown = null;
-                try {
-                  output = existingExec.output ? JSON.parse(existingExec.output) : null;
-                } catch (error) {
-                  this.logger.warn(
-                    `Failed to parse output for step ${step.id} iteration ${i}: ${error}`
-                  );
-                  output = { error: 'Failed to parse output' };
-                }
-                itemResults[i] = {
-                  output,
-                  outputs:
-                    typeof output === 'object' && output !== null && !Array.isArray(output)
-                      ? (output as Record<string, unknown>)
-                      : {},
-                  status: existingExec.status as 'success' | 'skipped',
-                };
-                continue;
-              }
-
-              const stepExecId = randomUUID();
-              await this.db.createStep(stepExecId, this.runId, step.id, i);
-
-              // Execute and store result at correct index
-              try {
-                this.logger.log(`  ⤷ [${i + 1}/${items.length}] Executing iteration...`);
-                itemResults[i] = await this.executeStepInternal(step, itemContext, stepExecId);
-                if (itemResults[i].status === 'failed') {
-                  aborted = true;
-                }
-              } catch (error) {
-                aborted = true;
-                throw error;
-              }
-            }
-          });
-
-        await Promise.all(workers);
-
-        // Aggregate results to match Spec requirements
-        // This allows:
-        // 1. ${{ steps.id.output }} -> array of output values
-        // 2. ${{ steps.id.items[0].status }} -> 'success'
-        // 3. ${{ steps.id.items.every(s => s.status == 'success') }} -> works via items array
-        const outputs = itemResults.map((r) => r.output);
-        const allSuccess = itemResults.every((r) => r.status === 'success');
-        const anySuspended = itemResults.some((r) => r.status === 'suspended');
-
-        // Aggregate usage from all items
-        const aggregatedUsage = itemResults.reduce(
-          (acc, r) => {
-            if (r.usage) {
-              acc.prompt_tokens += r.usage.prompt_tokens;
-              acc.completion_tokens += r.usage.completion_tokens;
-              acc.total_tokens += r.usage.total_tokens;
-            }
-            return acc;
-          },
-          { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
-        );
-
-        // Map child properties for easier access
-        // If outputs are [{ id: 1 }, { id: 2 }], then outputs.id = [1, 2]
-        const mappedOutputs = this.aggregateOutputs(outputs);
-
-        // Determine final status
-        let finalStatus: StepContext['status'] = 'failed';
-        if (allSuccess) {
-          finalStatus = 'success';
-        } else if (anySuspended) {
-          finalStatus = 'suspended';
-        }
-
-        // Use proper object structure that serializes correctly
-        const aggregatedContext: ForeachStepContext = {
-          output: outputs,
-          outputs: mappedOutputs,
-          status: finalStatus,
-          items: itemResults,
-          usage: aggregatedUsage,
-        };
-
-        this.stepContexts.set(step.id, aggregatedContext);
-
-        // Update parent step record with aggregated status
-        await this.db.completeStep(
-          parentStepExecId,
-          finalStatus,
-          aggregatedContext,
-          finalStatus === 'failed' ? 'One or more iterations failed' : undefined
-        );
-
-        if (finalStatus === 'suspended') {
-          // If any iteration suspended, the whole step is suspended
-          // We assume for now that only human steps can suspend, and we'll use the first one's input type
-          const suspendedItem = itemResults.find((r) => r.status === 'suspended');
-          throw new WorkflowSuspendedError(
-            suspendedItem?.error || 'Iteration suspended',
-            step.id,
-            'text'
-          );
-        }
-
-        if (finalStatus === 'failed') {
-          throw new Error(`Step ${step.id} failed: one or more iterations failed`);
-        }
-      } catch (error) {
-        if (error instanceof WorkflowSuspendedError) {
-          throw error;
-        }
-        // Mark parent step as failed
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        await this.db.completeStep(parentStepExecId, 'failed', null, errorMsg);
-        throw error;
-      }
+      this.stepContexts.set(step.id, result);
     } else {
       // Single execution
       const stepExecId = randomUUID();
@@ -1240,6 +1067,7 @@ Please provide the fixed step configuration as JSON.`;
       logger: this.logger,
       mcpManager: this.mcpManager,
       workflowDir: subWorkflowDir,
+      depth: this.depth + 1,
     });
 
     try {
@@ -1312,7 +1140,7 @@ Please provide the fixed step configuration as JSON.`;
         this.logger.log('All steps already completed. Nothing to resume.\n');
         // Evaluate outputs from completed state
         const outputs = this.evaluateOutputs();
-        await this.db.updateRunStatus(this.runId, 'completed', outputs);
+        await this.db.updateRunStatus(this.runId, 'success', outputs);
         this.logger.log('✨ Workflow already completed!\n');
         return outputs;
       }
@@ -1401,7 +1229,7 @@ Please provide the fixed step configuration as JSON.`;
       const outputs = this.evaluateOutputs();
 
       // Mark run as complete
-      await this.db.updateRunStatus(this.runId, 'completed', outputs);
+      await this.db.updateRunStatus(this.runId, 'success', outputs);
 
       this.logger.log('✨ Workflow completed successfully!\n');
 

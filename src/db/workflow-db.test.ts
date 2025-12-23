@@ -18,7 +18,7 @@ describe('WorkflowDb', () => {
   it('should create and retrieve a run', async () => {
     const runId = 'run-1';
     await db.createRun(runId, 'test-wf', { input: 1 });
-    const run = db.getRun(runId);
+    const run = await db.getRun(runId);
     expect(run).toBeDefined();
     expect(run?.workflow_name).toBe('test-wf');
     expect(JSON.parse(run?.inputs || '{}')).toEqual({ input: 1 });
@@ -27,9 +27,9 @@ describe('WorkflowDb', () => {
   it('should update run status', async () => {
     const runId = 'run-2';
     await db.createRun(runId, 'test-wf', {});
-    await db.updateRunStatus(runId, 'completed', { result: 'ok' });
-    const run = db.getRun(runId);
-    expect(run?.status).toBe('completed');
+    await db.updateRunStatus(runId, 'success', { result: 'ok' });
+    const run = await db.getRun(runId);
+    expect(run?.status).toBe('success');
     expect(JSON.parse(run?.outputs || '{}')).toEqual({ result: 'ok' });
   });
 
@@ -41,7 +41,7 @@ describe('WorkflowDb', () => {
     await db.startStep('exec-1');
     await db.completeStep('exec-1', 'success', { out: 'val' });
 
-    const steps = db.getStepsByRun(runId);
+    const steps = await db.getStepsByRun(runId);
     expect(steps).toHaveLength(1);
     expect(steps[0].step_id).toBe(stepId);
     expect(steps[0].status).toBe('success');
@@ -53,11 +53,11 @@ describe('WorkflowDb', () => {
     await db.createStep('exec-i0', runId, 'loop', 0);
     await db.createStep('exec-i1', runId, 'loop', 1);
 
-    const step0 = db.getStepByIteration(runId, 'loop', 0);
+    const step0 = await db.getStepByIteration(runId, 'loop', 0);
     expect(step0).toBeDefined();
     expect(step0?.iteration_index).toBe(0);
 
-    const steps = db.getStepsByRun(runId);
+    const steps = await db.getStepsByRun(runId);
     expect(steps).toHaveLength(2);
   });
 
@@ -68,14 +68,14 @@ describe('WorkflowDb', () => {
     await db.incrementRetry('exec-r');
     await db.incrementRetry('exec-r');
 
-    const steps = db.getStepsByRun(runId);
+    const steps = await db.getStepsByRun(runId);
     expect(steps[0].retry_count).toBe(2);
   });
 
   it('should list runs with limit', async () => {
     await db.createRun('run-l1', 'wf', {});
     await db.createRun('run-l2', 'wf', {});
-    const runs = db.listRuns(1);
+    const runs = await db.listRuns(1);
     expect(runs).toHaveLength(1);
   });
 
@@ -93,7 +93,7 @@ describe('WorkflowDb', () => {
     const deleted = await db.pruneRuns(30);
     expect(deleted).toBe(0);
 
-    const run = db.getRun(runId);
+    const run = await db.getRun(runId);
     expect(run).toBeDefined();
   });
 
@@ -103,7 +103,7 @@ describe('WorkflowDb', () => {
 
     // successful run
     await db.createRun('run-s2', 'my-wf', { i: 2 });
-    await db.updateRunStatus('run-s2', 'completed', { o: 2 });
+    await db.updateRunStatus('run-s2', 'success', { o: 2 });
     await new Promise((r) => setTimeout(r, 10));
 
     // failed run
@@ -113,7 +113,7 @@ describe('WorkflowDb', () => {
 
     // another successful run
     await db.createRun('run-s4', 'my-wf', { i: 4 });
-    await db.updateRunStatus('run-s4', 'completed', { o: 4 });
+    await db.updateRunStatus('run-s4', 'success', { o: 4 });
 
     const runs = await db.getSuccessfulRuns('my-wf', 5);
     expect(runs).toHaveLength(2);

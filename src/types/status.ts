@@ -15,7 +15,7 @@ export const StepStatus = {
 export type StepStatusType = (typeof StepStatus)[keyof typeof StepStatus];
 
 export const WorkflowStatus = {
-  COMPLETED: 'completed',
+  SUCCESS: 'success',
   FAILED: 'failed',
   PAUSED: 'paused',
   SUSPENDED: 'suspended',

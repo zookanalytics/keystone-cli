@@ -100,6 +100,15 @@ describe('Redactor', () => {
     const text = 'S1 is 123456789 and S2 is 1234567890';
     expect(thresholdRedactor.redact(text)).toBe('S1 is 123456789 and S2 is ***REDACTED***');
   });
+
+  it('should respect word boundaries for short secrets', () => {
+    const shortRedactor = new Redactor({ TOKEN: 'key' }); // 'key' is < 5 chars but TOKEN is sensitive
+    // Should redact " key " but NOT "keyboard" or "donkey"
+    const text = 'The key is on the keyboard near the donkey.';
+    expect(shortRedactor.redact(text)).toBe(
+      'The ***REDACTED*** is on the keyboard near the donkey.'
+    );
+  });
 });
 
 describe('RedactionBuffer', () => {

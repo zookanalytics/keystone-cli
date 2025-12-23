@@ -77,3 +77,72 @@ describe('MCPClient Audit Fixes', () => {
     }
   });
 });
+
+describe('MCPClient SSRF Protection', () => {
+  it('should reject localhost URLs without allowInsecure', async () => {
+    // HTTP localhost is rejected for not using HTTPS
+    await expect(MCPClient.createRemote('http://localhost:8080/sse')).rejects.toThrow(
+      /SSRF Protection.*HTTPS/
+    );
+    // HTTPS localhost is rejected for being localhost
+    await expect(MCPClient.createRemote('https://localhost:8080/sse')).rejects.toThrow(
+      /SSRF Protection.*localhost/
+    );
+  });
+
+  it('should reject 127.0.0.1', async () => {
+    await expect(MCPClient.createRemote('https://127.0.0.1:8080/sse')).rejects.toThrow(
+      /SSRF Protection.*localhost/
+    );
+  });
+
+  it('should reject private IP ranges (10.x.x.x)', async () => {
+    await expect(MCPClient.createRemote('https://10.0.0.1:8080/sse')).rejects.toThrow(
+      /SSRF Protection.*private/
+    );
+  });
+
+  it('should reject private IP ranges (192.168.x.x)', async () => {
+    await expect(MCPClient.createRemote('https://192.168.1.1:8080/sse')).rejects.toThrow(
+      /SSRF Protection.*private/
+    );
+  });
+
+  it('should reject private IP ranges (172.16-31.x.x)', async () => {
+    await expect(MCPClient.createRemote('https://172.16.0.1:8080/sse')).rejects.toThrow(
+      /SSRF Protection.*private/
+    );
+    await expect(MCPClient.createRemote('https://172.31.255.1:8080/sse')).rejects.toThrow(
+      /SSRF Protection.*private/
+    );
+  });
+
+  it('should reject cloud metadata endpoints', async () => {
+    // 169.254.169.254 is caught by link-local IP range check
+    await expect(
+      MCPClient.createRemote('https://169.254.169.254/latest/meta-data/')
+    ).rejects.toThrow(/SSRF Protection.*private/);
+    // Also test the hostname-based metadata detection
+    await expect(MCPClient.createRemote('https://metadata.google.internal/sse')).rejects.toThrow(
+      /SSRF Protection.*metadata/
+    );
+  });
+
+  it('should require HTTPS by default', async () => {
+    await expect(MCPClient.createRemote('http://api.example.com/sse')).rejects.toThrow(
+      /SSRF Protection.*HTTPS/
+    );
+  });
+
+  it('should allow HTTP with allowInsecure option', async () => {
+    // This will fail due to network issues, not SSRF
+    const promise = MCPClient.createRemote(
+      'http://api.example.com/sse',
+      {},
+      100, // short timeout
+      { allowInsecure: true }
+    );
+    // Should NOT throw SSRF error, but will throw timeout/connection error
+    await expect(promise).rejects.not.toThrow(/SSRF Protection/);
+  });
+});

@@ -58,14 +58,7 @@ interface ObjectExpression extends jsep.Expression {
 }
 
 export class ExpressionEvaluator {
-  // Pre-compiled regex for performance - handles nested braces (up to 3 levels)
-  private static readonly EXPRESSION_REGEX =
-    /\$\{\{(?:[^{}]|\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\})*\}\}/g;
-  private static readonly SINGLE_EXPRESSION_REGEX =
-    /^\s*\$\{\{(?:[^{}]|\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\})*\}\}\s*$/;
-  // Non-global version for hasExpression to avoid lastIndex state issues with global regex
-  private static readonly HAS_EXPRESSION_REGEX =
-    /\$\{\{(?:[^{}]|\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\})*\}\}/;
+  // Regex removed to prevent ReDoS - using manual parsing instead
 
   // Forbidden properties for security - prevents prototype pollution
   private static readonly FORBIDDEN_PROPERTIES = new Set([
@@ -78,44 +71,130 @@ export class ExpressionEvaluator {
     '__lookupSetter__',
   ]);
 
+  // Maximum template length to prevent ReDoS attacks even with manual parsing
+  private static readonly MAX_TEMPLATE_LENGTH = 10_000;
+
+  /**
+   * Helper to scan string for matches of ${{ ... }} handling nested braces manually
+   */
+  private static *scanExpressions(
+    template: string
+  ): Generator<{ start: number; end: number; expr: string }> {
+    let i = 0;
+    while (i < template.length) {
+      if (template.substring(i, i + 3) === '${{') {
+        let depth = 0;
+        let j = i + 3;
+        let closed = false;
+
+        while (j < template.length) {
+          if (template.substring(j, j + 2) === '}}' && depth === 0) {
+            yield {
+              start: i,
+              end: j + 2,
+              expr: template.substring(i + 3, j).trim(),
+            };
+            i = j + 1; // Advance main loop to after this match
+            closed = true;
+            break;
+          }
+
+          if (template[j] === '{') {
+            depth++;
+          } else if (template[j] === '}') {
+            if (depth > 0) depth--;
+          }
+          j++;
+        }
+
+        // If not closed, just advance one char to keep looking
+        if (!closed) i++;
+      } else {
+        i++;
+      }
+    }
+  }
+
   /**
    * Evaluate a string that may contain ${{ }} expressions
+   *
+   * Note on Equality:
+   * This evaluator uses JavaScript's loose equality (==) for '==' comparisons to match
+   * common non-technical user expectations (e.g. "5" == 5 is true).
+   * Strict equality (===) is preserved for '==='.
    */
   static evaluate(template: string, context: ExpressionContext): unknown {
-    const expressionRegex = new RegExp(ExpressionEvaluator.EXPRESSION_REGEX.source, 'g');
-
-    // If the entire string is a single expression, return the evaluated value directly
-    const singleExprMatch = template.match(ExpressionEvaluator.SINGLE_EXPRESSION_REGEX);
-    if (singleExprMatch) {
-      // Extract the expression content between ${{ and }}
-      const expr = singleExprMatch[0].replace(/^\s*\$\{\{\s*|\s*\}\}\s*$/g, '');
-      return ExpressionEvaluator.evaluateExpression(expr, context);
+    // Prevent excessive length
+    if (template.length > ExpressionEvaluator.MAX_TEMPLATE_LENGTH) {
+      throw new Error(
+        `Template exceeds maximum length of ${ExpressionEvaluator.MAX_TEMPLATE_LENGTH} characters`
+      );
     }
 
-    // Otherwise, replace all expressions in the string
-    return template.replace(expressionRegex, (match) => {
-      // Extract the expression content between ${{ and }}
-      const expr = match.replace(/^\$\{\{\s*|\s*\}\}$/g, '');
-      const result = ExpressionEvaluator.evaluateExpression(expr, context);
-
-      if (result === null || result === undefined) {
-        return '';
-      }
-
-      if (typeof result === 'object' && result !== null) {
-        // Special handling for shell command results to avoid [object Object] or JSON in commands
-        if (
-          'stdout' in result &&
-          'exitCode' in result &&
-          typeof (result as Record<string, unknown>).stdout === 'string'
-        ) {
-          return ((result as Record<string, unknown>).stdout as string).trim();
+    // Optimization: Check for single expression string like "${{ expr }}"
+    // This preserves types (doesn't force string conversion)
+    const trimmed = template.trim();
+    if (trimmed.startsWith('${{') && trimmed.endsWith('}}')) {
+      // Must verify it's correctly balanced and not multiple expressions like "${{ a }} ${{ b }}"
+      let depth = 0;
+      let balanced = true;
+      // Scan content between outer ${{ }}
+      for (let i = 3; i < trimmed.length - 2; i++) {
+        if (trimmed.substring(i, i + 2) === '}}' && depth === 0) {
+          // We found a closing tag before the end -> it's not a single expression
+          balanced = false;
+          break;
         }
-        return JSON.stringify(result, null, 2);
+        if (trimmed[i] === '{') depth++;
+        else if (trimmed[i] === '}') {
+          if (depth > 0) depth--;
+          else {
+            balanced = false;
+            break;
+          }
+        }
       }
 
-      return String(result);
-    });
+      if (balanced && depth === 0) {
+        const expr = trimmed.substring(3, trimmed.length - 2);
+        return ExpressionEvaluator.evaluateExpression(expr, context);
+      }
+    }
+
+    // Manual replacement loop
+    let resultStr = '';
+    let lastIndex = 0;
+
+    for (const match of ExpressionEvaluator.scanExpressions(template)) {
+      // Add text before match
+      resultStr += template.substring(lastIndex, match.start);
+
+      const evalResult = ExpressionEvaluator.evaluateExpression(match.expr, context);
+
+      if (evalResult === null || evalResult === undefined) {
+        // Empty string
+      } else if (typeof evalResult === 'object' && evalResult !== null) {
+        // Special handling for shell command results
+        if (
+          'stdout' in evalResult &&
+          'exitCode' in evalResult &&
+          typeof (evalResult as Record<string, unknown>).stdout === 'string'
+        ) {
+          resultStr += ((evalResult as Record<string, unknown>).stdout as string).trim();
+        } else {
+          resultStr += JSON.stringify(evalResult, null, 2);
+        }
+      } else {
+        resultStr += String(evalResult);
+      }
+
+      lastIndex = match.end;
+    }
+
+    // Add remaining text
+    resultStr += template.substring(lastIndex);
+
+    return resultStr;
   }
 
   /**
@@ -541,8 +620,8 @@ export class ExpressionEvaluator {
    * Check if a string contains any expressions
    */
   static hasExpression(str: string): boolean {
-    // Use non-global regex to avoid lastIndex state issues
-    return ExpressionEvaluator.HAS_EXPRESSION_REGEX.test(str);
+    const generator = ExpressionEvaluator.scanExpressions(str);
+    return !generator.next().done;
   }
 
   /**
@@ -573,13 +652,10 @@ export class ExpressionEvaluator {
    */
   static findStepDependencies(template: string): string[] {
     const dependencies = new Set<string>();
-    const expressionRegex = new RegExp(ExpressionEvaluator.EXPRESSION_REGEX.source, 'g');
-    const matches = template.matchAll(expressionRegex);
 
-    for (const match of matches) {
-      const expr = match[0].replace(/^\$\{\{\s*|\s*\}\}$/g, '');
+    for (const match of ExpressionEvaluator.scanExpressions(template)) {
       try {
-        const ast = jsep(expr);
+        const ast = jsep(match.expr);
         ExpressionEvaluator.collectStepIds(ast, dependencies);
       } catch {
         // Ignore parse errors, they'll be handled at runtime

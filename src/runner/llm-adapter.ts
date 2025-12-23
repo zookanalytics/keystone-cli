@@ -1,6 +1,7 @@
 import { pipeline } from '@xenova/transformers';
 import { AuthManager, COPILOT_HEADERS } from '../utils/auth-manager';
 import { ConfigLoader } from '../utils/config-loader';
+import { processOpenAIStream } from './stream-utils';
 
 // Maximum response size to prevent memory exhaustion (1MB)
 const MAX_RESPONSE_SIZE = 1024 * 1024;
@@ -96,67 +97,20 @@ export class OpenAIAdapter implements LLMAdapter {
 
     if (isStreaming) {
       if (!response.body) throw new Error('Response body is null');
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let fullContent = '';
-      const toolCalls: LLMToolCall[] = [];
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n').filter((line) => line.trim() !== '');
-
-        for (const line of lines) {
-          if (line.includes('[DONE]')) continue;
-          if (!line.startsWith('data: ')) continue;
-
-          try {
-            const data = JSON.parse(line.slice(6));
-            const delta = data.choices[0].delta;
-
-            if (delta.content) {
-              if (fullContent.length + delta.content.length > MAX_RESPONSE_SIZE) {
-                throw new Error(`LLM response exceeds maximum size of ${MAX_RESPONSE_SIZE} bytes`);
-              }
-              fullContent += delta.content;
-              options.onStream?.(delta.content);
-            }
-
-            if (delta.tool_calls) {
-              for (const tc of delta.tool_calls) {
-                if (!toolCalls[tc.index]) {
-                  toolCalls[tc.index] = {
-                    id: tc.id,
-                    type: 'function',
-                    function: { name: '', arguments: '' },
-                  };
-                }
-                const existing = toolCalls[tc.index];
-                if (tc.function?.name) existing.function.name += tc.function.name;
-                if (tc.function?.arguments) existing.function.arguments += tc.function.arguments;
-              }
-            }
-          } catch (e) {
-            // Ignore parse errors for incomplete chunks
-          }
-        }
-      }
-
-      return {
-        message: {
-          role: 'assistant',
-          content: fullContent || null,
-          tool_calls: toolCalls.length > 0 ? toolCalls.filter(Boolean) : undefined,
-        },
-      };
+      return processOpenAIStream(response, options, 'OpenAI');
     }
 
     const data = (await response.json()) as {
       choices: { message: LLMMessage }[];
       usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
     };
+
+    // Validate response size to prevent memory exhaustion
+    const contentLength = data.choices[0]?.message?.content?.length ?? 0;
+    if (contentLength > MAX_RESPONSE_SIZE) {
+      throw new Error(`LLM response exceeds maximum size of ${MAX_RESPONSE_SIZE} bytes`);
+    }
+
     return {
       message: data.choices[0].message,
       usage: data.usage,
@@ -376,7 +330,15 @@ export class AnthropicAdapter implements LLMAdapter {
               }
             }
           } catch (e) {
-            // Ignore parse errors
+            // Log non-SyntaxError exceptions at warning level (they indicate real issues)
+            if (!(e instanceof SyntaxError)) {
+              console.warn(`[Anthropic Stream] Error processing chunk: ${e}`);
+            } else if (process.env.DEBUG || process.env.LLM_DEBUG) {
+              // SyntaxErrors are normal for incomplete chunks - only log in debug mode
+              process.stderr.write(
+                `[Anthropic Stream] Incomplete chunk parse: ${line.slice(0, 50)}...\n`
+              );
+            }
           }
         }
       }
@@ -411,6 +373,12 @@ export class AnthropicAdapter implements LLMAdapter {
     };
 
     const content = data.content.find((c) => c.type === 'text')?.text || null;
+
+    // Validate response size to prevent memory exhaustion
+    if (content && content.length > MAX_RESPONSE_SIZE) {
+      throw new Error(`LLM response exceeds maximum size of ${MAX_RESPONSE_SIZE} bytes`);
+    }
+
     const toolCalls = data.content
       .filter((c) => c.type === 'tool_use')
       .map((c) => ({
@@ -483,68 +451,20 @@ export class CopilotAdapter implements LLMAdapter {
     if (isStreaming) {
       // Use the same streaming logic as OpenAIAdapter since Copilot uses OpenAI API
       if (!response.body) throw new Error('Response body is null');
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let fullContent = '';
-      const toolCalls: LLMToolCall[] = [];
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n').filter((line) => line.trim() !== '');
-
-        for (const line of lines) {
-          if (line.includes('[DONE]')) continue;
-          if (!line.startsWith('data: ')) continue;
-
-          try {
-            const data = JSON.parse(line.slice(6));
-            if (!data.choices?.[0]?.delta) continue;
-            const delta = data.choices[0].delta;
-
-            if (delta.content) {
-              if (fullContent.length + delta.content.length > MAX_RESPONSE_SIZE) {
-                throw new Error(`LLM response exceeds maximum size of ${MAX_RESPONSE_SIZE} bytes`);
-              }
-              fullContent += delta.content;
-              options.onStream?.(delta.content);
-            }
-
-            if (delta.tool_calls) {
-              for (const tc of delta.tool_calls) {
-                if (!toolCalls[tc.index]) {
-                  toolCalls[tc.index] = {
-                    id: tc.id,
-                    type: 'function',
-                    function: { name: '', arguments: '' },
-                  };
-                }
-                const existing = toolCalls[tc.index];
-                if (tc.function?.name) existing.function.name += tc.function.name;
-                if (tc.function?.arguments) existing.function.arguments += tc.function.arguments;
-              }
-            }
-          } catch (e) {
-            // Ignore parse errors
-          }
-        }
-      }
-
-      return {
-        message: {
-          role: 'assistant',
-          content: fullContent || null,
-          tool_calls: toolCalls.length > 0 ? toolCalls.filter(Boolean) : undefined,
-        },
-      };
+      return processOpenAIStream(response, options, 'Copilot');
     }
 
     const data = (await response.json()) as {
       choices: { message: LLMMessage }[];
       usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
     };
+
+    // Validate response size to prevent memory exhaustion
+    const contentLength = data.choices[0]?.message?.content?.length ?? 0;
+    if (contentLength > MAX_RESPONSE_SIZE) {
+      throw new Error(`LLM response exceeds maximum size of ${MAX_RESPONSE_SIZE} bytes`);
+    }
+
     return {
       message: data.choices[0].message,
       usage: data.usage,
@@ -557,7 +477,11 @@ export class LocalEmbeddingAdapter implements LLMAdapter {
   private static extractor: any = null;
 
   async chat(): Promise<LLMResponse> {
-    throw new Error('LocalEmbeddingAdapter only supports embeddings');
+    throw new Error(
+      'Local models in Keystone currently only support memory/embedding operations. ' +
+        'To use a local LLM for chat/generation, please use an OpenAI-compatible local server ' +
+        '(like Ollama, LM Studio, or LocalAI) and configure it as an OpenAI provider in your config.'
+    );
   }
 
   async embed(text: string, model = 'Xenova/all-MiniLM-L6-v2'): Promise<number[]> {

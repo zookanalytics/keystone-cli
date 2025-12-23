@@ -3,6 +3,7 @@ import type { Readable, Writable } from 'node:stream';
 import pkg from '../../package.json' with { type: 'json' };
 import { WorkflowDb } from '../db/workflow-db';
 import { WorkflowParser } from '../parser/workflow-parser';
+import { ConsoleLogger, type Logger } from '../utils/logger';
 import { generateMermaidGraph } from '../utils/mermaid';
 import { WorkflowRegistry } from '../utils/workflow-registry';
 import { WorkflowSuspendedError } from './step-executor';
@@ -19,11 +20,18 @@ export class MCPServer {
   private db: WorkflowDb;
   private input: Readable;
   private output: Writable;
+  private logger: Logger;
 
-  constructor(db?: WorkflowDb, input: Readable = process.stdin, output: Writable = process.stdout) {
+  constructor(
+    db?: WorkflowDb,
+    input: Readable = process.stdin,
+    output: Writable = process.stdout,
+    logger: Logger = new ConsoleLogger()
+  ) {
     this.db = db || new WorkflowDb();
     this.input = input;
     this.output = output;
+    this.logger = logger;
   }
 
   async start() {
@@ -43,7 +51,7 @@ export class MCPServer {
             this.output.write(`${JSON.stringify(response)}\n`);
           }
         } catch (error) {
-          console.error('Error handling MCP message:', error);
+          this.logger.error(`Error handling MCP message: ${error}`);
         }
       });
 
@@ -54,7 +62,7 @@ export class MCPServer {
 
       // Handle stream errors
       this.input.on('error', (err: Error) => {
-        console.error('stdin error:', err);
+        this.logger.error(`stdin error: ${err}`);
       });
     });
   }
@@ -223,6 +231,8 @@ export class MCPServer {
               log: (msg: string) => logs.push(msg),
               error: (msg: string) => logs.push(`ERROR: ${msg}`),
               warn: (msg: string) => logs.push(`WARN: ${msg}`),
+              info: (msg: string) => logs.push(`INFO: ${msg}`),
+              debug: (msg: string) => logs.push(`DEBUG: ${msg}`),
             };
 
             const runner = new WorkflowRunner(workflow, {
@@ -307,13 +317,13 @@ export class MCPServer {
           // --- Tool: get_run_logs ---
           if (toolParams.name === 'get_run_logs') {
             const { run_id } = toolParams.arguments as { run_id: string };
-            const run = this.db.getRun(run_id);
+            const run = await this.db.getRun(run_id);
 
             if (!run) {
               throw new Error(`Run ID ${run_id} not found`);
             }
 
-            const steps = this.db.getStepsByRun(run_id);
+            const steps = await this.db.getStepsByRun(run_id);
             const summary = {
               workflow: run.workflow_name,
               status: run.status,
@@ -360,7 +370,7 @@ export class MCPServer {
           // --- Tool: answer_human_input ---
           if (toolParams.name === 'answer_human_input') {
             const { run_id, input } = toolParams.arguments as { run_id: string; input: string };
-            const run = this.db.getRun(run_id);
+            const run = await this.db.getRun(run_id);
             if (!run) {
               throw new Error(`Run ID ${run_id} not found`);
             }
@@ -370,7 +380,7 @@ export class MCPServer {
             }
 
             // Find the pending or suspended step
-            const steps = this.db.getStepsByRun(run_id);
+            const steps = await this.db.getStepsByRun(run_id);
             const pendingStep = steps.find(
               (s) => s.status === 'pending' || s.status === 'suspended'
             );
@@ -403,6 +413,8 @@ export class MCPServer {
               log: (msg: string) => logs.push(msg),
               error: (msg: string) => logs.push(`ERROR: ${msg}`),
               warn: (msg: string) => logs.push(`WARN: ${msg}`),
+              info: (msg: string) => logs.push(`INFO: ${msg}`),
+              debug: (msg: string) => logs.push(`DEBUG: ${msg}`),
             };
 
             const runner = new WorkflowRunner(workflow, {
@@ -497,6 +509,8 @@ export class MCPServer {
               log: () => {},
               error: () => {},
               warn: () => {},
+              info: () => {},
+              debug: () => {},
             };
 
             const runner = new WorkflowRunner(workflow, {
@@ -507,18 +521,18 @@ export class MCPServer {
 
             const runId = runner.getRunId();
 
-            // Start the workflow asynchronously - don't await
+            // Start the workflow asynchronously
             runner.run().then(
-              (outputs) => {
-                // Update DB with success on completion (RunStatus uses 'completed')
-                this.db.updateRunStatus(runId, 'completed', outputs);
+              async (outputs) => {
+                // Update DB with success on completion
+                await this.db.updateRunStatus(runId, 'success', outputs);
               },
-              (error) => {
+              async (error) => {
                 // Update DB with failure
                 if (error instanceof WorkflowSuspendedError) {
-                  this.db.updateRunStatus(runId, 'paused');
+                  await this.db.updateRunStatus(runId, 'paused');
                 } else {
-                  this.db.updateRunStatus(
+                  await this.db.updateRunStatus(
                     runId,
                     'failed',
                     undefined,
@@ -554,7 +568,7 @@ export class MCPServer {
           // --- Tool: get_run_status ---
           if (toolParams.name === 'get_run_status') {
             const { run_id } = toolParams.arguments as { run_id: string };
-            const run = this.db.getRun(run_id);
+            const run = await this.db.getRun(run_id);
 
             if (!run) {
               throw new Error(`Run ID ${run_id} not found`);
@@ -567,7 +581,7 @@ export class MCPServer {
             };
 
             // Include outputs if completed successfully
-            if (run.status === 'completed' && run.outputs) {
+            if (run.status === 'success' && run.outputs) {
               response.outputs = JSON.parse(run.outputs);
             }
 
