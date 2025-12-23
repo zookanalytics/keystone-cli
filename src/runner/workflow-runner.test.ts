@@ -115,6 +115,8 @@ describe('WorkflowRunner', () => {
       },
       error: (msg: string) => console.error(msg),
       warn: (msg: string) => console.warn(msg),
+      info: (msg: string) => {},
+      debug: (msg: string) => {},
     };
 
     const finallyWorkflow: Workflow = {
@@ -484,6 +486,61 @@ describe('WorkflowRunner', () => {
     const finalRun = await finalDb.getRun(runId);
     expect(finalRun?.status).toBe('success');
     finalDb.close();
+
+    if (existsSync(resumeDbPath)) rmSync(resumeDbPath);
+  });
+
+  it('should resume a workflow marked as running (crashed process)', async () => {
+    const resumeDbPath = 'test-running-resume.db';
+    if (existsSync(resumeDbPath)) rmSync(resumeDbPath);
+
+    const workflow: Workflow = {
+      name: 'running-wf',
+      steps: [
+        { id: 's1', type: 'shell', run: 'echo "one"', needs: [] },
+        { id: 's2', type: 'shell', run: 'echo "two"', needs: ['s1'] },
+      ],
+      outputs: {
+        out: '${{ steps.s1.output.stdout.trim() }}-${{ steps.s2.output.stdout.trim() }}',
+      },
+    } as unknown as Workflow;
+
+    // Manually create a "running" state in the DB
+    const db = new WorkflowDb(resumeDbPath);
+    const runId = crypto.randomUUID();
+    await db.createRun(runId, workflow.name, {});
+    await db.updateRunStatus(runId, 'running');
+
+    // Create a completed step 1
+    const step1Id = crypto.randomUUID();
+    await db.createStep(step1Id, runId, 's1');
+    await db.completeStep(step1Id, 'success', { stdout: 'one\n', stderr: '', exitCode: 0 });
+    db.close();
+
+    // Verify warnings
+    let warningLogged = false;
+    const logger = {
+      log: () => {},
+      error: () => {},
+      warn: (msg: string) => {
+        if (msg.includes("Resuming a run marked as 'running'")) {
+          warningLogged = true;
+        }
+      },
+      info: () => {},
+      debug: () => {},
+    };
+
+    const runner = new WorkflowRunner(workflow, {
+      dbPath: resumeDbPath,
+      resumeRunId: runId,
+      // @ts-ignore
+      logger: logger,
+    });
+
+    const outputs = await runner.run();
+    expect(outputs.out).toBe('one-two');
+    expect(warningLogged).toBe(true);
 
     if (existsSync(resumeDbPath)) rmSync(resumeDbPath);
   });

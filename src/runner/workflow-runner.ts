@@ -161,10 +161,20 @@ export class WorkflowRunner {
       throw new Error(`Run ${this.runId} not found`);
     }
 
-    // Only allow resuming failed or paused runs
-    if (run.status !== WorkflowStatus.FAILED && run.status !== WorkflowStatus.PAUSED) {
+    // Only allow resuming failed, paused, or running (crash recovery) runs
+    if (
+      run.status !== WorkflowStatus.FAILED &&
+      run.status !== WorkflowStatus.PAUSED &&
+      run.status !== WorkflowStatus.RUNNING
+    ) {
       throw new Error(
-        `Cannot resume run with status '${run.status}'. Only 'failed' or 'paused' runs can be resumed.`
+        `Cannot resume run with status '${run.status}'. Only 'failed', 'paused', or 'running' runs can be resumed.`
+      );
+    }
+
+    if (run.status === WorkflowStatus.RUNNING) {
+      this.logger.warn(
+        `⚠️  Resuming a run marked as 'running'. This usually means the previous process crashed or was killed forcefully. Ensure no other instances are running.`
       );
     }
 

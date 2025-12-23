@@ -342,6 +342,21 @@ export class WorkflowDb {
     });
   }
 
+  /**
+   * Get the most recent run for a specific workflow
+   */
+  async getLastRun(workflowName: string): Promise<WorkflowRun | null> {
+    return this.withRetry(() => {
+      const stmt = this.db.prepare(`
+        SELECT * FROM workflow_runs
+        WHERE workflow_name = ?
+        ORDER BY started_at DESC
+        LIMIT 1
+      `);
+      return stmt.get(workflowName) as WorkflowRun | null;
+    });
+  }
+
   close(): void {
     this.db.close();
   }

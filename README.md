@@ -487,9 +487,9 @@ In these examples, the agent will have access to all tools provided by the MCP s
 | Command | Description |
 | :--- | :--- |
 | `init` | Initialize a new Keystone project |
-| `run <workflow>` | Execute a workflow (use `-i key=val` for inputs, `--dry-run` to test, `--debug` for REPL) |
+| `run <workflow>` | Execute a workflow (use `-i key=val`, `--resume` to auto-resume, `--dry-run`, `--debug`) |
 | `optimize <workflow>` | Optimize a specific step in a workflow (requires --target) |
-| `resume <run_id>` | Resume a failed or paused workflow |
+| `resume <run_id>` | Resume a failed/paused/crashed workflow by ID |
 | `validate [path]` | Check workflow files for errors |
 | `workflows` | List available workflows |
 | `history` | Show recent workflow runs |

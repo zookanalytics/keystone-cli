@@ -228,7 +228,8 @@ program
   .option('-i, --input <key=value...>', 'Input values')
   .option('--dry-run', 'Show what would be executed without actually running it')
   .option('--debug', 'Enable interactive debug mode on failure')
-  .action(async (workflowPath, options) => {
+  .option('--resume', 'Resume the last run of this workflow if it failed or was paused')
+  .action(async (workflowPathArg, options) => {
     // Parse inputs
     const inputs: Record<string, unknown> = {};
     if (options.input) {
@@ -249,17 +250,47 @@ program
 
     // Load and validate workflow
     try {
-      const resolvedPath = WorkflowRegistry.resolvePath(workflowPath);
+      const resolvedPath = WorkflowRegistry.resolvePath(workflowPathArg);
       const workflow = WorkflowParser.loadWorkflow(resolvedPath);
 
       // Import WorkflowRunner dynamically
       const { WorkflowRunner } = await import('./runner/workflow-runner.ts');
       const logger = new ConsoleLogger();
+
+      let resumeRunId: string | undefined;
+
+      // Handle auto-resume
+      if (options.resume) {
+        const db = new WorkflowDb();
+        const lastRun = await db.getLastRun(workflow.name);
+        db.close();
+
+        if (lastRun) {
+          if (
+            lastRun.status === 'failed' ||
+            lastRun.status === 'paused' ||
+            lastRun.status === 'running'
+          ) {
+            resumeRunId = lastRun.id;
+            console.log(
+              `Resuming run ${lastRun.id} (status: ${lastRun.status}) from ${new Date(
+                lastRun.started_at
+              ).toLocaleString()}`
+            );
+          } else {
+            console.log(`Last run ${lastRun.id} completed successfully. Starting new run.`);
+          }
+        } else {
+          console.log('No previous run found. Starting new run.');
+        }
+      }
+
       const runner = new WorkflowRunner(workflow, {
         inputs,
         workflowDir: dirname(resolvedPath),
         dryRun: !!options.dryRun,
         debug: !!options.debug,
+        resumeRunId,
         logger,
       });
 
