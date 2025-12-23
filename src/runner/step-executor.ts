@@ -51,16 +51,36 @@ export interface StepResult {
 /**
  * Execute a single step based on its type
  */
+export interface StepExecutorOptions {
+  executeWorkflowFn?: (step: WorkflowStep, context: ExpressionContext) => Promise<StepResult>;
+  mcpManager?: MCPManager;
+  memoryDb?: MemoryDb;
+  workflowDir?: string;
+  dryRun?: boolean;
+  // Dependency injection for testing
+  getAdapter?: typeof getAdapter;
+  sandbox?: typeof SafeSandbox;
+}
+
+/**
+ * Execute a single step based on its type
+ */
 export async function executeStep(
   step: Step,
   context: ExpressionContext,
   logger: Logger = new ConsoleLogger(),
-  executeWorkflowFn?: (step: WorkflowStep, context: ExpressionContext) => Promise<StepResult>,
-  mcpManager?: MCPManager,
-  memoryDb?: MemoryDb,
-  workflowDir?: string,
-  dryRun?: boolean
+  options: StepExecutorOptions = {}
 ): Promise<StepResult> {
+  const {
+    executeWorkflowFn,
+    mcpManager,
+    memoryDb,
+    workflowDir,
+    dryRun,
+    getAdapter: injectedGetAdapter,
+    sandbox: injectedSandbox,
+  } = options;
+
   try {
     let result: StepResult;
     switch (step.type) {
@@ -83,15 +103,14 @@ export async function executeStep(
         result = await executeLlmStep(
           step,
           context,
-          (s, c) =>
-            executeStep(s, c, logger, executeWorkflowFn, mcpManager, memoryDb, workflowDir, dryRun),
+          (s, c) => executeStep(s, c, logger, options),
           logger,
           mcpManager,
           workflowDir
         );
         break;
       case 'memory':
-        result = await executeMemoryStep(step, context, logger, memoryDb);
+        result = await executeMemoryStep(step, context, logger, memoryDb, injectedGetAdapter);
         break;
       case 'workflow':
         if (!executeWorkflowFn) {
@@ -100,7 +119,7 @@ export async function executeStep(
         result = await executeWorkflowFn(step, context);
         break;
       case 'script':
-        result = await executeScriptStep(step, context, logger);
+        result = await executeScriptStep(step, context, logger, injectedSandbox);
         break;
       default:
         throw new Error(`Unknown step type: ${(step as Step).type}`);
@@ -383,7 +402,7 @@ async function executeRequestStep(
     output: {
       status: response.status,
       statusText: response.statusText,
-      headers: Object.fromEntries(response.headers.entries()),
+      headers: Object.fromEntries(response.headers as unknown as Iterable<[string, string]>),
       data: responseData,
     },
     status: response.ok ? 'success' : 'failed',
@@ -503,7 +522,8 @@ async function executeSleepStep(
 async function executeScriptStep(
   step: ScriptStep,
   context: ExpressionContext,
-  _logger: Logger
+  _logger: Logger,
+  sandbox = SafeSandbox
 ): Promise<StepResult> {
   try {
     if (!step.allowInsecure) {
@@ -513,7 +533,7 @@ async function executeScriptStep(
       );
     }
 
-    const result = await SafeSandbox.execute(
+    const result = await sandbox.execute(
       step.run,
       {
         inputs: context.inputs,
@@ -546,14 +566,15 @@ async function executeMemoryStep(
   step: MemoryStep,
   context: ExpressionContext,
   logger: Logger,
-  memoryDb?: MemoryDb
+  memoryDb?: MemoryDb,
+  getAdapterFn = getAdapter
 ): Promise<StepResult> {
   if (!memoryDb) {
     throw new Error('Memory database not initialized');
   }
 
   try {
-    const { adapter, resolvedModel } = getAdapter(step.model || 'local');
+    const { adapter, resolvedModel } = getAdapterFn(step.model || 'local');
     if (!adapter.embed) {
       throw new Error(`Provider for model ${step.model || 'local'} does not support embeddings`);
     }

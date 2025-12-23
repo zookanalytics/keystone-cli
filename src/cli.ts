@@ -531,7 +531,9 @@ async function showRunLogs(run: WorkflowRun, db: WorkflowDb, verbose: boolean) {
     if (verbose && step.output) {
       try {
         const output = JSON.parse(step.output);
-        console.log(`           Output: ${JSON.stringify(output, null, 2).replace(/\n/g, '\n           ')}`);
+        console.log(
+          `           Output: ${JSON.stringify(output, null, 2).replace(/\n/g, '\n           ')}`
+        );
       } catch {
         console.log(`           Output: ${step.output}`);
       }

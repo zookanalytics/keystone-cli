@@ -630,16 +630,13 @@ export class WorkflowRunner {
     }
 
     const operation = async () => {
-      const result = await executeStep(
-        stepToExecute,
-        context,
-        this.logger,
-        this.executeSubWorkflow.bind(this),
-        this.mcpManager,
-        this.memoryDb,
-        this.options.workflowDir,
-        this.options.dryRun
-      );
+      const result = await executeStep(stepToExecute, context, this.logger, {
+        executeWorkflowFn: this.executeSubWorkflow.bind(this),
+        mcpManager: this.mcpManager,
+        memoryDb: this.memoryDb,
+        workflowDir: this.options.workflowDir,
+        dryRun: this.options.dryRun,
+      });
       if (result.status === 'failed') {
         throw new Error(result.error || 'Step failed');
       }
@@ -868,16 +865,13 @@ Do not change the 'id' or 'type' or 'auto_heal' fields.
 
     // Execute the agent step
     // We use a fresh context but share secrets/env
-    const result = await executeStep(
-      agentStep,
-      context,
-      this.logger,
-      this.executeSubWorkflow.bind(this),
-      this.mcpManager,
-      this.memoryDb,
-      this.options.workflowDir,
-      this.options.dryRun
-    );
+    const result = await executeStep(agentStep, context, this.logger, {
+      executeWorkflowFn: this.executeSubWorkflow.bind(this),
+      mcpManager: this.mcpManager,
+      memoryDb: this.memoryDb,
+      workflowDir: this.options.workflowDir,
+      dryRun: this.options.dryRun,
+    });
 
     if (result.status !== 'success' || !result.output) {
       throw new Error(`Healer agent failed: ${result.error || 'No output'}`);

@@ -1,4 +1,6 @@
 import { Database } from 'bun:sqlite';
+import { existsSync, mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 import './sqlite-setup.ts';
 import {
   StepStatus as StepStatusConst,
@@ -40,6 +42,10 @@ export class WorkflowDb {
   private db: Database;
 
   constructor(public readonly dbPath = '.keystone/state.db') {
+    const dir = dirname(dbPath);
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
     this.db = new Database(dbPath, { create: true });
     this.db.exec('PRAGMA journal_mode = WAL;'); // Write-ahead logging
     this.db.exec('PRAGMA foreign_keys = ON;'); // Enable foreign key enforcement

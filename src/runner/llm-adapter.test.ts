@@ -105,7 +105,9 @@ describe('AnthropicAdapter', () => {
     // @ts-ignore
     const fetchMock = global.fetch as MockFetch;
     // @ts-ignore
-    const [url, init] = fetchMock.mock.calls[0];
+    // @ts-ignore
+    // biome-ignore lint/suspicious/noExplicitAny: mock fetch init
+    const [url, init] = fetchMock.mock.calls[0] as [string, any];
 
     expect(url).toBe('https://api.anthropic.com/v1/messages');
     expect(init.headers['x-api-key']).toBe('fake-anthropic-key');
@@ -179,7 +181,8 @@ describe('AnthropicAdapter', () => {
     ]);
 
     // @ts-ignore
-    const init = global.fetch.mock.calls[0][1];
+    // biome-ignore lint/suspicious/noExplicitAny: mock fetch init
+    const init = global.fetch.mock.calls[0][1] as any;
     const body = JSON.parse(init.body);
     expect(body.messages[0].role).toBe('assistant');
     expect(body.messages[0].content).toHaveLength(2);
@@ -208,7 +211,8 @@ describe('AnthropicAdapter', () => {
     ]);
 
     // @ts-ignore
-    const init = global.fetch.mock.calls[0][1];
+    // biome-ignore lint/suspicious/noExplicitAny: mock fetch init
+    const init = global.fetch.mock.calls[0][1] as any;
     const body = JSON.parse(init.body);
     expect(body.messages[0].role).toBe('user');
     expect(body.messages[0].content[0]).toEqual({
@@ -255,7 +259,9 @@ describe('CopilotAdapter', () => {
     // @ts-ignore
     const fetchMock = global.fetch as MockFetch;
     // @ts-ignore
-    const [url, init] = fetchMock.mock.calls[0];
+    // @ts-ignore
+    // biome-ignore lint/suspicious/noExplicitAny: mock fetch init
+    const [url, init] = fetchMock.mock.calls[0] as [string, any];
     expect(url).toBe('https://api.githubcopilot.com/chat/completions');
     expect(init.headers.Authorization).toBe('Bearer mock-token');
     spy.mockRestore();

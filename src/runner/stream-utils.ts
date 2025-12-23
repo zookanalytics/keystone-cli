@@ -67,7 +67,7 @@ export async function processOpenAIStream(
               const toolCall = tc as ToolCallDelta;
               if (!toolCalls[toolCall.index]) {
                 toolCalls[toolCall.index] = {
-                  id: toolCall.id,
+                  id: toolCall.id || '',
                   type: 'function',
                   function: { name: '', arguments: '' },
                 };
@@ -93,7 +93,7 @@ export async function processOpenAIStream(
           const activeLogger = options?.logger || new ConsoleLogger();
 
           // Rethrow size limit errors so they bubble up
-          if (String(e).toLowerCase().includes('exceed maximum size')) {
+          if (e instanceof Error && e.message.toLowerCase().includes('maximum size')) {
             throw e;
           }
 
@@ -137,7 +137,7 @@ export async function processOpenAIStream(
               const toolCall = tc as ToolCallDelta;
               if (!toolCalls[toolCall.index]) {
                 toolCalls[toolCall.index] = {
-                  id: toolCall.id,
+                  id: toolCall.id || '',
                   type: 'function',
                   function: { name: '', arguments: '' },
                 };
@@ -161,7 +161,7 @@ export async function processOpenAIStream(
           }
         }
       } catch (e) {
-        if (String(e).toLowerCase().includes('exceed maximum size')) {
+        if (e instanceof Error && e.message.toLowerCase().includes('maximum size')) {
           throw e;
         }
         const activeLogger = options?.logger || new ConsoleLogger();

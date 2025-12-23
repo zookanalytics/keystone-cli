@@ -13,6 +13,7 @@ import * as dns from 'node:dns/promises';
 import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { MemoryDb } from '../db/memory-db';
 import type { ExpressionContext } from '../expression/evaluator';
 import type {
   FileStep,
@@ -22,6 +23,8 @@ import type {
   SleepStep,
   WorkflowStep,
 } from '../parser/schema';
+import type { SafeSandbox } from '../utils/sandbox';
+import type { getAdapter } from './llm-adapter';
 import { executeStep } from './step-executor';
 
 // Mock executeLlmStep
@@ -226,6 +229,196 @@ describe('step-executor', () => {
           // Ignore cleanup errors
         }
       }
+    });
+
+    it('should block path traversal outside cwd by default', async () => {
+      const outsidePath = join(process.cwd(), '..', 'outside.txt');
+      const step: FileStep = {
+        id: 'f1',
+        type: 'file',
+        needs: [],
+        op: 'read',
+        path: outsidePath,
+      };
+
+      const result = await executeStep(step, context);
+      expect(result.status).toBe('failed');
+      expect(result.error).toContain('Access denied');
+    });
+
+    it('should block path traversal with .. inside path resolving outside', async () => {
+      const outsidePath = 'foo/../../passwd';
+      const step: FileStep = {
+        id: 'f1',
+        type: 'file',
+        needs: [],
+        op: 'read',
+        path: outsidePath,
+      };
+
+      const result = await executeStep(step, context);
+      expect(result.status).toBe('failed');
+      expect(result.error).toContain('Access denied');
+    });
+  });
+
+  describe('script', () => {
+    const mockSandbox = {
+      execute: mock((code) => {
+        if (code === 'fail') throw new Error('Script failed');
+        return Promise.resolve('script-result');
+      }),
+    };
+
+    it('should fail if allowInsecure is not set', async () => {
+      // @ts-ignore
+      const step = {
+        id: 's1',
+        type: 'script',
+        run: 'console.log("hello")',
+      };
+      const result = await executeStep(step, context, undefined, {
+        sandbox: mockSandbox as unknown as typeof SafeSandbox,
+      });
+      expect(result.status).toBe('failed');
+      expect(result.error).toContain('Script execution is disabled by default');
+    });
+
+    it('should execute script if allowInsecure is true', async () => {
+      // @ts-ignore
+      const step = {
+        id: 's1',
+        type: 'script',
+        run: 'console.log("hello")',
+        allowInsecure: true,
+      };
+      const result = await executeStep(step, context, undefined, {
+        sandbox: mockSandbox as unknown as typeof SafeSandbox,
+      });
+      expect(result.status).toBe('success');
+      expect(result.output).toBe('script-result');
+    });
+
+    it('should handle script failure', async () => {
+      // @ts-ignore
+      const step = {
+        id: 's1',
+        type: 'script',
+        run: 'fail',
+        allowInsecure: true,
+      };
+      const result = await executeStep(step, context, undefined, {
+        sandbox: mockSandbox as unknown as typeof SafeSandbox,
+      });
+      expect(result.status).toBe('failed');
+      expect(result.error).toBe('Script failed');
+    });
+  });
+
+  describe('memory', () => {
+    const mockMemoryDb = {
+      store: mock(() => Promise.resolve('mem-id')),
+      search: mock(() => Promise.resolve([{ content: 'found', similarity: 0.9 }])),
+    };
+
+    const mockGetAdapter = mock((model) => {
+      if (model === 'no-embed') return { adapter: {}, resolvedModel: model };
+      return {
+        adapter: {
+          embed: mock((text) => Promise.resolve([0.1, 0.2, 0.3])),
+        },
+        resolvedModel: model,
+      };
+    });
+
+    it('should fail if memoryDb is not provided', async () => {
+      // @ts-ignore
+      const step = { id: 'm1', type: 'memory', op: 'store', text: 'foo' };
+      const result = await executeStep(step, context, undefined, {
+        getAdapter: mockGetAdapter as unknown as typeof getAdapter,
+      });
+      expect(result.status).toBe('failed');
+      expect(result.error).toBe('Memory database not initialized');
+    });
+
+    it('should fail if adapter does not support embedding', async () => {
+      // @ts-ignore
+      const step = { id: 'm1', type: 'memory', op: 'store', text: 'foo', model: 'no-embed' };
+      // @ts-ignore
+      const result = await executeStep(step, context, undefined, {
+        memoryDb: mockMemoryDb as unknown as MemoryDb,
+        getAdapter: mockGetAdapter as unknown as typeof getAdapter,
+      });
+      expect(result.status).toBe('failed');
+      expect(result.error).toContain('does not support embeddings');
+    });
+
+    it('should store memory', async () => {
+      // @ts-ignore
+      const step = {
+        id: 'm1',
+        type: 'memory',
+        op: 'store',
+        text: 'foo',
+        metadata: { source: 'test' },
+      };
+      // @ts-ignore
+      const result = await executeStep(step, context, undefined, {
+        memoryDb: mockMemoryDb as unknown as MemoryDb,
+        getAdapter: mockGetAdapter as unknown as typeof getAdapter,
+      });
+      expect(result.status).toBe('success');
+      expect(result.output).toEqual({ id: 'mem-id', status: 'stored' });
+      expect(mockMemoryDb.store).toHaveBeenCalledWith('foo', [0.1, 0.2, 0.3], { source: 'test' });
+    });
+
+    it('should search memory', async () => {
+      // @ts-ignore
+      const step = { id: 'm1', type: 'memory', op: 'search', query: 'foo', limit: 5 };
+      // @ts-ignore
+      const result = await executeStep(step, context, undefined, {
+        memoryDb: mockMemoryDb as unknown as MemoryDb,
+        getAdapter: mockGetAdapter as unknown as typeof getAdapter,
+      });
+      expect(result.status).toBe('success');
+      expect(result.output).toEqual([{ content: 'found', similarity: 0.9 }]);
+      expect(mockMemoryDb.search).toHaveBeenCalledWith([0.1, 0.2, 0.3], 5);
+    });
+
+    it('should fail store if text is missing', async () => {
+      // @ts-ignore
+      const step = { id: 'm1', type: 'memory', op: 'store' };
+      // @ts-ignore
+      const result = await executeStep(step, context, undefined, {
+        memoryDb: mockMemoryDb as unknown as MemoryDb,
+        getAdapter: mockGetAdapter as unknown as typeof getAdapter,
+      });
+      expect(result.status).toBe('failed');
+      expect(result.error).toBe('Text is required for memory store operation');
+    });
+
+    it('should fail search if query is missing', async () => {
+      // @ts-ignore
+      const step = { id: 'm1', type: 'memory', op: 'search' };
+      // @ts-ignore
+      const result = await executeStep(step, context, undefined, {
+        memoryDb: mockMemoryDb as unknown as MemoryDb,
+        getAdapter: mockGetAdapter as unknown as typeof getAdapter,
+      });
+      expect(result.status).toBe('failed');
+      expect(result.error).toBe('Query is required for memory search operation');
+    });
+
+    it('should fail for unknown memory operation', async () => {
+      // @ts-ignore
+      const step = { id: 'm1', type: 'memory', op: 'unknown', text: 'foo' };
+      // @ts-ignore
+      const result = await executeStep(step, context, undefined, {
+        memoryDb: mockMemoryDb as unknown as MemoryDb,
+        getAdapter: mockGetAdapter as unknown as typeof getAdapter,
+      });
+      expect(result.status).toBe('failed');
+      expect(result.error).toContain('Unknown memory operation');
     });
   });
 
@@ -517,7 +710,7 @@ describe('step-executor', () => {
       );
 
       // @ts-ignore
-      const result = await executeStep(step, context, undefined, executeWorkflowFn);
+      const result = await executeStep(step, context, undefined, { executeWorkflowFn });
       expect(result.status).toBe('success');
       expect(result.output).toBe('child-output');
       expect(executeWorkflowFn).toHaveBeenCalled();

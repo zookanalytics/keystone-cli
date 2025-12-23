@@ -1,5 +1,7 @@
 import type { Database } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 import * as sqliteVec from 'sqlite-vec';
 import './sqlite-setup.ts';
 
@@ -22,6 +24,10 @@ export class MemoryDb {
       this.db = cached.db;
     } else {
       const { Database } = require('bun:sqlite');
+      const dir = dirname(dbPath);
+      if (!existsSync(dir)) {
+        mkdirSync(dir, { recursive: true });
+      }
       this.db = new Database(dbPath, { create: true });
 
       // Load sqlite-vec extension
