@@ -163,43 +163,9 @@ async function executeShellStep(
   const isRisky = detectShellInjectionRisk(command);
 
   if (isRisky && !step.allowInsecure) {
-    // Check if we have a resume approval
-    const stepInputs = context.inputs
-      ? (context.inputs as Record<string, unknown>)[step.id]
-      : undefined;
-    if (
-      stepInputs &&
-      typeof stepInputs === 'object' &&
-      '__approved' in stepInputs &&
-      stepInputs.__approved === true
-    ) {
-      // Already approved, proceed
-    } else {
-      const message = `Potentially risky shell command detected: ${command}`;
-
-      if (!process.stdin.isTTY) {
-        return {
-          output: null,
-          status: 'suspended',
-          error: `APPROVAL_REQUIRED: ${message}`,
-        };
-      }
-
-      const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout,
-      });
-
-      try {
-        logger.warn(`\n⚠️  ${message}`);
-        const answer = (await rl.question('Do you want to execute this command? (y/N): ')).trim();
-        if (answer.toLowerCase() !== 'y' && answer.toLowerCase() !== 'yes') {
-          throw new Error('Command execution denied by user');
-        }
-      } finally {
-        rl.close();
-      }
-    }
+    throw new Error(
+      `Security Error: Command contains shell metacharacters that may indicate injection risk.\n   Command: ${command.substring(0, 100)}${command.length > 100 ? '...' : ''}\n   To execute this command, set 'allowInsecure: true' on the step definition.`
+    );
   }
 
   const result = await executeShell(step, context, logger);
@@ -244,10 +210,38 @@ async function executeFileStep(
   // Security: Prevent path traversal
   const cwd = process.cwd();
   const resolvedPath = path.resolve(cwd, rawPath);
-  const relativePath = path.relative(cwd, resolvedPath);
+  const realCwd = fs.realpathSync(cwd);
+  const isWithin = (target: string) => {
+    const relativePath = path.relative(realCwd, target);
+    return !(relativePath.startsWith('..') || path.isAbsolute(relativePath));
+  };
+  const getExistingAncestorRealPath = (start: string) => {
+    let current = start;
+    while (!fs.existsSync(current)) {
+      const parent = path.dirname(current);
+      if (parent === current) {
+        break;
+      }
+      current = parent;
+    }
+    if (!fs.existsSync(current)) {
+      return realCwd;
+    }
+    return fs.realpathSync(current);
+  };
 
-  if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
-    throw new Error(`Access denied: Path '${rawPath}' resolves outside the working directory.`);
+  if (!step.allowOutsideCwd) {
+    if (fs.existsSync(resolvedPath)) {
+      const realTarget = fs.realpathSync(resolvedPath);
+      if (!isWithin(realTarget)) {
+        throw new Error(`Access denied: Path '${rawPath}' resolves outside the working directory.`);
+      }
+    } else {
+      const realParent = getExistingAncestorRealPath(path.dirname(resolvedPath));
+      if (!isWithin(realParent)) {
+        throw new Error(`Access denied: Path '${rawPath}' resolves outside the working directory.`);
+      }
+    }
   }
 
   // Use resolved path for operations
@@ -330,7 +324,7 @@ async function executeRequestStep(
   const url = ExpressionEvaluator.evaluateString(step.url, context);
 
   // Validate URL to prevent SSRF
-  validateRemoteUrl(url);
+  await validateRemoteUrl(url);
 
   // Evaluate headers
   const headers: Record<string, string> = {};
@@ -512,6 +506,13 @@ async function executeScriptStep(
   _logger: Logger
 ): Promise<StepResult> {
   try {
+    if (!step.allowInsecure) {
+      throw new Error(
+        'Script execution is disabled by default because Bun uses an insecure VM sandbox. ' +
+          "Set 'allowInsecure: true' on the script step to run it anyway."
+      );
+    }
+
     const result = await SafeSandbox.execute(
       step.run,
       {

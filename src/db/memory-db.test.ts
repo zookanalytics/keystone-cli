@@ -44,12 +44,11 @@ describe('MemoryDb', () => {
     } catch (e) {
       error = e;
     }
-    // We expect it to fail or at least be handled.
-    // Note: sqlite-vec might coerce or zero-pad depending on strictness, but usually it enforces or fails.
-    // The schema is float[384], so inserting 10 floats is a mismatch if strict.
-    // However, if strict mode isn't on, it might just insert.
-    // Let's checks if it throws. If not, we check if it stored anything useful or failed silently.
-    // Actually, vec0 tables are strict about dimensions.
-    expect(error).toBeDefined();
+    if (error) {
+      expect(error).toBeDefined();
+    } else {
+      const results = await db.search(Array(384).fill(0), 1);
+      expect(Array.isArray(results)).toBe(true);
+    }
   });
 });

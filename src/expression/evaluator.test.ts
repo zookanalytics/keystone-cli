@@ -303,4 +303,23 @@ describe('ExpressionEvaluator', () => {
     const contextWithNull = { ...context, nullVal: null };
     expect(ExpressionEvaluator.evaluate('${{ nullVal }}', contextWithNull)).toBe(null);
   });
+
+  test('should allow plain strings longer than 10k', () => {
+    const longString = 'a'.repeat(11000);
+    expect(ExpressionEvaluator.evaluate(longString, context)).toBe(longString);
+  });
+
+  test('should still enforce 10k limit for strings with expressions', () => {
+    const longStringWithExpr = `${'a'.repeat(10000)}\${{ inputs.name }}`;
+    expect(() => ExpressionEvaluator.evaluate(longStringWithExpr, context)).toThrow(
+      /Template with expressions exceeds maximum length/
+    );
+  });
+
+  test('should enforce 1MB limit for plain strings', () => {
+    const wayTooLongString = 'a'.repeat(1000001);
+    expect(() => ExpressionEvaluator.evaluate(wayTooLongString, context)).toThrow(
+      /Plain string exceeds maximum length/
+    );
+  });
 });

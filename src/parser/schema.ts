@@ -108,6 +108,7 @@ const FileStepSchema = BaseStepSchema.extend({
   path: z.string(),
   content: z.string().optional(),
   op: z.enum(['read', 'write', 'append']),
+  allowOutsideCwd: z.boolean().optional(),
 });
 
 const RequestStepSchema = BaseStepSchema.extend({

@@ -27,21 +27,21 @@ steps:
   - id: write_file
     type: file
     op: write
-    path: /tmp/keystone-test.txt
+    path: ./tmp/keystone-test.txt
     content: "Test file created at ${{ steps.get_date.output }}"
 
   # Test file read
   - id: read_file
     type: file
     op: read
-    path: /tmp/keystone-test.txt
+    path: ./tmp/keystone-test.txt
     needs: [write_file]
 
   # Test shell with dependencies
   - id: count_files
     type: shell
     needs: [write_file]
-    run: ls /tmp/keystone-*.txt | wc -l
+    run: ls ./tmp/keystone-*.txt | wc -l
     transform: parseInt(stdout.trim())
 
   # Test conditional execution
@@ -66,4 +66,4 @@ steps:
 finally:
   - id: cleanup
     type: shell
-    run: rm /tmp/keystone-test.txt
+    run: rm ./tmp/keystone-test.txt

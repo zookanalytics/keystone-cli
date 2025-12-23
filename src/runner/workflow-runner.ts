@@ -1166,6 +1166,11 @@ Please provide the fixed step configuration as JSON.`;
           globalConcurrencyLimit = this.workflow.concurrency;
         }
       }
+      if (!Number.isInteger(globalConcurrencyLimit) || globalConcurrencyLimit <= 0) {
+        throw new Error(
+          `workflow.concurrency must be a positive integer, got: ${globalConcurrencyLimit}`
+        );
+      }
 
       // Execute steps in parallel where possible (respecting dependencies and global concurrency)
       const pendingSteps = new Set(remainingSteps);

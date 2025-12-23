@@ -100,7 +100,7 @@ export class MemoryDb {
 
     return rows.map((row) => ({
       id: row.id,
-      score: row.distance,
+      distance: row.distance,
       text: row.text,
       metadata: JSON.parse(row.metadata),
     }));

@@ -1,5 +1,17 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock } from 'bun:test';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  mock,
+  spyOn,
+} from 'bun:test';
+import * as dns from 'node:dns/promises';
 import { mkdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ExpressionContext } from '../expression/evaluator';
 import type {
@@ -187,6 +199,34 @@ describe('step-executor', () => {
       expect(result.status).toBe('failed');
       expect(result.error).toContain('Unknown file operation');
     });
+
+    it('should allow file paths outside cwd when allowOutsideCwd is true', async () => {
+      const outsidePath = join(tmpdir(), `keystone-test-${Date.now()}.txt`);
+
+      const writeStep: FileStep = {
+        id: 'w-outside',
+        type: 'file',
+        needs: [],
+        op: 'write',
+        path: outsidePath,
+        content: 'outside',
+        allowOutsideCwd: true,
+      };
+
+      try {
+        const writeResult = await executeStep(writeStep, context);
+        expect(writeResult.status).toBe('success');
+
+        const content = await Bun.file(outsidePath).text();
+        expect(content).toBe('outside');
+      } finally {
+        try {
+          rmSync(outsidePath);
+        } catch (e) {
+          // Ignore cleanup errors
+        }
+      }
+    });
   });
 
   describe('sleep', () => {
@@ -207,14 +247,19 @@ describe('step-executor', () => {
 
   describe('request', () => {
     const originalFetch = global.fetch;
+    let lookupSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
       // @ts-ignore
       global.fetch = mock();
+      lookupSpy = spyOn(dns, 'lookup').mockResolvedValue([
+        { address: '93.184.216.34', family: 4 },
+      ] as unknown as Awaited<ReturnType<typeof dns.lookup>>);
     });
 
     afterEach(() => {
       global.fetch = originalFetch;
+      lookupSpy.mockRestore();
     });
 
     it('should perform an HTTP request', async () => {

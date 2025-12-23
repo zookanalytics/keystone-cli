@@ -9,10 +9,22 @@ export async function promptSecret(promptText: string): Promise<string> {
   if (!stdin.isTTY) {
     // Non-interactive mode: just read a line
     stdout.write(promptText);
-    for await (const line of console) {
-      return line.trim();
-    }
-    return '';
+    const readline = require('node:readline');
+    const rl = readline.createInterface({
+      input: stdin,
+      terminal: false,
+    });
+
+    return new Promise((resolve) => {
+      rl.on('line', (line: string) => {
+        rl.close();
+        resolve(line.trim());
+      });
+
+      rl.on('close', () => {
+        resolve('');
+      });
+    });
   }
 
   return new Promise((resolve) => {

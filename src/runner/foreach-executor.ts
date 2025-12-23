@@ -29,17 +29,18 @@ export class ForeachExecutor {
   public static aggregateOutputs(outputs: unknown[]): Record<string, unknown> {
     const parentOutputs: Record<string, unknown> = {};
 
-    if (outputs.length === 0) return parentOutputs;
+    const validOutputs = outputs.filter((o) => o !== undefined);
+    if (validOutputs.length === 0) return parentOutputs;
 
     // We can only aggregate objects, and we assume all outputs have similar shape
-    const firstOutput = outputs[0];
+    const firstOutput = validOutputs[0];
     if (typeof firstOutput !== 'object' || firstOutput === null) {
       return parentOutputs;
     }
 
     // Collect all keys from all outputs
     const keys = new Set<string>();
-    for (const output of outputs) {
+    for (const output of validOutputs) {
       if (typeof output === 'object' && output !== null) {
         for (const key of Object.keys(output)) {
           keys.add(key);
@@ -99,6 +100,9 @@ export class ForeachExecutor {
         }
       } else {
         concurrencyLimit = step.concurrency;
+        if (!Number.isInteger(concurrencyLimit) || concurrencyLimit <= 0) {
+          throw new Error(`concurrency must be a positive integer, got: ${concurrencyLimit}`);
+        }
       }
     }
 
@@ -113,6 +117,7 @@ export class ForeachExecutor {
     try {
       // Initialize results array
       const itemResults: StepContext[] = existingContext?.items || new Array(items.length);
+      const shouldCheckDb = !!existingContext;
 
       // Ensure array is correct length
       if (itemResults.length !== items.length) {
@@ -125,8 +130,20 @@ export class ForeachExecutor {
       const workers = new Array(Math.min(concurrencyLimit, items.length))
         .fill(null)
         .map(async () => {
-          while (currentIndex < items.length && !aborted) {
-            const i = currentIndex++; // Capture index atomically
+          const nextIndex = () => {
+            if (aborted) return null;
+            if (currentIndex >= items.length) return null;
+            const i = currentIndex;
+            currentIndex += 1;
+            return i;
+          };
+
+          while (true) {
+            const i = nextIndex();
+            if (i === null) break;
+
+            if (aborted) break;
+
             const item = items[i];
 
             // Skip if already successful or skipped
@@ -145,14 +162,21 @@ export class ForeachExecutor {
               index: i,
             };
 
-            // Check DB again for robustness
-            const existingExec = await this.db.getStepByIteration(runId, step.id, i);
+            // Check DB again for robustness (resume flows only)
+            const existingExec = shouldCheckDb
+              ? await this.db.getStepByIteration(runId, step.id, i)
+              : undefined;
             if (
               existingExec &&
               (existingExec.status === StepStatus.SUCCESS ||
                 existingExec.status === StepStatus.SKIPPED)
             ) {
               let output: unknown = null;
+              let itemStatus = existingExec.status as
+                | typeof StepStatus.SUCCESS
+                | typeof StepStatus.SKIPPED
+                | typeof StepStatus.FAILED;
+
               try {
                 output = existingExec.output ? JSON.parse(existingExec.output) : null;
               } catch (error) {
@@ -160,6 +184,20 @@ export class ForeachExecutor {
                   `Failed to parse output for step ${step.id} iteration ${i}: ${error}`
                 );
                 output = { error: 'Failed to parse output' };
+                itemStatus = StepStatus.FAILED;
+                aborted = true; // Fail fast if we find corrupted data
+                try {
+                  await this.db.completeStep(
+                    existingExec.id,
+                    StepStatus.FAILED,
+                    output,
+                    'Failed to parse output'
+                  );
+                } catch (dbError) {
+                  this.logger.warn(
+                    `Failed to update DB for corrupted output on step ${step.id} iteration ${i}: ${dbError}`
+                  );
+                }
               }
               itemResults[i] = {
                 output,
@@ -167,21 +205,25 @@ export class ForeachExecutor {
                   typeof output === 'object' && output !== null && !Array.isArray(output)
                     ? (output as Record<string, unknown>)
                     : {},
-                status: existingExec.status as
-                  | typeof StepStatus.SUCCESS
-                  | typeof StepStatus.SKIPPED,
+                status: itemStatus,
               } as StepContext;
               continue;
             }
+
+            if (aborted) break;
 
             const stepExecId = randomUUID();
             await this.db.createStep(stepExecId, runId, step.id, i);
 
             // Execute and store result
             try {
+              if (aborted) break;
               this.logger.log(`  ⤷ [${i + 1}/${items.length}] Executing iteration...`);
               itemResults[i] = await this.executeStepFn(step, itemContext, stepExecId);
-              if (itemResults[i].status === StepStatus.FAILED) {
+              if (
+                itemResults[i].status === StepStatus.FAILED ||
+                itemResults[i].status === StepStatus.SUSPENDED
+              ) {
                 aborted = true;
               }
             } catch (error) {
@@ -191,17 +233,26 @@ export class ForeachExecutor {
           }
         });
 
-      await Promise.all(workers);
+      const workerResults = await Promise.allSettled(workers);
+
+      // Check if any worker rejected (this would be due to an unexpected throw)
+      const firstError = workerResults.find((r) => r.status === 'rejected') as
+        | PromiseRejectedResult
+        | undefined;
+      if (firstError) {
+        throw firstError.reason;
+      }
 
       // Aggregate results
-      const outputs = itemResults.map((r) => r.output);
-      const allSuccess = itemResults.every((r) => r.status === StepStatus.SUCCESS);
-      const anySuspended = itemResults.some((r) => r.status === StepStatus.SUSPENDED);
+      const outputs = itemResults.map((r) => r?.output);
+      const allSuccess = itemResults.every((r) => r?.status === StepStatus.SUCCESS);
+      const anyFailed = itemResults.some((r) => r?.status === StepStatus.FAILED);
+      const anySuspended = itemResults.some((r) => r?.status === StepStatus.SUSPENDED);
 
       // Aggregate usage
       const aggregatedUsage = itemResults.reduce(
         (acc, r) => {
-          if (r.usage) {
+          if (r?.usage) {
             acc.prompt_tokens += r.usage.prompt_tokens;
             acc.completion_tokens += r.usage.completion_tokens;
             acc.total_tokens += r.usage.total_tokens;
@@ -218,6 +269,8 @@ export class ForeachExecutor {
       let finalStatus: (typeof StepStatus)[keyof typeof StepStatus] = StepStatus.FAILED;
       if (allSuccess) {
         finalStatus = StepStatus.SUCCESS;
+      } else if (anyFailed) {
+        finalStatus = StepStatus.FAILED;
       } else if (anySuspended) {
         finalStatus = StepStatus.SUSPENDED;
       }
@@ -230,11 +283,16 @@ export class ForeachExecutor {
         usage: aggregatedUsage,
       };
 
+      const persistedContext = {
+        ...aggregatedContext,
+        __foreachItems: items,
+      };
+
       // Update parent step record
       await this.db.completeStep(
         parentStepExecId,
         finalStatus,
-        aggregatedContext,
+        persistedContext,
         finalStatus === StepStatus.FAILED ? 'One or more iterations failed' : undefined
       );
 
@@ -256,9 +314,13 @@ export class ForeachExecutor {
       if (error instanceof WorkflowSuspendedError) {
         throw error;
       }
-      // Mark parent step as failed
+      // Mark parent step as failed (if not already handled)
       const errorMsg = error instanceof Error ? error.message : String(error);
-      await this.db.completeStep(parentStepExecId, StepStatus.FAILED, null, errorMsg);
+      try {
+        await this.db.completeStep(parentStepExecId, StepStatus.FAILED, null, errorMsg);
+      } catch (dbError) {
+        this.logger.error(`Failed to update DB on foreach error: ${dbError}`);
+      }
       throw error;
     }
   }

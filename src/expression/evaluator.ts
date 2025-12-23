@@ -73,6 +73,8 @@ export class ExpressionEvaluator {
 
   // Maximum template length to prevent ReDoS attacks even with manual parsing
   private static readonly MAX_TEMPLATE_LENGTH = 10_000;
+  // Maximum length for plain strings without expressions (1MB)
+  private static readonly MAX_PLAIN_STRING_LENGTH = 1_000_000;
 
   /**
    * Helper to scan string for matches of ${{ ... }} handling nested braces manually
@@ -124,11 +126,22 @@ export class ExpressionEvaluator {
    * Strict equality (===) is preserved for '==='.
    */
   static evaluate(template: string, context: ExpressionContext): unknown {
+    const hasExpr = ExpressionEvaluator.hasExpression(template);
+
     // Prevent excessive length
-    if (template.length > ExpressionEvaluator.MAX_TEMPLATE_LENGTH) {
-      throw new Error(
-        `Template exceeds maximum length of ${ExpressionEvaluator.MAX_TEMPLATE_LENGTH} characters`
-      );
+    if (hasExpr) {
+      if (template.length > ExpressionEvaluator.MAX_TEMPLATE_LENGTH) {
+        throw new Error(
+          `Template with expressions exceeds maximum length of ${ExpressionEvaluator.MAX_TEMPLATE_LENGTH} characters`
+        );
+      }
+    } else {
+      if (template.length > ExpressionEvaluator.MAX_PLAIN_STRING_LENGTH) {
+        throw new Error(
+          `Plain string exceeds maximum length of ${ExpressionEvaluator.MAX_PLAIN_STRING_LENGTH} characters`
+        );
+      }
+      return template;
     }
 
     // Optimization: Check for single expression string like "${{ expr }}"
@@ -548,6 +561,10 @@ export class ExpressionEvaluator {
             const method = (object as Record<string, unknown>)[methodName] as (
               ...args: unknown[]
             ) => unknown;
+            if (Array.isArray(object) && (methodName === 'sort' || methodName === 'reverse')) {
+              const copy = [...object];
+              return method.call(copy, ...args);
+            }
             return method.call(object, ...args);
           }
 

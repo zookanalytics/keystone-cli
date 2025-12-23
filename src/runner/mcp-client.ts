@@ -1,4 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process';
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 import { type Interface, createInterface } from 'node:readline';
 import pkg from '../../package.json' with { type: 'json' };
 import { ConsoleLogger, type Logger } from '../utils/logger.ts';
@@ -16,7 +18,64 @@ const MAX_BUFFER_SIZE = 10 * 1024 * 1024;
  * @param options.allowInsecure If true, skips all security checks (use only for development/testing)
  * @throws Error if the URL is potentially dangerous
  */
-export function validateRemoteUrl(url: string, options: { allowInsecure?: boolean } = {}): void {
+function isPrivateIpAddress(address: string): boolean {
+  const normalized = address.toLowerCase();
+  const parseMappedIpv4 = (mapped: string): string | null => {
+    const rest = mapped.replace(/^::ffff:/i, '');
+    if (rest.includes('.')) {
+      return rest;
+    }
+    const parts = rest.split(':');
+    if (parts.length !== 2) {
+      return null;
+    }
+    const high = Number.parseInt(parts[0], 16);
+    const low = Number.parseInt(parts[1], 16);
+    if (Number.isNaN(high) || Number.isNaN(low)) {
+      return null;
+    }
+    const a = (high >> 8) & 0xff;
+    const b = high & 0xff;
+    const c = (low >> 8) & 0xff;
+    const d = low & 0xff;
+    return `${a}.${b}.${c}.${d}`;
+  };
+
+  // IPv4 checks
+  const ipv4Match = normalized.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4Match) {
+    const [, a, b] = ipv4Match.map(Number);
+    return (
+      a === 10 || // 10.0.0.0/8
+      (a === 172 && b >= 16 && b <= 31) || // 172.16.0.0/12
+      (a === 192 && b === 168) || // 192.168.0.0/16
+      (a === 169 && b === 254) || // 169.254.0.0/16 (link-local)
+      a === 127 // 127.0.0.0/8
+    );
+  }
+
+  // IPv6-mapped IPv4 (::ffff:127.0.0.1 or ::ffff:7f00:1)
+  if (normalized.startsWith('::ffff:')) {
+    const mappedIpv4 = parseMappedIpv4(normalized);
+    if (mappedIpv4) {
+      return isPrivateIpAddress(mappedIpv4);
+    }
+  }
+
+  // IPv6 checks (best-effort, without full CIDR parsing)
+  const ipv6 = normalized.replace(/^\[|\]$/g, '');
+  return (
+    ipv6 === '::1' || // Loopback
+    ipv6.startsWith('fe80:') || // Link-local
+    ipv6.startsWith('fc') || // Unique local (fc00::/7)
+    ipv6.startsWith('fd') // Unique local (fc00::/7)
+  );
+}
+
+export async function validateRemoteUrl(
+  url: string,
+  options: { allowInsecure?: boolean } = {}
+): Promise<void> {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -49,35 +108,11 @@ export function validateRemoteUrl(url: string, options: { allowInsecure?: boolea
     throw new Error(`SSRF Protection: Cannot connect to localhost/loopback address: ${hostname}`);
   }
 
-  // Block private IP ranges (IPv4)
-  // 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 (link-local)
-  const ipv4Match = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (ipv4Match) {
-    const [, a, b] = ipv4Match.map(Number);
-    if (
-      a === 10 || // 10.0.0.0/8
-      (a === 172 && b >= 16 && b <= 31) || // 172.16.0.0/12
-      (a === 192 && b === 168) || // 192.168.0.0/16
-      (a === 169 && b === 254) || // 169.254.0.0/16 (link-local)
-      a === 127 // 127.0.0.0/8
-    ) {
+  // Block private IP ranges (IPv4/IPv6) for literal IPs
+  if (isIP(hostname)) {
+    if (isPrivateIpAddress(hostname)) {
       throw new Error(
         `SSRF Protection: Cannot connect to private/internal IP address: ${hostname}`
-      );
-    }
-  }
-
-  // Block IPv6 private ranges
-  if (hostname.startsWith('[') || hostname.includes(':')) {
-    const ipv6 = hostname.replace(/^\[|\]$/g, '').toLowerCase();
-    if (
-      ipv6 === '::1' ||
-      ipv6.startsWith('fe80:') || // Link-local
-      ipv6.startsWith('fc') || // Unique local (fc00::/7)
-      ipv6.startsWith('fd') // Unique local (fc00::/7)
-    ) {
-      throw new Error(
-        `SSRF Protection: Cannot connect to private/internal IPv6 address: ${hostname}`
       );
     }
   }
@@ -89,6 +124,26 @@ export function validateRemoteUrl(url: string, options: { allowInsecure?: boolea
     hostname.endsWith('.internal')
   ) {
     throw new Error(`SSRF Protection: Cannot connect to cloud metadata endpoint: ${hostname}`);
+  }
+
+  // Resolve DNS to prevent hostnames that map to private IPs (DNS rebinding)
+  if (!isIP(hostname)) {
+    try {
+      const resolved = await lookup(hostname, { all: true });
+      for (const record of resolved) {
+        if (isPrivateIpAddress(record.address)) {
+          throw new Error(
+            `SSRF Protection: Hostname "${hostname}" resolves to private/internal address: ${record.address}`
+          );
+        }
+      }
+    } catch (error) {
+      throw new Error(
+        `SSRF Protection: Failed to resolve hostname "${hostname}": ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
   }
 }
 
@@ -522,7 +577,14 @@ class SSETransport implements MCPTransport {
 export class MCPClient {
   private transport: MCPTransport;
   private messageId = 0;
-  private pendingRequests = new Map<number, (response: MCPResponse) => void>();
+  private pendingRequests = new Map<
+    number,
+    {
+      resolve: (response: MCPResponse) => void;
+      reject: (error: Error) => void;
+      timeoutId: ReturnType<typeof setTimeout>;
+    }
+  >();
   private timeout: number;
   private logger: Logger;
 
@@ -545,10 +607,11 @@ export class MCPClient {
 
     this.transport.onMessage((response) => {
       if (response.id !== undefined && this.pendingRequests.has(response.id)) {
-        const resolve = this.pendingRequests.get(response.id);
-        if (resolve) {
+        const pending = this.pendingRequests.get(response.id);
+        if (pending) {
           this.pendingRequests.delete(response.id);
-          resolve(response);
+          clearTimeout(pending.timeoutId);
+          pending.resolve(response);
         }
       }
     });
@@ -572,7 +635,7 @@ export class MCPClient {
     options: { allowInsecure?: boolean; logger?: Logger } = {}
   ): Promise<MCPClient> {
     // Validate URL to prevent SSRF attacks
-    validateRemoteUrl(url, options);
+    await validateRemoteUrl(url, options);
 
     const logger = options.logger || new ConsoleLogger();
     const transport = new SSETransport(url, headers);
@@ -601,10 +664,7 @@ export class MCPClient {
         }
       }, this.timeout);
 
-      this.pendingRequests.set(id, (response) => {
-        clearTimeout(timeoutId);
-        resolve(response);
-      });
+      this.pendingRequests.set(id, { resolve, reject, timeoutId });
 
       this.transport.send(message).catch((err) => {
         clearTimeout(timeoutId);
@@ -643,10 +703,9 @@ export class MCPClient {
 
   stop() {
     // Reject all pending requests to prevent hanging callers
-    for (const [id, resolve] of this.pendingRequests) {
-      // We don't have reject here because it's a map of resolves
-      // They will just timeout or we should handle it better.
-      // But for now just clear.
+    for (const [, pending] of this.pendingRequests) {
+      clearTimeout(pending.timeoutId);
+      pending.reject(new Error('MCP client stopped'));
     }
     this.pendingRequests.clear();
     this.transport.close();

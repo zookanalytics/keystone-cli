@@ -287,7 +287,7 @@ Keystone supports several specialized step types:
 
 All steps support common features like `needs` (dependencies), `if` (conditionals), `retry`, `timeout`, `foreach` (parallel iteration), `concurrency` (max parallel items for foreach), `transform` (post-process output using expressions), `learn` (auto-index for few-shot), and `reflexion` (self-correction loop).
 
-Workflows also support a top-level `concurrency` field to limit how many steps can run in parallel across the entire workflow.
+Workflows also support a top-level `concurrency` field to limit how many steps can run in parallel across the entire workflow. This must be a positive integer.
 
 ### Self-Healing Steps
 Steps can be configured to automatically recover from failures using an LLM agent.
@@ -315,13 +315,14 @@ When a step fails, the specified agent is invoked with the error details. The ag
 - id: process_files
   type: shell
   foreach: ${{ steps.list_files.output }}
-  concurrency: 5 # Process 5 files at a time
+  concurrency: 5 # Process 5 files at a time (must be a positive integer)
   run: echo "Processing ${{ item }}"
 
 #### Example: Script Step
 ```yaml
 - id: calculate
   type: script
+  allowInsecure: true
   run: |
     const data = context.steps.fetch_data.output;
     return data.map(i => i.value * 2).reduce((a, b) => a + b, 0);

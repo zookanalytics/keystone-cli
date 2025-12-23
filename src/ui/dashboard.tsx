@@ -169,6 +169,7 @@ const Dashboard = () => {
 const getStatusColor = (status: string) => {
   switch (status.toLowerCase()) {
     case 'completed':
+    case 'success':
       return 'green';
     case 'failed':
       return 'red';
@@ -186,6 +187,7 @@ const getStatusColor = (status: string) => {
 const getStatusIcon = (status: string) => {
   switch (status.toLowerCase()) {
     case 'completed':
+    case 'success':
       return '✅';
     case 'failed':
       return '❌';
