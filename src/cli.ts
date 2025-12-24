@@ -199,7 +199,8 @@ program
   .command('validate')
   .description('Validate workflow files')
   .argument('[path]', 'Workflow file or directory to validate (default: .keystone/workflows/)')
-  .action(async (pathArg) => {
+  .option('--strict', 'Enable strict validation (schemas, enums)')
+  .action(async (pathArg, options) => {
     const path = pathArg || '.keystone/workflows/';
 
     try {
@@ -234,6 +235,9 @@ program
       for (const file of files) {
         try {
           const workflow = WorkflowParser.loadWorkflow(file);
+          if (options.strict) {
+            WorkflowParser.validateStrict(workflow);
+          }
           console.log(`  ✓ ${file.padEnd(40)} ${workflow.name} (${workflow.steps.length} steps)`);
           successCount++;
         } catch (error) {
@@ -655,6 +659,83 @@ program
     await performMaintenance(days);
   });
 
+// ===== keystone dedup =====
+const dedup = program.command('dedup').description('Manage idempotency/deduplication records');
+
+dedup
+  .command('list')
+  .description('List idempotency records')
+  .argument('[run_id]', 'Filter by run ID (optional)')
+  .action(async (runId) => {
+    try {
+      const db = new WorkflowDb();
+      const records = await db.listIdempotencyRecords(runId);
+      db.close();
+
+      if (records.length === 0) {
+        console.log('No idempotency records found.');
+        return;
+      }
+
+      console.log('\n🔑 Idempotency Records:');
+      console.log(''.padEnd(100, '-'));
+      console.log(
+        `${'Key'.padEnd(30)} ${'Step'.padEnd(15)} ${'Status'.padEnd(10)} ${'Created At'}`
+      );
+      console.log(''.padEnd(100, '-'));
+
+      for (const record of records) {
+        const key = record.idempotency_key.slice(0, 28);
+        console.log(
+          `${key.padEnd(30)} ${record.step_id.padEnd(15)} ${record.status.padEnd(10)} ${record.created_at}`
+        );
+      }
+      console.log(`\nTotal: ${records.length} record(s)`);
+    } catch (error) {
+      console.error('✗ Failed to list records:', error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+dedup
+  .command('clear')
+  .description('Clear idempotency records')
+  .argument('<target>', 'Run ID to clear, or "--all" to clear all records')
+  .action(async (target) => {
+    try {
+      const db = new WorkflowDb();
+      let count: number;
+
+      if (target === '--all') {
+        count = await db.clearAllIdempotencyRecords();
+        console.log(`✓ Cleared ${count} idempotency record(s)`);
+      } else {
+        count = await db.clearIdempotencyRecords(target);
+        console.log(`✓ Cleared ${count} idempotency record(s) for run ${target.slice(0, 8)}`);
+      }
+
+      db.close();
+    } catch (error) {
+      console.error('✗ Failed to clear records:', error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+dedup
+  .command('prune')
+  .description('Remove expired idempotency records')
+  .action(async () => {
+    try {
+      const db = new WorkflowDb();
+      const count = await db.pruneIdempotencyRecords();
+      db.close();
+      console.log(`✓ Pruned ${count} expired idempotency record(s)`);
+    } catch (error) {
+      console.error('✗ Failed to prune records:', error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
 // ===== keystone ui =====
 program
   .command('ui')
@@ -789,16 +870,12 @@ auth
   .command('login')
   .description('Login to an authentication provider')
   .argument('[provider]', 'Authentication provider', 'github')
-  .option(
-    '-p, --provider <provider>',
-    'Authentication provider (deprecated, use positional argument)'
-  )
   .option('-t, --token <token>', 'Personal Access Token (if not using interactive mode)')
-  .action(async (providerArg, options) => {
+  .action(async (provider, options) => {
     const { AuthManager } = await import('./utils/auth-manager.ts');
-    const provider = (options.provider || providerArg).toLowerCase();
+    const providerName = provider.toLowerCase();
 
-    if (provider === 'github') {
+    if (providerName === 'github') {
       let token = options.token;
 
       if (!token) {
@@ -853,12 +930,12 @@ auth
         console.error('✗ No token provided.');
         process.exit(1);
       }
-    } else if (provider === 'openai' || provider === 'anthropic') {
+    } else if (providerName === 'openai' || providerName === 'anthropic') {
       let key = options.token; // Use --token if provided as the API key
 
       if (!key) {
-        console.log(`\n🔑 Login to ${provider.toUpperCase()}`);
-        console.log(`   Please provide your ${provider.toUpperCase()} API key.\n`);
+        console.log(`\n🔑 Login to ${providerName.toUpperCase()}`);
+        console.log(`   Please provide your ${providerName.toUpperCase()} API key.\n`);
         const prompt = 'API Key: ';
         process.stdout.write(prompt);
         for await (const line of console) {
@@ -868,18 +945,18 @@ auth
       }
 
       if (key) {
-        if (provider === 'openai') {
+        if (providerName === 'openai') {
           AuthManager.save({ openai_api_key: key });
         } else {
           AuthManager.save({ anthropic_api_key: key });
         }
-        console.log(`\n✓ Successfully saved ${provider.toUpperCase()} API key.`);
+        console.log(`\n✓ Successfully saved ${providerName.toUpperCase()} API key.`);
       } else {
         console.error('✗ No API key provided.');
         process.exit(1);
       }
     } else {
-      console.error(`✗ Unsupported provider: ${provider}`);
+      console.error(`✗ Unsupported provider: ${providerName}`);
       process.exit(1);
     }
   });
@@ -888,49 +965,48 @@ auth
   .command('status')
   .description('Show authentication status')
   .argument('[provider]', 'Authentication provider')
-  .option('-p, --provider <provider>', 'Authentication provider')
-  .action(async (providerArg, options) => {
+  .action(async (provider) => {
     const { AuthManager } = await import('./utils/auth-manager.ts');
     const auth = AuthManager.load();
-    const provider = (options.provider || providerArg)?.toLowerCase();
+    const providerName = provider?.toLowerCase();
 
     console.log('\n🏛️  Authentication Status:');
 
-    if (!provider || provider === 'github' || provider === 'copilot') {
+    if (!providerName || providerName === 'github' || providerName === 'copilot') {
       if (auth.github_token) {
         console.log('  ✓ Logged into GitHub');
         if (auth.copilot_expires_at) {
           const expires = new Date(auth.copilot_expires_at * 1000);
           console.log(`  ✓ Copilot session expires: ${expires.toLocaleString()}`);
         }
-      } else if (provider) {
+      } else if (providerName) {
         console.log(
           `  ⊘ Not logged into GitHub. Run "keystone auth login github" to authenticate.`
         );
       }
     }
 
-    if (!provider || provider === 'openai') {
+    if (!providerName || providerName === 'openai') {
       if (auth.openai_api_key) {
         console.log('  ✓ OpenAI API key configured');
-      } else if (provider) {
+      } else if (providerName) {
         console.log(
           `  ⊘ OpenAI API key not configured. Run "keystone auth login openai" to authenticate.`
         );
       }
     }
 
-    if (!provider || provider === 'anthropic') {
+    if (!providerName || providerName === 'anthropic') {
       if (auth.anthropic_api_key) {
         console.log('  ✓ Anthropic API key configured');
-      } else if (provider) {
+      } else if (providerName) {
         console.log(
           `  ⊘ Anthropic API key not configured. Run "keystone auth login anthropic" to authenticate.`
         );
       }
     }
 
-    if (!auth.github_token && !auth.openai_api_key && !auth.anthropic_api_key && !provider) {
+    if (!auth.github_token && !auth.openai_api_key && !auth.anthropic_api_key && !providerName) {
       console.log('  ⊘ No providers configured. Run "keystone auth login" to authenticate.');
     }
   });
@@ -939,29 +1015,25 @@ auth
   .command('logout')
   .description('Logout and clear authentication tokens')
   .argument('[provider]', 'Authentication provider')
-  .option(
-    '-p, --provider <provider>',
-    'Authentication provider (deprecated, use positional argument)'
-  )
-  .action(async (providerArg, options) => {
+  .action(async (provider) => {
     const { AuthManager } = await import('./utils/auth-manager.ts');
-    const provider = (options.provider || providerArg)?.toLowerCase();
+    const providerName = provider?.toLowerCase();
 
-    if (!provider || provider === 'github' || provider === 'copilot') {
+    if (!providerName || providerName === 'github' || providerName === 'copilot') {
       AuthManager.save({
         github_token: undefined,
         copilot_token: undefined,
         copilot_expires_at: undefined,
       });
       console.log('✓ Successfully logged out of GitHub.');
-    } else if (provider === 'openai') {
+    } else if (providerName === 'openai') {
       AuthManager.save({ openai_api_key: undefined });
       console.log('✓ Successfully cleared OpenAI API key.');
-    } else if (provider === 'anthropic') {
+    } else if (providerName === 'anthropic') {
       AuthManager.save({ anthropic_api_key: undefined });
       console.log('✓ Successfully cleared Anthropic API key.');
     } else {
-      console.error(`✗ Unknown provider: ${provider}`);
+      console.error(`✗ Unknown provider: ${providerName}`);
       process.exit(1);
     }
   });

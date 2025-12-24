@@ -80,6 +80,12 @@ describe('Redactor', () => {
     expect(blocklistRedactor.redact(text)).toBe(text);
   });
 
+  it('should redact forced secrets regardless of length or blocklist', () => {
+    const forcedRedactor = new Redactor({}, { forcedSecrets: ['ok', 'true'] });
+    expect(forcedRedactor.redact('ok')).toBe('***REDACTED***');
+    expect(forcedRedactor.redact('true')).toBe('***REDACTED***');
+  });
+
   it('should redact short values only for sensitive keys', () => {
     const mixedRedactor = new Redactor({
       PASSWORD: 'abc', // sensitive key, short value

@@ -168,7 +168,7 @@ export class OptimizationRunner {
       prompt: `${evalConfig.prompt}\n\nOutputs to evaluate:\n${JSON.stringify(outputs, null, 2)}`,
       needs: [],
       maxIterations: 10,
-      schema: {
+      outputSchema: {
         type: 'object',
         properties: {
           score: { type: 'number', minimum: 0, maximum: 100 },

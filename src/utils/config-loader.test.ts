@@ -16,7 +16,7 @@ describe('ConfigLoader', () => {
         test: { type: 'openai' },
       },
       model_mappings: {},
-      storage: { retention_days: 30 },
+      storage: { retention_days: 30, redact_secrets_at_rest: true },
       mcp_servers: {},
     };
 
@@ -41,7 +41,7 @@ describe('ConfigLoader', () => {
         'gpt-*': 'copilot',
         'claude-v1': 'anthropic',
       },
-      storage: { retention_days: 30 },
+      storage: { retention_days: 30, redact_secrets_at_rest: true },
       mcp_servers: {},
     };
     ConfigLoader.setConfig(mockConfig);

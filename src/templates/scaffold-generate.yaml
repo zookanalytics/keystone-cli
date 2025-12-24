@@ -26,7 +26,7 @@ steps:
 
       Produce the full file content for the given path.
       Return only JSON with fields: path, content.
-    schema:
+    outputSchema:
       type: object
       properties:
         path:

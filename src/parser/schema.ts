@@ -2,11 +2,80 @@ import { z } from 'zod';
 
 // ===== Input/Output Schema =====
 
-const InputSchema = z.object({
-  type: z.enum(['string', 'number', 'boolean', 'array', 'object']),
-  default: z.any().optional(),
-  description: z.string().optional(),
-});
+const InputSchema = z
+  .object({
+    type: z.enum(['string', 'number', 'boolean', 'array', 'object']),
+    default: z.any().optional(),
+    values: z.array(z.union([z.string(), z.number(), z.boolean()])).optional(),
+    secret: z.boolean().optional(),
+    description: z.string().optional(),
+  })
+  .superRefine((value, ctx) => {
+    const type = value.type;
+    const defaultValue = value.default;
+
+    if (defaultValue !== undefined) {
+      if (type === 'string' && typeof defaultValue !== 'string') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `default must be a string for type "${type}"`,
+        });
+      }
+      if (type === 'number' && typeof defaultValue !== 'number') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `default must be a number for type "${type}"`,
+        });
+      }
+      if (type === 'boolean' && typeof defaultValue !== 'boolean') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `default must be a boolean for type "${type}"`,
+        });
+      }
+      if (type === 'array' && !Array.isArray(defaultValue)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `default must be an array for type "${type}"`,
+        });
+      }
+      if (
+        type === 'object' &&
+        (typeof defaultValue !== 'object' || defaultValue === null || Array.isArray(defaultValue))
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `default must be an object for type "${type}"`,
+        });
+      }
+    }
+
+    if (value.values) {
+      if (!['string', 'number', 'boolean'].includes(type)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `values cannot be used with type "${type}"`,
+        });
+        return;
+      }
+
+      for (const allowed of value.values) {
+        if (typeof allowed !== type) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `enum value ${JSON.stringify(allowed)} must be a ${type}`,
+          });
+        }
+      }
+
+      if (defaultValue !== undefined && !value.values.includes(defaultValue as never)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `default must be one of: ${value.values.map((v) => JSON.stringify(v)).join(', ')}`,
+        });
+      }
+    }
+  });
 
 // ===== Retry Schema =====
 
@@ -42,11 +111,15 @@ const BaseStepSchema = z.object({
   retry: RetrySchema.optional(),
   auto_heal: AutoHealSchema.optional(),
   reflexion: ReflexionSchema.optional(),
+  allowFailure: z.boolean().optional(),
+  idempotencyKey: z.string().optional(), // Expression for dedup key (evaluated at runtime)
   foreach: z.string().optional(),
   // Accept both number and string (for expressions or YAML number-as-string)
   concurrency: z.union([z.number().int().positive(), z.string()]).optional(),
   transform: z.string().optional(),
   learn: z.boolean().optional(),
+  inputSchema: z.any().optional(),
+  outputSchema: z.any().optional(),
 });
 
 // ===== Step Type Schemas =====
@@ -73,7 +146,6 @@ const LlmStepSchema = BaseStepSchema.extend({
   provider: z.string().optional(),
   model: z.string().optional(),
   prompt: z.string(),
-  schema: z.any().optional(),
   tools: z.array(AgentToolSchema).optional(),
   maxIterations: z.number().int().positive().default(10),
   useGlobalMcp: z.boolean().optional(),
@@ -186,6 +258,7 @@ export const WorkflowSchema = z.object({
   env: z.record(z.string()).optional(),
   concurrency: z.union([z.number().int().positive(), z.string()]).optional(),
   steps: z.array(StepSchema),
+  errors: z.array(StepSchema).optional(),
   finally: z.array(StepSchema).optional(),
   eval: EvalSchema.optional(),
 });

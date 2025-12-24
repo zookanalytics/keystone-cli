@@ -37,6 +37,7 @@ export const ConfigSchema = z.object({
   storage: z
     .object({
       retention_days: z.number().default(30),
+      redact_secrets_at_rest: z.boolean().default(true),
     })
     .default({}),
   mcp_servers: z

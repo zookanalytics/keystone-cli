@@ -41,8 +41,8 @@ export async function executeLlmStep(
 
   // Inject schema instructions if present
   let systemPrompt = agent.systemPrompt;
-  if (step.schema) {
-    systemPrompt += `\n\nIMPORTANT: You must output valid JSON that matches the following schema:\n${JSON.stringify(step.schema, null, 2)}`;
+  if (step.outputSchema) {
+    systemPrompt += `\n\nIMPORTANT: You must output valid JSON that matches the following schema:\n${JSON.stringify(step.outputSchema, null, 2)}`;
   }
 
   const messages: LLMMessage[] = [];
@@ -240,7 +240,9 @@ export async function executeLlmStep(
     };
 
     // Create redactor once outside the loop for performance (regex compilation)
-    const redactor = new Redactor(context.secrets || {});
+    const redactor = new Redactor(context.secrets || {}, {
+      forcedSecrets: context.secretValues || [],
+    });
     const redactionBuffer = new RedactionBuffer(redactor);
 
     while (iterations < maxIterations) {
@@ -250,13 +252,13 @@ export async function executeLlmStep(
         model: resolvedModel,
         tools: llmTools.length > 0 ? llmTools : undefined,
         onStream: (chunk) => {
-          if (!step.schema) {
+          if (!step.outputSchema) {
             process.stdout.write(redactionBuffer.process(chunk));
           }
         },
       });
 
-      if (!step.schema) {
+      if (!step.outputSchema) {
         process.stdout.write(redactionBuffer.flush());
       }
 
@@ -273,7 +275,7 @@ export async function executeLlmStep(
         let output = message.content;
 
         // If schema is defined, attempt to parse JSON
-        if (step.schema && typeof output === 'string') {
+        if (step.outputSchema && typeof output === 'string') {
           try {
             output = extractJson(output) as typeof output;
           } catch (e) {

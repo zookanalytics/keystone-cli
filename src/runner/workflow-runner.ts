@@ -7,8 +7,10 @@ import { ExpressionEvaluator } from '../expression/evaluator.ts';
 import type { Step, Workflow, WorkflowStep } from '../parser/schema.ts';
 import { WorkflowParser } from '../parser/workflow-parser.ts';
 import { StepStatus, type StepStatusType, WorkflowStatus } from '../types/status.ts';
+import { ConfigLoader } from '../utils/config-loader.ts';
 import { extractJson } from '../utils/json-parser.ts';
 import { Redactor } from '../utils/redactor.ts';
+import { formatSchemaErrors, validateJsonSchema } from '../utils/schema-validator.ts';
 import { WorkflowRegistry } from '../utils/workflow-registry.ts';
 import { ForeachExecutor } from './foreach-executor.ts';
 import { type LLMMessage, getAdapter } from './llm-adapter.ts';
@@ -48,6 +50,13 @@ class RedactingLogger implements Logger {
     if (this.inner.debug) {
       this.inner.debug(this.redactor.redact(msg));
     }
+  }
+}
+
+class StepExecutionError extends Error {
+  constructor(public readonly result: StepResult) {
+    super(result.error || 'Step failed');
+    this.name = 'StepExecutionError';
   }
 }
 
@@ -99,6 +108,9 @@ export class WorkflowRunner {
   private inputs: Record<string, unknown>;
   private secrets: Record<string, string>;
   private redactor: Redactor;
+  private rawLogger: Logger;
+  private secretValues: string[] = [];
+  private redactAtRest = true;
   private resumeRunId?: string;
   private restored = false;
   private logger: Logger;
@@ -109,7 +121,9 @@ export class WorkflowRunner {
   private hasWarnedMemory = false;
   private static readonly MEMORY_WARNING_THRESHOLD = 1000;
   private static readonly MAX_RECURSION_DEPTH = 10;
+  private static readonly REDACTED_PLACEHOLDER = '***REDACTED***';
   private depth = 0;
+  private lastFailedStep?: { id: string; error: string };
 
   constructor(workflow: Workflow, options: RunOptions = {}) {
     this.workflow = workflow;
@@ -125,9 +139,10 @@ export class WorkflowRunner {
     this.db = new WorkflowDb(options.dbPath);
     this.memoryDb = new MemoryDb(options.memoryDbPath);
     this.secrets = this.loadSecrets();
-    this.redactor = new Redactor(this.secrets);
+    this.redactor = new Redactor(this.secrets, { forcedSecrets: this.secretValues });
     // Wrap the logger with a redactor to prevent secret leakage in logs
     const rawLogger = options.logger || new ConsoleLogger();
+    this.rawLogger = rawLogger;
     this.logger = new RedactingLogger(rawLogger, this.redactor);
     this.mcpManager = options.mcpManager || new MCPManager();
 
@@ -252,6 +267,7 @@ export class WorkflowRunner {
                   ? (output as Record<string, unknown>)
                   : {},
               status: exec.status as typeof StepStatus.SUCCESS | typeof StepStatus.SKIPPED,
+              error: exec.error || undefined,
             };
             outputs[exec.iteration_index] = output;
           } else {
@@ -261,6 +277,7 @@ export class WorkflowRunner {
               output: null,
               outputs: {},
               status: exec.status as StepStatusType,
+              error: exec.error || undefined,
             };
           }
         }
@@ -348,6 +365,7 @@ export class WorkflowRunner {
                 ? (output as Record<string, unknown>)
                 : {},
             status: exec.status as StepContext['status'],
+            error: exec.error || undefined,
           });
           if (exec.status !== StepStatus.SUSPENDED) {
             completedStepIds.add(stepId);
@@ -392,7 +410,12 @@ export class WorkflowRunner {
       this.removeSignalHandlers();
 
       // Update run status in DB
-      await this.db.updateRunStatus(this.runId, status, undefined, error);
+      await this.db.updateRunStatus(
+        this.runId,
+        status,
+        undefined,
+        error ? this.redactForStorage(error) : undefined
+      );
 
       // Stop all MCP clients
       await this.mcpManager.stopAll();
@@ -469,16 +492,169 @@ export class WorkflowRunner {
     return secrets;
   }
 
+  private refreshRedactor(): void {
+    this.redactor = new Redactor(this.secrets, { forcedSecrets: this.secretValues });
+    this.logger = new RedactingLogger(this.rawLogger, this.redactor);
+  }
+
+  private redactForStorage<T>(value: T): T {
+    if (!this.redactAtRest) return value;
+    return this.redactor.redactValue(value) as T;
+  }
+
+  private validateSchema(
+    kind: 'input' | 'output',
+    schema: unknown,
+    data: unknown,
+    stepId: string
+  ): void {
+    try {
+      const result = validateJsonSchema(schema, data);
+      if (result.valid) return;
+      const details = formatSchemaErrors(result.errors)
+        .map((line) => `  - ${line}`)
+        .join('\n');
+      throw new Error(
+        `${kind === 'input' ? 'Input' : 'Output'} schema validation failed for step "${stepId}":\n${details}`
+      );
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.message.includes('schema validation failed for step')) {
+          throw error;
+        }
+        throw new Error(
+          `${kind === 'input' ? 'Input' : 'Output'} schema error for step "${stepId}": ${error.message}`
+        );
+      }
+      throw error;
+    }
+  }
+
+  private buildStepInputs(step: Step, context: ExpressionContext): Record<string, unknown> {
+    const stripUndefined = (value: Record<string, unknown>) => {
+      const result: Record<string, unknown> = {};
+      for (const [key, val] of Object.entries(value)) {
+        if (val !== undefined) {
+          result[key] = val;
+        }
+      }
+      return result;
+    };
+
+    switch (step.type) {
+      case 'shell': {
+        let env: Record<string, string> | undefined;
+        if (step.env) {
+          env = {};
+          for (const [key, value] of Object.entries(step.env)) {
+            env[key] = ExpressionEvaluator.evaluateString(value, context);
+          }
+        }
+        return stripUndefined({
+          run: ExpressionEvaluator.evaluateString(step.run, context),
+          dir: step.dir ? ExpressionEvaluator.evaluateString(step.dir, context) : undefined,
+          env,
+          allowInsecure: step.allowInsecure,
+        });
+      }
+      case 'file':
+        return stripUndefined({
+          path: ExpressionEvaluator.evaluateString(step.path, context),
+          content:
+            step.content !== undefined
+              ? ExpressionEvaluator.evaluateString(step.content, context)
+              : undefined,
+          op: step.op,
+          allowOutsideCwd: step.allowOutsideCwd,
+        });
+      case 'request': {
+        let headers: Record<string, string> | undefined;
+        if (step.headers) {
+          headers = {};
+          for (const [key, value] of Object.entries(step.headers)) {
+            headers[key] = ExpressionEvaluator.evaluateString(value, context);
+          }
+        }
+        return stripUndefined({
+          url: ExpressionEvaluator.evaluateString(step.url, context),
+          method: step.method,
+          headers,
+          body: step.body ? ExpressionEvaluator.evaluateObject(step.body, context) : undefined,
+          allowInsecure: step.allowInsecure,
+        });
+      }
+      case 'human':
+        return stripUndefined({
+          message: ExpressionEvaluator.evaluateString(step.message, context),
+          inputType: step.inputType,
+        });
+      case 'sleep': {
+        const evaluated = ExpressionEvaluator.evaluate(step.duration.toString(), context);
+        return { duration: Number(evaluated) };
+      }
+      case 'llm':
+        return stripUndefined({
+          agent: step.agent,
+          provider: step.provider,
+          model: step.model,
+          prompt: ExpressionEvaluator.evaluateString(step.prompt, context),
+          tools: step.tools,
+          maxIterations: step.maxIterations,
+          useGlobalMcp: step.useGlobalMcp,
+          allowClarification: step.allowClarification,
+          mcpServers: step.mcpServers,
+          useStandardTools: step.useStandardTools,
+          allowOutsideCwd: step.allowOutsideCwd,
+          allowInsecure: step.allowInsecure,
+        });
+      case 'workflow':
+        return stripUndefined({
+          path: step.path,
+          inputs: step.inputs
+            ? ExpressionEvaluator.evaluateObject(step.inputs, context)
+            : undefined,
+        });
+      case 'script':
+        return stripUndefined({
+          run: step.run,
+          allowInsecure: step.allowInsecure,
+        });
+      case 'memory':
+        return stripUndefined({
+          op: step.op,
+          query: step.query ? ExpressionEvaluator.evaluateString(step.query, context) : undefined,
+          text: step.text ? ExpressionEvaluator.evaluateString(step.text, context) : undefined,
+          model: step.model,
+          metadata: step.metadata
+            ? ExpressionEvaluator.evaluateObject(step.metadata, context)
+            : undefined,
+          limit: step.limit,
+        });
+      default:
+        return {};
+    }
+  }
+
   /**
    * Apply workflow defaults to inputs and validate types
    */
   private applyDefaultsAndValidate(): void {
     if (!this.workflow.inputs) return;
 
+    const secretValues = new Set<string>();
+
     for (const [key, config] of Object.entries(this.workflow.inputs)) {
       // Apply default if missing
       if (this.inputs[key] === undefined && config.default !== undefined) {
         this.inputs[key] = config.default;
+      }
+
+      if (config.secret) {
+        if (this.inputs[key] === WorkflowRunner.REDACTED_PLACEHOLDER) {
+          throw new Error(
+            `Secret input "${key}" was redacted at rest. Please provide it again to resume this run.`
+          );
+        }
       }
 
       // Validate required inputs
@@ -502,7 +678,42 @@ export class WorkflowRunner {
       if (type === 'array' && !Array.isArray(value)) {
         throw new Error(`Input "${key}" must be an array, got ${typeof value}`);
       }
+      if (
+        type === 'object' &&
+        (typeof value !== 'object' || value === null || Array.isArray(value))
+      ) {
+        throw new Error(`Input "${key}" must be an object, got ${typeof value}`);
+      }
+
+      if (config.values) {
+        if (!['string', 'number', 'boolean'].includes(type)) {
+          throw new Error(`Input "${key}" cannot use enum values with type "${type}"`);
+        }
+        for (const allowed of config.values) {
+          if (typeof allowed !== type) {
+            throw new Error(
+              `Input "${key}" enum value ${JSON.stringify(allowed)} must be a ${type}`
+            );
+          }
+        }
+        if (!config.values.includes(value as string | number | boolean)) {
+          throw new Error(
+            `Input "${key}" must be one of: ${config.values.map((v) => JSON.stringify(v)).join(', ')}`
+          );
+        }
+      }
+
+      if (config.secret && value !== undefined && value !== WorkflowRunner.REDACTED_PLACEHOLDER) {
+        if (typeof value === 'string') {
+          secretValues.add(value);
+        } else if (typeof value === 'number' || typeof value === 'boolean') {
+          secretValues.add(String(value));
+        }
+      }
     }
+
+    this.secretValues = Array.from(secretValues);
+    this.refreshRedactor();
   }
 
   /**
@@ -515,6 +726,7 @@ export class WorkflowRunner {
         output?: unknown;
         outputs?: Record<string, unknown>;
         status?: string;
+        error?: string;
         items?: StepContext[];
       }
     > = {};
@@ -526,6 +738,7 @@ export class WorkflowRunner {
           output: ctx.output,
           outputs: ctx.outputs,
           status: ctx.status,
+          error: ctx.error,
           items: ctx.items,
         };
       } else {
@@ -533,6 +746,7 @@ export class WorkflowRunner {
           output: ctx.output,
           outputs: ctx.outputs,
           status: ctx.status,
+          error: ctx.error,
         };
       }
     }
@@ -540,6 +754,7 @@ export class WorkflowRunner {
     const baseContext: ExpressionContext = {
       inputs: this.inputs,
       secrets: this.secrets,
+      secretValues: this.secretValues,
       steps: stepsContext,
       item,
       index,
@@ -547,6 +762,7 @@ export class WorkflowRunner {
       output: item
         ? undefined
         : this.stepContexts.get(this.workflow.steps.find((s) => !s.foreach)?.id || '')?.output,
+      last_failed_step: this.lastFailedStep,
     };
 
     const resolvedEnv: Record<string, string> = {};
@@ -641,6 +857,34 @@ export class WorkflowRunner {
     context: ExpressionContext,
     stepExecId: string
   ): Promise<StepContext> {
+    // Check idempotency key for dedup
+    let idempotencyKey: string | undefined;
+    if (step.idempotencyKey) {
+      try {
+        idempotencyKey = ExpressionEvaluator.evaluateString(step.idempotencyKey, context);
+        if (idempotencyKey) {
+          const existing = await this.db.getIdempotencyRecord(idempotencyKey);
+          if (existing && existing.status === 'success') {
+            this.logger.log(`  ⟳ Step ${step.id} skipped (idempotency hit: ${idempotencyKey})`);
+            const output = existing.output ? JSON.parse(existing.output) : null;
+            await this.db.completeStep(stepExecId, 'success', output, undefined);
+            return {
+              output,
+              outputs:
+                typeof output === 'object' && output !== null && !Array.isArray(output)
+                  ? (output as Record<string, unknown>)
+                  : {},
+              status: 'success',
+            };
+          }
+        }
+      } catch (error) {
+        this.logger.warn(
+          `  ⚠️ Failed to evaluate idempotencyKey for ${step.id}: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    }
+
     let stepToExecute = step;
 
     // Inject few-shot examples if enabled
@@ -673,12 +917,39 @@ export class WorkflowRunner {
         dryRun: this.options.dryRun,
       });
       if (result.status === 'failed') {
-        throw new Error(result.error || 'Step failed');
+        throw new StepExecutionError(result);
+      }
+      if (result.status === 'success' && stepToExecute.outputSchema) {
+        try {
+          this.validateSchema(
+            'output',
+            stepToExecute.outputSchema,
+            result.output,
+            stepToExecute.id
+          );
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          throw new StepExecutionError({
+            ...result,
+            status: 'failed',
+            error: message,
+          });
+        }
       }
       return result;
     };
 
     try {
+      if (stepToExecute.inputSchema) {
+        const inputsForValidation = this.buildStepInputs(stepToExecute, context);
+        this.validateSchema(
+          'input',
+          stepToExecute.inputSchema,
+          inputsForValidation,
+          stepToExecute.id
+        );
+      }
+
       const operationWithTimeout = async () => {
         if (step.timeout) {
           return await withTimeout(operation(), step.timeout, `Step ${step.id}`);
@@ -691,12 +962,21 @@ export class WorkflowRunner {
         await this.db.incrementRetry(stepExecId);
       });
 
+      const persistedOutput = this.redactForStorage(result.output);
+      const persistedError = result.error
+        ? this.redactAtRest
+          ? this.redactor.redact(result.error)
+          : result.error
+        : result.error;
+
       if (result.status === StepStatus.SUSPENDED) {
         await this.db.completeStep(
           stepExecId,
           StepStatus.SUSPENDED,
-          result.output,
-          'Waiting for interaction',
+          persistedOutput,
+          this.redactAtRest
+            ? this.redactor.redact('Waiting for interaction')
+            : 'Waiting for interaction',
           result.usage
         );
         return result;
@@ -705,8 +985,8 @@ export class WorkflowRunner {
       await this.db.completeStep(
         stepExecId,
         result.status,
-        result.output,
-        result.error,
+        persistedOutput,
+        persistedError,
         result.usage
       );
 
@@ -735,10 +1015,30 @@ export class WorkflowRunner {
         outputs = {};
       }
 
+      // Store idempotency record for successful steps
+      if (idempotencyKey && result.status === 'success') {
+        try {
+          await this.db.storeIdempotencyRecord(
+            idempotencyKey,
+            this.runId,
+            step.id,
+            'success',
+            result.output,
+            undefined,
+            undefined // TTL in seconds (undefined = no expiry)
+          );
+        } catch (error) {
+          this.logger.warn(
+            `  ⚠️ Failed to store idempotency record for ${step.id}: ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
+      }
+
       return {
         output: result.output,
         outputs,
         status: result.status,
+        error: result.error,
         usage: result.usage,
       };
     } catch (error) {
@@ -840,16 +1140,48 @@ export class WorkflowRunner {
         }
       }
 
-      const errorMsg = error instanceof Error ? error.message : String(error);
+      const failureResult = error instanceof StepExecutionError ? error.result : null;
+      const errorMsg =
+        failureResult?.error || (error instanceof Error ? error.message : String(error));
       const redactedErrorMsg = this.redactor.redact(errorMsg);
+      const failureOutput = failureResult?.output ?? null;
+      const failureOutputs =
+        typeof failureOutput === 'object' && failureOutput !== null && !Array.isArray(failureOutput)
+          ? (failureOutput as Record<string, unknown>)
+          : {};
+
+      if (step.allowFailure) {
+        this.logger.warn(
+          `  ⚠️ Step ${step.id} failed but allowFailure is true: ${redactedErrorMsg}`
+        );
+        await this.db.completeStep(
+          stepExecId,
+          StepStatus.SUCCESS,
+          this.redactForStorage(failureOutput),
+          this.redactAtRest ? redactedErrorMsg : errorMsg
+        );
+        return {
+          output: failureOutput,
+          outputs: failureOutputs,
+          status: StepStatus.SUCCESS,
+          error: errorMsg,
+        };
+      }
+
       this.logger.error(`  ✗ Step ${step.id} failed: ${redactedErrorMsg}`);
-      await this.db.completeStep(stepExecId, 'failed', null, redactedErrorMsg);
+      await this.db.completeStep(
+        stepExecId,
+        StepStatus.FAILED,
+        this.redactForStorage(failureOutput),
+        this.redactAtRest ? redactedErrorMsg : errorMsg
+      );
 
       // Return failed context
       return {
-        output: null,
-        outputs: {},
-        status: 'failed',
+        output: failureOutput,
+        outputs: failureOutputs,
+        status: StepStatus.FAILED,
+        error: errorMsg,
       };
     }
   }
@@ -889,7 +1221,7 @@ Do not change the 'id' or 'type' or 'auto_heal' fields.
       agent: auto_heal.agent,
       model: auto_heal.model,
       prompt,
-      schema: {
+      outputSchema: {
         type: 'object',
         description: 'Partial step configuration with fixed values',
         additionalProperties: true,
@@ -1148,12 +1480,14 @@ Please provide the fixed step configuration as JSON.`;
         '   Workflows can execute arbitrary shell commands and access your environment.\n'
     );
 
+    this.redactAtRest = ConfigLoader.load().storage?.redact_secrets_at_rest ?? true;
+
     // Apply defaults and validate inputs
     this.applyDefaultsAndValidate();
 
     // Create run record (only for new runs, not for resume)
     if (!isResume) {
-      await this.db.createRun(this.runId, this.workflow.name, this.inputs);
+      await this.db.createRun(this.runId, this.workflow.name, this.redactForStorage(this.inputs));
     }
     await this.db.updateRunStatus(this.runId, 'running');
 
@@ -1178,7 +1512,7 @@ Please provide the fixed step configuration as JSON.`;
         this.logger.log('All steps already completed. Nothing to resume.\n');
         // Evaluate outputs from completed state
         const outputs = this.evaluateOutputs();
-        await this.db.updateRunStatus(this.runId, 'success', outputs);
+        await this.db.updateRunStatus(this.runId, 'success', this.redactForStorage(outputs));
         this.logger.log('✨ Workflow already completed!\n');
         return outputs;
       }
@@ -1272,7 +1606,7 @@ Please provide the fixed step configuration as JSON.`;
       const outputs = this.evaluateOutputs();
 
       // Mark run as complete
-      await this.db.updateRunStatus(this.runId, 'success', outputs);
+      await this.db.updateRunStatus(this.runId, 'success', this.redactForStorage(outputs));
 
       this.logger.log('✨ Workflow completed successfully!\n');
 
@@ -1283,9 +1617,27 @@ Please provide the fixed step configuration as JSON.`;
         this.logger.log(`\n⏸  Workflow paused: ${error.message}`);
         throw error;
       }
+
       const errorMsg = error instanceof Error ? error.message : String(error);
+
+      // Find the failed step from stepContexts
+      for (const [stepId, ctx] of this.stepContexts.entries()) {
+        if (ctx.status === 'failed') {
+          this.lastFailedStep = { id: stepId, error: ctx.error || errorMsg };
+          break;
+        }
+      }
+
+      // Run errors block if defined (before finally, after retries exhausted)
+      await this.runErrors();
+
       this.logger.error(`\n✗ Workflow failed: ${errorMsg}\n`);
-      await this.db.updateRunStatus(this.runId, 'failed', undefined, errorMsg);
+      await this.db.updateRunStatus(
+        this.runId,
+        'failed',
+        undefined,
+        this.redactAtRest ? this.redactor.redact(errorMsg) : errorMsg
+      );
       throw error;
     } finally {
       this.removeSignalHandlers();
@@ -1369,6 +1721,87 @@ Please provide the fixed step configuration as JSON.`;
       }
       this.logger.error(
         `Error in finally block: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  /**
+   * Execute the errors block if defined (runs after a step exhausts retries, before finally)
+   */
+  private async runErrors(): Promise<void> {
+    if (!this.workflow.errors || this.workflow.errors.length === 0) {
+      return;
+    }
+
+    if (!this.lastFailedStep) {
+      this.logger.warn('Errors block defined but no failed step context available');
+      return;
+    }
+
+    this.logger.log('\n🔧 Executing errors block...');
+
+    const stepMap = new Map(this.workflow.errors.map((s) => [s.id, s]));
+    const completedErrorsSteps = new Set<string>();
+    const pendingErrorsSteps = new Set(this.workflow.errors.map((s) => s.id));
+    const runningPromises = new Map<string, Promise<void>>();
+    const totalErrorsSteps = this.workflow.errors.length;
+    const errorsStepIndices = new Map(this.workflow.errors.map((s, index) => [s.id, index + 1]));
+
+    try {
+      while (pendingErrorsSteps.size > 0 || runningPromises.size > 0) {
+        for (const stepId of pendingErrorsSteps) {
+          const step = stepMap.get(stepId);
+          if (!step) continue;
+
+          // Dependencies can be from main steps (already in this.stepContexts) or previous errors steps
+          const dependenciesMet = step.needs.every(
+            (dep: string) => this.stepContexts.has(dep) || completedErrorsSteps.has(dep)
+          );
+
+          if (dependenciesMet) {
+            pendingErrorsSteps.delete(stepId);
+
+            const errorsStepIndex = errorsStepIndices.get(stepId);
+            this.logger.log(
+              `[${errorsStepIndex}/${totalErrorsSteps}] ▶ Executing errors step: ${step.id} (${step.type})`
+            );
+            const promise = this.executeStepWithForeach(step)
+              .then(() => {
+                completedErrorsSteps.add(stepId);
+                runningPromises.delete(stepId);
+                this.logger.log(
+                  `[${errorsStepIndex}/${totalErrorsSteps}] ✓ Errors step ${step.id} completed\n`
+                );
+              })
+              .catch((err) => {
+                runningPromises.delete(stepId);
+                this.logger.error(
+                  `  ✗ Errors step ${step.id} failed: ${err instanceof Error ? err.message : String(err)}`
+                );
+                // We continue with other errors steps if possible
+                completedErrorsSteps.add(stepId); // Mark as "done" (even if failed) so dependents can run
+              });
+
+            runningPromises.set(stepId, promise);
+          }
+        }
+
+        if (runningPromises.size === 0 && pendingErrorsSteps.size > 0) {
+          this.logger.error('Deadlock in errors block detected');
+          break;
+        }
+
+        if (runningPromises.size > 0) {
+          await Promise.race(runningPromises.values());
+        }
+      }
+    } catch (error) {
+      // Wait for other parallel steps to settle to avoid unhandled rejections
+      if (runningPromises.size > 0) {
+        await Promise.allSettled(runningPromises.values());
+      }
+      this.logger.error(
+        `Error in errors block: ${error instanceof Error ? error.message : String(error)}`
       );
     }
   }

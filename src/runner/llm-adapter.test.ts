@@ -332,7 +332,7 @@ describe('getAdapter', () => {
         'gpt-*': 'openai',
         'copilot:*': 'copilot',
       },
-      storage: { retention_days: 30 },
+      storage: { retention_days: 30, redact_secrets_at_rest: true },
       mcp_servers: {},
     });
   });
@@ -376,7 +376,7 @@ describe('getAdapter', () => {
       default_provider: 'unknown',
       providers: {}, // No providers configured
       model_mappings: {},
-      storage: { retention_days: 30 },
+      storage: { retention_days: 30, redact_secrets_at_rest: true },
       mcp_servers: {},
     });
 

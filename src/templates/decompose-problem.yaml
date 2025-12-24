@@ -34,7 +34,7 @@ steps:
 
       Return empty arrays if a category is not needed.
       Return only the structured JSON required by the schema.
-    schema:
+    outputSchema:
       type: object
       properties:
         research:
@@ -145,7 +145,7 @@ steps:
 
       Review results:
       ${{ steps.review.outputs }}
-    schema:
+    outputSchema:
       type: object
       properties:
         summary:

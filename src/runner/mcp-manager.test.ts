@@ -46,7 +46,7 @@ describe('MCPManager', () => {
       providers: {},
       model_mappings: {},
       default_provider: 'openai',
-      storage: { retention_days: 30 },
+      storage: { retention_days: 30, redact_secrets_at_rest: true },
     } as unknown as Config);
 
     const manager = new MCPManager();
@@ -67,7 +67,7 @@ describe('MCPManager', () => {
       providers: {},
       model_mappings: {},
       default_provider: 'openai',
-      storage: { retention_days: 30 },
+      storage: { retention_days: 30, redact_secrets_at_rest: true },
     } as unknown as Config);
 
     const initSpy = spyOn(MCPClient.prototype, 'initialize').mockResolvedValue({
@@ -132,7 +132,7 @@ describe('MCPManager', () => {
       providers: {},
       model_mappings: {},
       default_provider: 'openai',
-      storage: { retention_days: 30 },
+      storage: { retention_days: 30, redact_secrets_at_rest: true },
     } as unknown as Config);
 
     // Mock initialize to take some time
@@ -175,7 +175,7 @@ describe('MCPManager', () => {
       providers: {},
       model_mappings: {},
       default_provider: 'openai',
-      storage: { retention_days: 30 },
+      storage: { retention_days: 30, redact_secrets_at_rest: true },
     } as unknown as Config);
 
     const createLocalSpy = spyOn(MCPClient, 'createLocal').mockImplementation(

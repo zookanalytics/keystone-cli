@@ -23,7 +23,7 @@ steps:
     needs: [auto_heal_demo]
     prompt: |
       Generate a list of 3 random colors. Just list them.
-    schema:
+    outputSchema:
       type: object
       properties:
         colors:

@@ -29,7 +29,7 @@ steps:
       - notes: optional implementation guidance
 
       Return only the structured JSON required by the schema.
-    schema:
+    outputSchema:
       type: object
       properties:
         files:

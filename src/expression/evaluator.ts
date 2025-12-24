@@ -27,7 +27,11 @@ jsep.plugins.register(jsepObject);
 export interface ExpressionContext {
   inputs?: Record<string, unknown>;
   secrets?: Record<string, string>;
-  steps?: Record<string, { output?: unknown; outputs?: Record<string, unknown>; status?: string }>;
+  secretValues?: string[];
+  steps?: Record<
+    string,
+    { output?: unknown; outputs?: Record<string, unknown>; status?: string; error?: string }
+  >;
   item?: unknown;
   args?: unknown;
   index?: number;
@@ -35,6 +39,7 @@ export interface ExpressionContext {
   output?: unknown;
   autoHealAttempts?: number;
   reflexionAttempts?: number;
+  last_failed_step?: { id: string; error: string };
 }
 
 type ASTNode = jsep.Expression;
@@ -300,6 +305,7 @@ export class ExpressionEvaluator {
           index: context.index,
           env: context.env || {},
           stdout: contextAsRecord.stdout, // For transform expressions
+          last_failed_step: context.last_failed_step,
         };
 
         if (name in rootContext && rootContext[name] !== undefined) {

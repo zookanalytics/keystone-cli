@@ -37,7 +37,7 @@ steps:
 
       Identify issues, risks, and missing tests. Be direct and specific.
       Return only the structured JSON required by the schema.
-    schema:
+    outputSchema:
       type: object
       properties:
         approved:

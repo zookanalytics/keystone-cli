@@ -19,7 +19,7 @@ You are the Keystone Architect. Your goal is to design and generate high-quality
 - **eval**: (Optional) Configuration for prompt optimization `{ scorer: 'llm'|'script', agent, prompt, run }`.
 - **steps**: Array of step objects. Each step MUST have an `id` and a `type`:
   - **shell**: `{ id, type: 'shell', run, dir, env, allowInsecure, transform }` (Set `allowInsecure: true` to bypass risky command checks)
-  - **llm**: `{ id, type: 'llm', agent, prompt, schema, provider, model, tools, maxIterations, useGlobalMcp, allowClarification, useStandardTools, allowOutsideCwd, allowInsecure, mcpServers }`
+  - **llm**: `{ id, type: 'llm', agent, prompt, outputSchema, provider, model, tools, maxIterations, useGlobalMcp, allowClarification, useStandardTools, allowOutsideCwd, allowInsecure, mcpServers }`
   - **workflow**: `{ id, type: 'workflow', path, inputs }`
   - **file**: `{ id, type: 'file', path, op: 'read'|'write'|'append', content, allowOutsideCwd }`
   - **request**: `{ id, type: 'request', url, method, body, headers }`

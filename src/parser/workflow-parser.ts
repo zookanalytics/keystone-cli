@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { z } from 'zod';
 import { ExpressionEvaluator } from '../expression/evaluator.ts';
+import { validateJsonSchemaDefinition } from '../utils/schema-validator.ts';
 import { resolveAgentPath } from './agent-parser.ts';
 import { type Workflow, WorkflowSchema } from './schema.ts';
 
@@ -26,6 +27,9 @@ export class WorkflowParser {
       // Validate agents exist
       WorkflowParser.validateAgents(workflow, workflowDir);
 
+      // Validate errors block
+      WorkflowParser.validateErrors(workflow);
+
       // Validate finally block
       WorkflowParser.validateFinally(workflow);
 
@@ -48,7 +52,7 @@ export class WorkflowParser {
    * Automatically detect step dependencies from expressions
    */
   private static resolveImplicitDependencies(workflow: Workflow): void {
-    const allSteps = [...workflow.steps, ...(workflow.finally || [])];
+    const allSteps = [...workflow.steps, ...(workflow.errors || []), ...(workflow.finally || [])];
     for (const step of allSteps) {
       const detected = new Set<string>();
 
@@ -127,7 +131,7 @@ export class WorkflowParser {
    * Validate that all agents referenced in LLM steps exist
    */
   private static validateAgents(workflow: Workflow, baseDir?: string): void {
-    const allSteps = [...workflow.steps, ...(workflow.finally || [])];
+    const allSteps = [...workflow.steps, ...(workflow.errors || []), ...(workflow.finally || [])];
     for (const step of allSteps) {
       if (step.type === 'llm') {
         try {
@@ -162,6 +166,39 @@ export class WorkflowParser {
         if (!mainStepIds.has(dep) && !finallyStepIds.has(dep)) {
           throw new Error(
             `Finally step "${step.id}" depends on non-existent step "${dep}". Finally steps can only depend on main steps or previous finally steps.`
+          );
+        }
+      }
+    }
+  }
+
+  /**
+   * Validate errors block
+   */
+  private static validateErrors(workflow: Workflow): void {
+    if (!workflow.errors) return;
+
+    const mainStepIds = new Set(workflow.steps.map((s) => s.id));
+    const errorsStepIds = new Set<string>();
+    const finallyStepIds = new Set((workflow.finally || []).map((s) => s.id));
+
+    for (const step of workflow.errors) {
+      if (mainStepIds.has(step.id)) {
+        throw new Error(`Step ID "${step.id}" in errors block conflicts with main steps`);
+      }
+      if (finallyStepIds.has(step.id)) {
+        throw new Error(`Step ID "${step.id}" in errors block conflicts with finally steps`);
+      }
+      if (errorsStepIds.has(step.id)) {
+        throw new Error(`Duplicate Step ID "${step.id}" in errors block`);
+      }
+      errorsStepIds.add(step.id);
+
+      // Errors steps can only depend on main steps or previous errors steps
+      for (const dep of step.needs) {
+        if (!mainStepIds.has(dep) && !errorsStepIds.has(dep)) {
+          throw new Error(
+            `Errors step "${step.id}" depends on non-existent step "${dep}". Errors steps can only depend on main steps or previous errors steps.`
           );
         }
       }
@@ -231,5 +268,32 @@ export class WorkflowParser {
     }
 
     return result;
+  }
+
+  /**
+   * Strict validation for schema definitions and enums.
+   */
+  static validateStrict(workflow: Workflow): void {
+    const errors: string[] = [];
+
+    const allSteps = [...workflow.steps, ...(workflow.errors || []), ...(workflow.finally || [])];
+    for (const step of allSteps) {
+      if (step.inputSchema) {
+        const result = validateJsonSchemaDefinition(step.inputSchema);
+        if (!result.valid) {
+          errors.push(`step "${step.id}" inputSchema: ${result.error}`);
+        }
+      }
+      if (step.outputSchema) {
+        const result = validateJsonSchemaDefinition(step.outputSchema);
+        if (!result.valid) {
+          errors.push(`step "${step.id}" outputSchema: ${result.error}`);
+        }
+      }
+    }
+
+    if (errors.length > 0) {
+      throw new Error(`Strict validation failed:\n${errors.map((e) => `  - ${e}`).join('\n')}`);
+    }
   }
 }

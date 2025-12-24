@@ -38,7 +38,7 @@ steps:
       ${{ steps.recall_preference.output[0].content }}
 
       What programming language should I use? Answer in one word.
-    schema:
+    outputSchema:
       type: object
       properties:
         language:

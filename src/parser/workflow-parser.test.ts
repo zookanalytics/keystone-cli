@@ -94,6 +94,24 @@ steps:
       expect(() => WorkflowParser.loadWorkflow(filePath)).toThrow(/Invalid workflow schema/);
     });
 
+    test('should throw on invalid input enum defaults', () => {
+      const content = `
+name: invalid-enum
+inputs:
+  mode:
+    type: string
+    values: [fast, slow]
+    default: medium
+steps:
+  - id: step1
+    type: shell
+    run: echo test
+`;
+      const filePath = join(tempDir, 'invalid-enum.yaml');
+      writeFileSync(filePath, content);
+      expect(() => WorkflowParser.loadWorkflow(filePath)).toThrow(/Invalid workflow schema/);
+    });
+
     test('should throw on non-existent file', () => {
       expect(() => WorkflowParser.loadWorkflow('non-existent.yaml')).toThrow(
         /Failed to parse workflow/
@@ -211,6 +229,42 @@ finally:
       const workflow = WorkflowParser.loadWorkflow(filePath);
       const cleanupStep = workflow.finally?.find((s) => s.id === 'cleanup');
       expect(cleanupStep?.needs).toContain('step1');
+    });
+  });
+
+  describe('validateStrict', () => {
+    test('should throw on invalid step schema definitions', () => {
+      const workflow = {
+        name: 'strict-invalid',
+        steps: [
+          {
+            id: 's1',
+            type: 'shell',
+            run: 'echo ok',
+            needs: [],
+            inputSchema: { type: 123 },
+          },
+        ],
+      } as unknown as Workflow;
+
+      expect(() => WorkflowParser.validateStrict(workflow)).toThrow(/Strict validation failed/);
+    });
+
+    test('should pass on valid step schema definitions', () => {
+      const workflow = {
+        name: 'strict-valid',
+        steps: [
+          {
+            id: 's1',
+            type: 'shell',
+            run: 'echo ok',
+            needs: [],
+            inputSchema: { type: 'object', properties: { run: { type: 'string' } } },
+          },
+        ],
+      } as unknown as Workflow;
+
+      expect(() => WorkflowParser.validateStrict(workflow)).not.toThrow();
     });
   });
 });

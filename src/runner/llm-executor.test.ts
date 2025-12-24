@@ -288,7 +288,7 @@ You are a test agent.`;
       prompt: 'give me json',
       needs: [],
       maxIterations: 10,
-      schema: {
+      outputSchema: {
         type: 'object',
         properties: {
           foo: { type: 'string' },
@@ -315,7 +315,7 @@ You are a test agent.`;
       prompt: 'give me invalid json',
       needs: [],
       maxIterations: 10,
-      schema: { type: 'object' },
+      outputSchema: { type: 'object' },
     };
     const context: ExpressionContext = { inputs: {}, steps: {} };
     const executeStepFn = mock(async () => ({ status: 'success' as const, output: 'ok' }));
@@ -360,7 +360,7 @@ You are a test agent.`;
       prompt: 'give me invalid json',
       needs: [],
       maxIterations: 3,
-      schema: { type: 'object' },
+      outputSchema: { type: 'object' },
     };
     const context: ExpressionContext = { inputs: {}, steps: {} };
     const executeStepFn = mock(async () => ({ status: 'success' as const, output: 'ok' }));
@@ -547,7 +547,7 @@ You are a test agent.`;
       },
       model_mappings: {},
       default_provider: 'openai',
-      storage: { retention_days: 30 },
+      storage: { retention_days: 30, redact_secrets_at_rest: true },
     });
 
     const manager = new MCPManager();
@@ -674,7 +674,7 @@ You are a test agent.`;
       providers: { openai: { type: 'openai', api_key_env: 'OPENAI_API_KEY' } },
       model_mappings: {},
       default_provider: 'openai',
-      storage: { retention_days: 30 },
+      storage: { retention_days: 30, redact_secrets_at_rest: true },
     });
 
     const manager = new MCPManager();

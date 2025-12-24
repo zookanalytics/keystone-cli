@@ -39,7 +39,7 @@ steps:
 
       If code changes are needed, use available tools to make them.
       Return only the structured JSON required by the schema.
-    schema:
+    outputSchema:
       type: object
       properties:
         summary:

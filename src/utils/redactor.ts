@@ -5,12 +5,17 @@
  * with masked strings before they are logged or stored in the database.
  */
 
+export interface RedactorOptions {
+  forcedSecrets?: string[];
+}
+
 export class Redactor {
   private patterns: RegExp[] = [];
   private combinedPattern: RegExp | null = null;
   public readonly maxSecretLength: number;
+  private hasShortSecrets: boolean;
 
-  constructor(secrets: Record<string, string>) {
+  constructor(secrets: Record<string, string>, options: RedactorOptions = {}) {
     // Keys that indicate high sensitivity - always redact their values regardless of length
     const sensitiveKeys = new Set([
       'api_key',
@@ -26,13 +31,6 @@ export class Redactor {
       'access_key',
       'private_key',
     ]);
-
-    // Extract all secret values
-    // We filter based on:
-    // 1. Value must be a string and not empty
-    // 2. Value must not be in the blocklist of common words
-    // 3. Either the key indicates high sensitivity OR length >= 10 (conservative limit for unknown values)
-    const secretsToRedact = new Set<string>();
 
     const valueBlocklist = new Set([
       'true',
@@ -53,6 +51,19 @@ export class Redactor {
       'private',
       'protected',
     ]);
+
+    // Extract all secret values
+    // We filter based on:
+    // 1. Value must be a string and not empty
+    // 2. Value must not be in the blocklist of common words
+    // 3. Either the key indicates high sensitivity OR length >= 10 (conservative limit for unknown values)
+    const secretsToRedact = new Set<string>();
+
+    for (const forced of options.forcedSecrets || []) {
+      if (typeof forced === 'string' && forced.length > 0) {
+        secretsToRedact.add(forced);
+      }
+    }
 
     for (const [key, value] of Object.entries(secrets)) {
       if (!value || typeof value !== 'string') continue;
@@ -76,6 +87,7 @@ export class Redactor {
     }
 
     const uniqueSecrets = Array.from(secretsToRedact).sort((a, b) => b.length - a.length);
+    this.hasShortSecrets = uniqueSecrets.some((s) => s.length < 3);
 
     // Build regex patterns
     // Optimization: Group secrets into a single combined regex where possible
@@ -109,11 +121,15 @@ export class Redactor {
    * Redact all secrets from a string
    */
   redact(text: string): string {
-    if (!text || typeof text !== 'string' || text.length < 3) {
+    if (!text || typeof text !== 'string') {
       return text;
     }
 
     if (!this.combinedPattern) {
+      return text;
+    }
+
+    if (!this.hasShortSecrets && text.length < 3) {
       return text;
     }
 

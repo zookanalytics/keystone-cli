@@ -176,6 +176,7 @@ export class ForeachExecutor {
                 | typeof StepStatus.SUCCESS
                 | typeof StepStatus.SKIPPED
                 | typeof StepStatus.FAILED;
+              let itemError: string | undefined = existingExec.error || undefined;
 
               try {
                 output = existingExec.output ? JSON.parse(existingExec.output) : null;
@@ -185,6 +186,7 @@ export class ForeachExecutor {
                 );
                 output = { error: 'Failed to parse output' };
                 itemStatus = StepStatus.FAILED;
+                itemError = 'Failed to parse output';
                 aborted = true; // Fail fast if we find corrupted data
                 try {
                   await this.db.completeStep(
@@ -206,6 +208,7 @@ export class ForeachExecutor {
                     ? (output as Record<string, unknown>)
                     : {},
                 status: itemStatus,
+                error: itemError,
               } as StepContext;
               continue;
             }

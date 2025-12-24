@@ -3,6 +3,7 @@ import { existsSync, rmSync } from 'node:fs';
 import { WorkflowDb } from '../db/workflow-db';
 import type { Workflow } from '../parser/schema';
 import { WorkflowParser } from '../parser/workflow-parser';
+import { ConfigLoader } from '../utils/config-loader';
 import { WorkflowRegistry } from '../utils/workflow-registry';
 import { WorkflowRunner } from './workflow-runner';
 
@@ -212,6 +213,85 @@ describe('WorkflowRunner', () => {
     expect(outputs).toBeDefined();
   });
 
+  it('should validate step input schema', async () => {
+    const schemaDbPath = 'test-step-input-schema.db';
+    const workflowWithInputSchema: Workflow = {
+      name: 'step-input-schema-wf',
+      steps: [
+        {
+          id: 's1',
+          type: 'shell',
+          run: 'echo "hello"',
+          needs: [],
+          inputSchema: {
+            type: 'object',
+            properties: { run: { type: 'number' } },
+            required: ['run'],
+            additionalProperties: false,
+          },
+        },
+      ],
+    } as unknown as Workflow;
+
+    const runner = new WorkflowRunner(workflowWithInputSchema, { dbPath: schemaDbPath });
+    await expect(runner.run()).rejects.toThrow(/Step s1 failed/);
+
+    const db = new WorkflowDb(schemaDbPath);
+    const steps = await db.getStepsByRun(runner.getRunId());
+    db.close();
+
+    expect(steps[0]?.error || '').toMatch(/Input schema validation failed/);
+    if (existsSync(schemaDbPath)) rmSync(schemaDbPath);
+  });
+
+  it('should validate step output schema', async () => {
+    const schemaDbPath = 'test-step-output-schema.db';
+    const workflowWithOutputSchema: Workflow = {
+      name: 'step-output-schema-wf',
+      steps: [
+        {
+          id: 's1',
+          type: 'shell',
+          run: 'echo "hello"',
+          needs: [],
+          outputSchema: {
+            type: 'object',
+            properties: { ok: { const: true } },
+            required: ['ok'],
+            additionalProperties: false,
+          },
+        },
+      ],
+    } as unknown as Workflow;
+
+    const runner = new WorkflowRunner(workflowWithOutputSchema, { dbPath: schemaDbPath });
+    await expect(runner.run()).rejects.toThrow(/Step s1 failed/);
+
+    const db = new WorkflowDb(schemaDbPath);
+    const steps = await db.getStepsByRun(runner.getRunId());
+    db.close();
+
+    expect(steps[0]?.error || '').toMatch(/Output schema validation failed/);
+    if (existsSync(schemaDbPath)) rmSync(schemaDbPath);
+  });
+
+  it('should enforce input enums', async () => {
+    const workflowWithEnums: Workflow = {
+      name: 'enum-wf',
+      inputs: {
+        mode: { type: 'string', values: ['fast', 'slow'] },
+      },
+      steps: [{ id: 's1', type: 'shell', run: 'echo "${{ inputs.mode }}"', needs: [] }],
+    } as unknown as Workflow;
+
+    const runner = new WorkflowRunner(workflowWithEnums, {
+      dbPath,
+      inputs: { mode: 'invalid' },
+    });
+
+    await expect(runner.run()).rejects.toThrow(/must be one of/);
+  });
+
   it('should handle step failure and workflow failure', async () => {
     const failWorkflow: Workflow = {
       name: 'fail-wf',
@@ -219,6 +299,117 @@ describe('WorkflowRunner', () => {
     } as unknown as Workflow;
     const runner = new WorkflowRunner(failWorkflow, { dbPath });
     await expect(runner.run()).rejects.toThrow(/Step fail failed/);
+  });
+
+  it('should execute errors block when a step fails', async () => {
+    let errorsBlockExecuted = false;
+    let lastFailedStepId: string | undefined;
+    const runnerLogger = {
+      log: (msg: string) => {
+        if (msg.includes('Executing errors step: err1')) {
+          errorsBlockExecuted = true;
+        }
+      },
+      error: () => {},
+      warn: () => {},
+      info: () => {},
+      debug: () => {},
+    };
+
+    const errorsWorkflow: Workflow = {
+      name: 'errors-wf',
+      steps: [{ id: 's1', type: 'shell', run: 'exit 1', needs: [] }],
+      errors: [
+        {
+          id: 'err1',
+          type: 'shell',
+          run: 'echo "Handling failure of ${{ last_failed_step.id }}"',
+          needs: [],
+        },
+      ],
+    } as unknown as Workflow;
+
+    const runner = new WorkflowRunner(errorsWorkflow, { dbPath, logger: runnerLogger });
+    try {
+      await runner.run();
+    } catch (e) {
+      // Expected to fail
+    }
+
+    expect(errorsBlockExecuted).toBe(true);
+  });
+
+  it('should continue when allowFailure is true', async () => {
+    const allowFailureWorkflow: Workflow = {
+      name: 'allow-failure-wf',
+      steps: [
+        { id: 'fail', type: 'shell', run: 'exit 1', needs: [], allowFailure: true },
+        { id: 'next', type: 'shell', run: 'echo ok', needs: ['fail'] },
+      ],
+      outputs: {
+        status: '${{ steps.fail.status }}',
+        error: '${{ steps.fail.error }}',
+      },
+    } as unknown as Workflow;
+
+    const runner = new WorkflowRunner(allowFailureWorkflow, { dbPath });
+    const outputs = await runner.run();
+    expect(outputs.status).toBe('success');
+    expect(String(outputs.error || '')).toMatch(/exit 1|Step failed|Shell command exited/);
+  });
+
+  it('should deduplicate steps using idempotencyKey', async () => {
+    const idempotencyDbPath = 'test-idempotency.db';
+    if (existsSync(idempotencyDbPath)) rmSync(idempotencyDbPath);
+
+    let idempotencyHitCount = 0;
+    const runnerLogger = {
+      log: (msg: string) => {
+        if (msg.includes('idempotency hit')) {
+          idempotencyHitCount++;
+        }
+      },
+      error: () => {},
+      warn: () => {},
+      info: () => {},
+      debug: () => {},
+    };
+
+    const idempotencyWorkflow: Workflow = {
+      name: 'idempotency-wf',
+      steps: [
+        {
+          id: 's1',
+          type: 'shell',
+          run: 'echo "executed"',
+          needs: [],
+          idempotencyKey: '"fixed-key-123"',
+        },
+      ],
+      outputs: {
+        out: '${{ steps.s1.output.stdout.trim() }}',
+      },
+    } as unknown as Workflow;
+
+    // First run - should execute (no idempotency hit)
+    const runner1 = new WorkflowRunner(idempotencyWorkflow, {
+      dbPath: idempotencyDbPath,
+      logger: runnerLogger,
+    });
+    const outputs1 = await runner1.run();
+    expect(outputs1.out).toBe('executed');
+    expect(idempotencyHitCount).toBe(0);
+
+    // Second run - should hit idempotency cache
+    const runner2 = new WorkflowRunner(idempotencyWorkflow, {
+      dbPath: idempotencyDbPath,
+      logger: runnerLogger,
+    });
+    const outputs2 = await runner2.run();
+    expect(outputs2.out).toBe('executed');
+    expect(idempotencyHitCount).toBe(1);
+
+    if (existsSync(idempotencyDbPath)) rmSync(idempotencyDbPath);
   });
 
   it('should execute steps in parallel', async () => {
@@ -399,6 +590,44 @@ describe('WorkflowRunner', () => {
     await runner.run();
 
     expect(runner.redact('my-super-secret')).toBe('***REDACTED***');
+  });
+
+  it('should redact secret inputs at rest', async () => {
+    const dbFile = 'test-secret-at-rest.db';
+    const workflow: Workflow = {
+      name: 'secret-input-wf',
+      inputs: {
+        token: { type: 'string', secret: true },
+      },
+      steps: [{ id: 's1', type: 'shell', run: 'echo "ok"', needs: [] }],
+    } as unknown as Workflow;
+
+    ConfigLoader.setConfig({
+      default_provider: 'openai',
+      providers: {
+        openai: { type: 'openai' },
+      },
+      model_mappings: {},
+      storage: { retention_days: 30, redact_secrets_at_rest: true },
+      mcp_servers: {},
+    });
+
+    const runner = new WorkflowRunner(workflow, {
+      dbPath: dbFile,
+      inputs: { token: 'super-secret' },
+    });
+    await runner.run();
+
+    const db = new WorkflowDb(dbFile);
+    const run = await db.getRun(runner.getRunId());
+    db.close();
+
+    expect(run).toBeTruthy();
+    const persistedInputs = run ? JSON.parse(run.inputs) : {};
+    expect(persistedInputs.token).toBe('***REDACTED***');
+
+    ConfigLoader.clear();
+    if (existsSync(dbFile)) rmSync(dbFile);
   });
 
   it('should return run ID', () => {

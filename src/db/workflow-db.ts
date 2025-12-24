@@ -9,7 +9,6 @@ import {
   type WorkflowStatusType,
 } from '../types/status';
 
-// Re-export for backward compatibility - these map to the database column values
 export type RunStatus = WorkflowStatusType | 'pending';
 export type StepStatus = StepStatusType;
 
@@ -36,6 +35,17 @@ export interface StepExecution {
   completed_at: string | null;
   retry_count: number;
   usage: string | null; // JSON
+}
+
+export interface IdempotencyRecord {
+  idempotency_key: string;
+  run_id: string;
+  step_id: string;
+  status: StepStatus;
+  output: string | null; // JSON
+  error: string | null;
+  created_at: string;
+  expires_at: string | null;
 }
 
 export class WorkflowDb {
@@ -130,17 +140,22 @@ export class WorkflowDb {
       CREATE INDEX IF NOT EXISTS idx_steps_run ON step_executions(run_id);
       CREATE INDEX IF NOT EXISTS idx_steps_status ON step_executions(status);
       CREATE INDEX IF NOT EXISTS idx_steps_iteration ON step_executions(run_id, step_id, iteration_index);
-    `);
 
-    // Ensure usage column exists (migration for older databases)
-    // Use PRAGMA table_info to check column existence - more reliable than catching errors
-    const columns = this.db.prepare('PRAGMA table_info(step_executions)').all() as {
-      name: string;
-    }[];
-    const hasUsageColumn = columns.some((col) => col.name === 'usage');
-    if (!hasUsageColumn) {
-      this.db.exec('ALTER TABLE step_executions ADD COLUMN usage TEXT;');
-    }
+      CREATE TABLE IF NOT EXISTS idempotency_records (
+        idempotency_key TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        step_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        output TEXT,
+        error TEXT,
+        created_at TEXT NOT NULL,
+        expires_at TEXT,
+        FOREIGN KEY (run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_idempotency_run ON idempotency_records(run_id);
+      CREATE INDEX IF NOT EXISTS idx_idempotency_expires ON idempotency_records(expires_at);
+    `);
   }
 
   // ===== Workflow Runs =====
@@ -354,6 +369,112 @@ export class WorkflowDb {
         LIMIT 1
       `);
       return stmt.get(workflowName) as WorkflowRun | null;
+    });
+  }
+  // ===== Idempotency Records =====
+
+  /**
+   * Get an idempotency record by key
+   * Returns null if not found or expired
+   */
+  async getIdempotencyRecord(key: string): Promise<IdempotencyRecord | null> {
+    return this.withRetry(() => {
+      const stmt = this.db.prepare(`
+        SELECT * FROM idempotency_records
+        WHERE idempotency_key = ?
+        AND (expires_at IS NULL OR expires_at > datetime('now'))
+      `);
+      return stmt.get(key) as IdempotencyRecord | null;
+    });
+  }
+
+  /**
+   * Store an idempotency record
+   * If a record with the same key exists, it will be replaced
+   */
+  async storeIdempotencyRecord(
+    key: string,
+    runId: string,
+    stepId: string,
+    status: StepStatus,
+    output?: unknown,
+    error?: string,
+    ttlSeconds?: number
+  ): Promise<void> {
+    await this.withRetry(() => {
+      const expiresAt = ttlSeconds ? new Date(Date.now() + ttlSeconds * 1000).toISOString() : null;
+      const stmt = this.db.prepare(`
+        INSERT OR REPLACE INTO idempotency_records
+        (idempotency_key, run_id, step_id, status, output, error, created_at, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?)
+      `);
+      stmt.run(
+        key,
+        runId,
+        stepId,
+        status,
+        output === undefined ? null : JSON.stringify(output),
+        error || null,
+        expiresAt
+      );
+    });
+  }
+
+  /**
+   * Remove expired idempotency records
+   */
+  async pruneIdempotencyRecords(): Promise<number> {
+    return await this.withRetry(() => {
+      const stmt = this.db.prepare(`
+        DELETE FROM idempotency_records
+        WHERE expires_at IS NOT NULL AND expires_at < datetime('now')
+      `);
+      const result = stmt.run();
+      return result.changes;
+    });
+  }
+
+  /**
+   * Clear idempotency records for a specific run
+   */
+  async clearIdempotencyRecords(runId: string): Promise<number> {
+    return await this.withRetry(() => {
+      const stmt = this.db.prepare('DELETE FROM idempotency_records WHERE run_id = ?');
+      const result = stmt.run(runId);
+      return result.changes;
+    });
+  }
+
+  /**
+   * List idempotency records, optionally filtered by run ID
+   */
+  async listIdempotencyRecords(runId?: string): Promise<IdempotencyRecord[]> {
+    return this.withRetry(() => {
+      if (runId) {
+        const stmt = this.db.prepare(`
+          SELECT * FROM idempotency_records
+          WHERE run_id = ?
+          ORDER BY created_at DESC
+        `);
+        return stmt.all(runId) as IdempotencyRecord[];
+      }
+      const stmt = this.db.prepare(`
+        SELECT * FROM idempotency_records
+        ORDER BY created_at DESC
+        LIMIT 100
+      `);
+      return stmt.all() as IdempotencyRecord[];
+    });
+  }
+
+  /**
+   * Clear all idempotency records
+   */
+  async clearAllIdempotencyRecords(): Promise<number> {
+    return await this.withRetry(() => {
+      const stmt = this.db.prepare('DELETE FROM idempotency_records');
+      const result = stmt.run();
+      return result.changes;
     });
   }
 

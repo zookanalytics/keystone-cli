@@ -164,11 +164,11 @@ mcp_servers:
       GITHUB_PERSONAL_ACCESS_TOKEN: "your-github-pat" # Or omit if GITHUB_TOKEN is in your .env
 
 storage:
-
   retention_days: 30
+  redact_secrets_at_rest: true
 ```
 
-`storage.retention_days` sets the default window used by `keystone maintenance` / `keystone prune`.
+`storage.retention_days` sets the default window used by `keystone maintenance` / `keystone prune`. `storage.redact_secrets_at_rest` controls whether secret inputs and known secrets are redacted before storing run data (default `true`).
 
 ### Model & Provider Resolution
 
@@ -298,6 +298,8 @@ Keystone uses `${{ }}` syntax for dynamic values. Expressions are evaluated usin
 - `${{ env.NAME }}`: Access environment variables (process env merged with workflow-level `env`).
   Workflow-level `env` is evaluated per step; if an expression cannot be resolved yet, the variable is skipped with a warning.
 
+Inputs support `values` for enums and `secret: true` for sensitive values (redacted in logs and at rest by default; resumptions may require re-entry).
+
 Standard JavaScript-like expressions are supported: `${{ steps.build.status == 'success' ? '🚀' : '❌' }}`.
 
 ---
@@ -312,8 +314,10 @@ outputs:
 
 Keystone supports several specialized step types:
 
+- Any step can optionally define `inputSchema` and/or `outputSchema` (JSON Schema) to validate evaluated inputs before execution and outputs after completion.
+
 - `shell`: Run arbitrary shell commands.
-- `llm`: Prompt an agent and get structured or unstructured responses. Supports `schema` (JSON Schema) for structured output.
+- `llm`: Prompt an agent and get structured or unstructured responses. Supports `outputSchema` (JSON Schema) for structured output.
   - `allowClarification`: Boolean (default `false`). If `true`, allows the LLM to ask clarifying questions back to the user or suspend the workflow if no human is available.
   - `maxIterations`: Number (default `10`). Maximum number of tool-calling loops allowed for the agent.
   - `allowInsecure`: Boolean (default `false`). Set `true` to allow risky tool execution.
@@ -382,6 +386,113 @@ When a step fails, the specified agent is invoked with the error details. The ag
     return data.map(i => i.value * 2).reduce((a, b) => a + b, 0);
 ```
 ```
+
+---
+
+## 🔧 Advanced Features
+
+### Idempotency Keys
+
+Make retries and resume operations safe for side-effecting steps by specifying an `idempotencyKey`. When a key matches a previous successful execution, the cached result is returned instead of re-executing the step.
+
+```yaml
+- id: charge_customer
+  type: request
+  url: https://api.stripe.com/charge
+  body: { amount: 100, customer: ${{ inputs.customer_id }} }
+  # Expression that evaluates to a unique key for this operation
+  idempotencyKey: '"charge-" + inputs.customer_id + "-" + inputs.order_id'
+```
+
+Manage idempotency records via CLI:
+- `keystone dedup list` - View all idempotency records
+- `keystone dedup clear <run_id>` - Clear records for a specific run
+- `keystone dedup clear --all` - Clear all records
+- `keystone dedup prune` - Remove expired records
+
+### AllowFailure Pattern
+
+Enable fail-forward steps that continue workflow execution even when they fail. Useful for agentic exploration where some attempts may naturally fail.
+
+```yaml
+- id: try_approach_a
+  type: llm
+  agent: explorer
+  prompt: "Try approach A to solve the problem"
+  allowFailure: true  # Workflow continues if this fails
+
+- id: analyze_results
+  type: llm
+  agent: analyst
+  prompt: |
+    Approach A status: ${{ steps.try_approach_a.status }}
+    Error (if any): ${{ steps.try_approach_a.error }}
+    Output: ${{ steps.try_approach_a.output }}
+```
+
+The step's `status` will be `'success'` even when it fails internally, but the `error` field will contain the failure details.
+
+### Global Errors Block
+
+Define workflow-level error handling that runs when a step exhausts retries. Access failure context via `last_failed_step`.
+
+```yaml
+name: resilient-workflow
+steps:
+  - id: critical_step
+    type: shell
+    run: exit 1
+    retry: { count: 2, backoff: exponential }
+
+errors:
+  - id: analyze_failure
+    type: llm
+    agent: debugger
+    prompt: |
+      Step ${{ last_failed_step.id }} failed with:
+      Error: ${{ last_failed_step.error }}
+      Suggest remediation steps.
+```
+
+The errors block runs after all retries/auto_heal are exhausted and before the `finally` block.
+
+### Input Enums and Secrets
+
+Constrain input values and mark sensitive data for automatic redaction.
+
+```yaml
+inputs:
+  environment:
+    type: string
+    values: [dev, staging, prod]  # Only these values allowed
+    default: dev
+  api_key:
+    type: string
+    secret: true  # Redacted in logs and at rest
+```
+
+### Typed Step Input/Output Schemas
+
+Validate step inputs and outputs using JSON Schema.
+
+```yaml
+- id: process_data
+  type: script
+  run: return { count: inputs.items.length, valid: true }
+  inputSchema:
+    type: object
+    properties:
+      items: { type: array, items: { type: string } }
+    required: [items]
+  outputSchema:
+    type: object
+    properties:
+      count: { type: number }
+      valid: { type: boolean }
+    required: [count, valid]
+```
+
+Schema validation errors include path-level details and are surfaced before/after step execution.
 
 ---
 
@@ -536,6 +647,9 @@ In these examples, the agent will have access to all tools provided by the MCP s
 | `ui` | Open the interactive TUI dashboard |
 | `mcp start` | Start the Keystone MCP server |
 | `mcp login <server>` | Login to a remote MCP server |
+| `dedup list [run_id]` | List idempotency records (optionally filter by run) |
+| `dedup clear <target>` | Clear idempotency records by run ID or `--all` |
+| `dedup prune` | Remove expired idempotency records |
 | `completion [shell]` | Generate shell completion script (zsh, bash) |
 | `maintenance [--days N]` | Perform database maintenance (prune old runs and vacuum) |
 

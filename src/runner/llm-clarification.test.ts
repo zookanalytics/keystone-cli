@@ -25,7 +25,7 @@ describe('LLM Clarification', () => {
       },
       default_provider: 'openai',
       model_mappings: {},
-      storage: { retention_days: 30 },
+      storage: { retention_days: 30, redact_secrets_at_rest: true },
       mcp_servers: {},
     } as unknown as Config);
   });
