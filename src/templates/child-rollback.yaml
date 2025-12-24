@@ -1,0 +1,11 @@
+name: nested-rollback-child
+description: Child workflow with a side effect and compensation
+
+steps:
+  - id: child_action
+    type: shell
+    run: echo "Child action executed"
+    compensate:
+      id: undo_child_action
+      type: shell
+      run: echo "Undoing child action..."

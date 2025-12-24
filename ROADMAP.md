@@ -132,19 +132,19 @@ Tasks:
 3. [x] Ensure timeouts and retries are consistent across restarts.
 4. [x] Document semantics and edge cases (clock skew, daylight changes).
 
-### Dynamic subflows with fan-out/fan-in and compensations
+### [x] Dynamic subflows with fan-out/fan-in and compensations
 Goal: Support complex orchestration patterns with safe rollbacks for side effects.
 Notes:
 1. Fan-out branches should be addressable for join conditions (all/any/quorum/count) with timeouts and partial results.
 2. Compensations should run in reverse completion order within a scope (step, subflow, workflow) and be idempotent.
 3. Rollbacks should be triggered on error, cancel, or explicit `rollback` while preserving original failure context.
 Tasks:
-1. Add a fan-out/fan-in join step with explicit join conditions, timeouts, and partial-result behavior.
-2. Introduce `compensate` blocks for steps, sub-workflows, and top-level workflows.
-3. Define rollback scope, ordering, and escalation rules (what happens when compensation fails).
-4. Persist compensation queues/state in the DB for resume-safe execution.
-5. Expose join/compensation status in logs and run metadata.
-6. Ship example workflows that demonstrate fan-out/fan-in and compensation patterns.
+1. [x] Add a fan-out/fan-in join step with explicit join conditions, timeouts, and partial-result behavior.
+2. [x] Introduce `compensate` blocks for steps, sub-workflows, and top-level workflows.
+3. [x] Define rollback scope, ordering, and escalation rules (what happens when compensation fails).
+4. [x] Persist compensation queues/state in the DB for resume-safe execution.
+5. [x] Expose join/compensation status in logs and run metadata.
+6. [x] Ship example workflows that demonstrate fan-out/fan-in and compensation patterns.
 
 ### Sub-workflow output contracts and mapping
 Goal: Make sub-workflow outputs predictable, namespaced, and easy to consume.

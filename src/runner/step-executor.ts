@@ -75,6 +75,86 @@ export interface StepExecutorOptions {
   sandbox?: typeof SafeSandbox;
 }
 
+import type { JoinStep } from '../parser/schema.ts';
+
+/**
+ * Execute a join step
+ */
+async function executeJoinStep(
+  step: JoinStep,
+  context: ExpressionContext,
+  _logger: Logger
+): Promise<StepResult> {
+  // Join step logic:
+  // It aggregates outputs from its 'needs'.
+  // Since the runner ensures dependencies are met (or processed),
+  // we just need to collect the results from context.steps.
+
+  const inputs: Record<string, unknown> = {};
+  const statusMap: Record<string, string> = {};
+  const realStatusMap: Record<string, 'success' | 'failed'> = {}; // Status considering allowFailure errors
+  const errors: string[] = [];
+
+  for (const depId of step.needs) {
+    const depContext = context.steps[depId];
+    if (depContext) {
+      inputs[depId] = depContext.output;
+      if (depContext.status) {
+        statusMap[depId] = depContext.status;
+      }
+      
+      // Determine effective status:
+      // If status is success but error exists (allowFailure), treat as failed for the join condition
+      const isRealSuccess = depContext.status === 'success' && !depContext.error;
+      realStatusMap[depId] = isRealSuccess ? 'success' : 'failed';
+
+      if (depContext.error) {
+        errors.push(`Dependency ${depId} failed: ${depContext.error}`);
+      }
+    }
+  }
+
+  // Validate condition
+  const condition = step.condition;
+  const total = step.needs.length;
+  // Use realStatusMap to count successes/failures
+  const successCount = Object.values(realStatusMap).filter((s) => s === 'success').length;
+  
+  // Note: We use the strict success count.
+  // If a step was skipped, it's neither success nor failed in this binary map?
+  // Skipped steps usually mean "not run". 
+  // If we want skipped steps to count as success? Probably not.
+  // Let's check skipped.
+  
+  let passed = false;
+
+  if (condition === 'all') {
+    passed = successCount === total;
+  } else if (condition === 'any') {
+    passed = successCount > 0;
+  } else if (typeof condition === 'number') {
+    passed = successCount >= condition;
+  }
+
+  // NOTE: True "any" or "quorum" (partial completion) requires Runner support to schedule the join
+  // before all dependencies are done. Currently, the runner waits for ALL dependencies.
+  // So this logic works for 'all' or 'any' (if others failed but allowFailure was true).
+  // Use allowFailure on branches to support "best effort" joins with the current runner.
+
+  if (!passed) {
+    return {
+      output: { inputs, status: statusMap },
+      status: 'failed',
+      error: `Join condition '${condition}' not met. Success: ${successCount}/${total}. Errors: ${errors.join('; ')}`,
+    };
+  }
+
+  return {
+    output: { inputs, status: statusMap },
+    status: 'success',
+  };
+}
+
 /**
  * Execute a single step based on its type
  */
@@ -146,6 +226,16 @@ export async function executeStep(
         break;
       case 'script':
         result = await executeScriptStep(step, context, logger, injectedSandbox, abortSignal);
+        break;
+      case 'join':
+        // Join is handled by the runner logic for aggregation, but we need a placeholder here
+        // or logic to aggregate results from dependencies.
+        // Actually, for 'all', 'any', 'quorum', the step *itself* should process the inputs.
+        // By the time executeStep is called, dependencies are met (for 'all').
+        // But for 'any', the runner must schedule it early.
+        // Assuming the runner handles scheduling, here we just return the aggregated output.
+        // We will assume 'context.steps' contains the dependency outputs.
+        result = await executeJoinStep(step, context, logger);
         break;
       default:
         throw new Error(`Unknown step type: ${(step as Step).type}`);

@@ -69,27 +69,45 @@ export class WorkflowRegistry {
   /**
    * Resolve a workflow name to a file path
    */
-  static resolvePath(name: string): string {
+  static resolvePath(name: string, baseDir?: string): string {
     // 1. Check if it's already a path
     if (existsSync(name) && (name.endsWith('.yaml') || name.endsWith('.yml'))) {
       return name;
     }
 
-    const searchPaths = WorkflowRegistry.getSearchPaths();
+    // 2. Check relative to baseDir if name ends with yaml/yml
+    if (baseDir && (name.endsWith('.yaml') || name.endsWith('.yml'))) {
+      const fullPath = join(baseDir, name);
+      if (existsSync(fullPath)) return fullPath;
+    }
 
-    // 2. Search by filename in standard dirs
+    const searchPaths = this.getSearchPaths();
+    if (baseDir) {
+      searchPaths.unshift(baseDir);
+      // Also check .keystone/workflows relative to baseDir if any
+      const relativeKeystone = join(baseDir, '.keystone', 'workflows');
+      if (existsSync(relativeKeystone)) searchPaths.unshift(relativeKeystone);
+    }
+
+    // 3. Search by filename in standard dirs
     for (const dir of searchPaths) {
       if (!existsSync(dir)) continue;
 
-      // Check exact filename match (name.yaml)
-      const pathYaml = join(dir, `${name}.yaml`);
-      if (existsSync(pathYaml)) return pathYaml;
+      // Check exact filename match (name.yaml) - only if name doesn't already HAVE extension
+      if (!name.endsWith('.yaml') && !name.endsWith('.yml')) {
+        const pathYaml = join(dir, `${name}.yaml`);
+        if (existsSync(pathYaml)) return pathYaml;
 
-      const pathYml = join(dir, `${name}.yml`);
-      if (existsSync(pathYml)) return pathYml;
+        const pathYml = join(dir, `${name}.yml`);
+        if (existsSync(pathYml)) return pathYml;
+      } else {
+        // Just check if name exists in this dir
+        const fullPath = join(dir, name);
+        if (existsSync(fullPath)) return fullPath;
+      }
     }
 
-    // 3. Search by internal workflow name
+    // 4. Search by internal workflow name
     for (const dir of searchPaths) {
       if (!existsSync(dir)) continue;
 

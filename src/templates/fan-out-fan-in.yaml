@@ -1,0 +1,61 @@
+name: fan-out-fan-in-example
+description: Demonstrates dynamic join conditions and nested compensations
+
+inputs:
+  should_fail:
+    type: boolean
+    default: false
+
+steps:
+  - id: prepare
+    type: shell
+    run: echo "Preparing..."
+    compensate:
+      id: cleanup_prepare
+      type: shell
+      run: echo "Cleaning up preparation..."
+
+  - id: parallel_1
+    type: shell
+    run: sleep 2 && echo "Parallel 1 done"
+    needs: [prepare]
+    compensate:
+      id: undo_1
+      type: shell
+      run: echo "Undoing Parallel 1..."
+
+  - id: parallel_2
+    type: shell
+    run: |
+      echo "Parallel 2 failing intentionally..."
+      exit 1
+    needs: [prepare]
+    compensate:
+      id: undo_2
+      type: shell
+      run: echo "Undoing Parallel 2..."
+
+  - id: early_join
+    type: join
+    condition: any
+    needs: [parallel_1, parallel_2]
+
+  - id: after_early_join
+    type: shell
+    run: echo "One of the parallel steps finished! Proceeding early..."
+    needs: [early_join]
+
+  - id: final_join
+    type: join
+    condition: all
+    needs: [parallel_1, parallel_2]
+
+  - id: conclude
+    type: shell
+    run: echo "Both parallel steps finished! Workflow complete."
+    needs: [final_join]
+
+compensate:
+  id: workflow_cleanup
+  type: shell
+  run: echo "Performing final top-level workflow cleanup..."

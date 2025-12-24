@@ -124,6 +124,7 @@ const BaseStepSchema = z.object({
   outputSchema: z.any().optional(),
   outputRetries: z.number().int().min(0).optional(), // Max retries for output validation failures
   repairStrategy: z.enum(['reask', 'repair', 'hybrid']).optional(), // Strategy for output repair
+  compensate: z.lazy(() => StepSchema).optional(), // Compensation step to run on rollback
 });
 
 // ===== Step Type Schemas =====
@@ -142,6 +143,12 @@ const AgentToolSchema = z.object({
   description: z.string().optional(),
   parameters: z.any().optional(), // JSON Schema for tool arguments
   execution: z.lazy(() => StepSchema), // Tools are essentially steps
+});
+
+const JoinStepSchema = BaseStepSchema.extend({
+  type: z.literal('join'),
+  target: z.enum(['steps', 'branches']).optional().default('steps'),
+  condition: z.union([z.literal('all'), z.literal('any'), z.number().int().positive()]).default('all'),
 });
 
 const LlmStepSchema = BaseStepSchema.extend({
@@ -241,6 +248,7 @@ export const StepSchema: z.ZodType<any> = z.lazy(() =>
     SleepStepSchema,
     ScriptStepSchema,
     MemoryStepSchema,
+    JoinStepSchema,
   ])
 );
 
@@ -265,6 +273,7 @@ export const WorkflowSchema = z.object({
   steps: z.array(StepSchema),
   errors: z.array(StepSchema).optional(),
   finally: z.array(StepSchema).optional(),
+  compensate: z.lazy(() => StepSchema).optional(), // Top-level compensation for the entire workflow
   eval: EvalSchema.optional(),
 });
 
@@ -293,6 +302,7 @@ export type HumanStep = z.infer<typeof HumanStepSchema>;
 export type SleepStep = z.infer<typeof SleepStepSchema>;
 export type ScriptStep = z.infer<typeof ScriptStepSchema>;
 export type MemoryStep = z.infer<typeof MemoryStepSchema>;
+export type JoinStep = z.infer<typeof JoinStepSchema>;
 export type Workflow = z.infer<typeof WorkflowSchema>;
 export type AgentTool = z.infer<typeof AgentToolSchema>;
 export type Agent = z.infer<typeof AgentSchema>;

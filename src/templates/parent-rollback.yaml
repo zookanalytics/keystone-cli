@@ -1,0 +1,16 @@
+name: nested-rollback-parent
+description: Parent workflow that triggers a child and then fails
+
+steps:
+  - id: run_child
+    type: workflow
+    path: ./child-rollback.yaml
+    compensate:
+      id: parent_post_child_undo
+      type: shell
+      run: echo "Parent cleanup after child rollback..."
+
+  - id: fail_step
+    type: shell
+    run: exit 1
+    needs: [run_child]

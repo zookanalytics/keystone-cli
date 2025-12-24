@@ -58,6 +58,19 @@ export interface DurableTimer {
   completed_at: string | null;
 }
 
+export interface CompensationRecord {
+  id: string;
+  run_id: string;
+  step_id: string;
+  compensation_step_id: string; // The ID of the compensation step definition (usually randomUUID)
+  definition: string; // JSON definition of the compensation step
+  status: StepStatus;
+  output: string | null;
+  error: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
 export class WorkflowDb {
   private db: Database;
 
@@ -180,6 +193,23 @@ export class WorkflowDb {
       CREATE INDEX IF NOT EXISTS idx_timers_wake ON durable_timers(wake_at);
       CREATE INDEX IF NOT EXISTS idx_timers_run ON durable_timers(run_id);
       CREATE INDEX IF NOT EXISTS idx_timers_pending ON durable_timers(wake_at, completed_at);
+
+      CREATE TABLE IF NOT EXISTS compensations (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        step_id TEXT NOT NULL,
+        compensation_step_id TEXT NOT NULL,
+        definition TEXT NOT NULL,
+        status TEXT NOT NULL,
+        output TEXT,
+        error TEXT,
+        created_at TEXT NOT NULL,
+        completed_at TEXT,
+        FOREIGN KEY (run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_compensations_run ON compensations(run_id);
+      CREATE INDEX IF NOT EXISTS idx_compensations_status ON compensations(status);
     `);
   }
 
@@ -351,6 +381,21 @@ export class WorkflowDb {
         LIMIT 1
       `);
       return stmt.get(runId, stepId, iterationIndex) as StepExecution | null;
+    });
+  }
+
+  /**
+   * Get the main execution (non-iteration) of a step
+   */
+  public async getMainStep(runId: string, stepId: string): Promise<StepExecution | null> {
+    return this.withRetry(() => {
+      const stmt = this.db.prepare(`
+        SELECT * FROM step_executions
+        WHERE run_id = ? AND step_id = ? AND iteration_index IS NULL
+        ORDER BY started_at DESC
+        LIMIT 1
+      `);
+      return stmt.get(runId, stepId) as StepExecution | null;
     });
   }
 
@@ -689,6 +734,70 @@ export class WorkflowDb {
       const stmt = this.db.prepare('DELETE FROM durable_timers');
       const result = stmt.run();
       return result.changes;
+    });
+  }
+
+  // ===== Compensations =====
+
+  async registerCompensation(
+    id: string,
+    runId: string,
+    stepId: string,
+    compensationStepId: string,
+    definition: string
+  ): Promise<void> {
+    await this.withRetry(() => {
+      const stmt = this.db.prepare(`
+        INSERT INTO compensations (id, run_id, step_id, compensation_step_id, definition, status, created_at)
+        VALUES (?, ?, ?, ?, ?, 'pending', datetime('now'))
+      `);
+      stmt.run(id, runId, stepId, compensationStepId, definition);
+    });
+  }
+
+  async updateCompensationStatus(
+    id: string,
+    status: StepStatus,
+    output?: unknown,
+    error?: string
+  ): Promise<void> {
+    await this.withRetry(() => {
+      const stmt = this.db.prepare(`
+        UPDATE compensations
+        SET status = ?, output = ?, error = ?, completed_at = ?
+        WHERE id = ?
+      `);
+      const completedAt =
+        status === 'success' || status === 'failed' ? new Date().toISOString() : null;
+      stmt.run(
+        status,
+        output === undefined ? null : JSON.stringify(output),
+        error || null,
+        completedAt,
+        id
+      );
+    });
+  }
+
+  async getPendingCompensations(runId: string): Promise<CompensationRecord[]> {
+    return this.withRetry(() => {
+      const stmt = this.db.prepare(`
+        SELECT * FROM compensations
+        WHERE run_id = ? AND status = 'pending'
+        ORDER BY created_at DESC, rowid DESC
+      `);
+      return stmt.all(runId) as CompensationRecord[];
+    });
+  }
+
+  async getAllCompensations(runId: string): Promise<CompensationRecord[]> {
+    return this.withRetry(() => {
+      const stmt = this.db.prepare(`
+        SELECT * FROM compensations
+        WHERE run_id = ?
+        ORDER BY created_at DESC, rowid DESC
+      `);
+      return stmt.all(runId) as CompensationRecord[];
     });
   }
 

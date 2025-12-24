@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { dirname, join } from 'node:path';
 import { MemoryDb } from '../db/memory-db.ts';
 import { type RunStatus, WorkflowDb } from '../db/workflow-db.ts';
@@ -75,6 +77,7 @@ export interface RunOptions {
   dedup?: boolean;
   getAdapter?: typeof getAdapter;
   depth?: number;
+  allowSuccessResume?: boolean;
 }
 
 export interface StepContext {
@@ -173,6 +176,10 @@ export class WorkflowRunner {
       this.runId = randomUUID();
     }
 
+    if (this.workflow.compensate) {
+      // We will register at the start of run()
+    }
+
     this.setupSignalHandlers();
   }
 
@@ -193,11 +200,13 @@ export class WorkflowRunner {
     }
 
     // Only allow resuming failed, paused, canceled, or running (crash recovery) runs
+    // Unless specifically allowed (e.g. for rollback/compensation)
     if (
       run.status !== WorkflowStatus.FAILED &&
       run.status !== WorkflowStatus.PAUSED &&
       run.status !== WorkflowStatus.RUNNING &&
-      run.status !== WorkflowStatus.CANCELED
+      run.status !== WorkflowStatus.CANCELED &&
+      !(this.options.allowSuccessResume && run.status === WorkflowStatus.SUCCESS)
     ) {
       throw new Error(
         `Cannot resume run with status '${run.status}'. Only 'failed', 'paused', 'canceled', or 'running' runs can be resumed.`
@@ -441,6 +450,79 @@ export class WorkflowRunner {
   }
 
   /**
+   * Process compensations (rollback)
+   */
+  private async processCompensations(errorReason: string): Promise<void> {
+    this.logger.log(`\n↩️  Initiating rollback due to: ${errorReason}`);
+
+    try {
+      // Get all pending compensations
+      const compensations = await this.db.getPendingCompensations(this.runId);
+
+      if (compensations.length === 0) {
+        this.logger.log('  No pending compensations found.');
+        return;
+      }
+
+      this.logger.log(`  Found ${compensations.length} compensation(s) to execute.`);
+
+      // Execute in reverse order (LIFO) - already sorted by query
+      for (const compRecord of compensations) {
+        const stepDef = JSON.parse(compRecord.definition) as Step;
+        this.logger.log(`  Running compensation: ${stepDef.id} (undoing ${compRecord.step_id})`);
+
+        await this.db.updateCompensationStatus(compRecord.id, 'running');
+
+        // Build context for compensation
+        // It has access to the original step's output via steps.<step_id>.output
+        const context = this.buildContext();
+
+        try {
+          // Execute the compensation step
+          const result = await executeStep(stepDef, context, this.logger, {
+            executeWorkflowFn: this.executeSubWorkflow.bind(this),
+            mcpManager: this.mcpManager,
+            memoryDb: this.memoryDb,
+            workflowDir: this.options.workflowDir,
+            dryRun: this.options.dryRun,
+          });
+
+          if (result.status === 'success') {
+            this.logger.log(`  ✓ Compensation ${stepDef.id} succeeded`);
+            await this.db.updateCompensationStatus(compRecord.id, 'success', result.output);
+          } else {
+            this.logger.error(`  ✗ Compensation ${stepDef.id} failed: ${result.error}`);
+            await this.db.updateCompensationStatus(compRecord.id, 'failed', result.output, result.error);
+          }
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          this.logger.error(`  ✗ Compensation ${stepDef.id} crashed: ${errMsg}`);
+          await this.db.updateCompensationStatus(compRecord.id, 'failed', null, errMsg);
+        }
+
+        // 2. Recursive rollback for sub-workflows
+        // Try to find if this step was a workflow step with a subRunId
+        const stepExec = await this.db.getMainStep(this.runId, compRecord.step_id);
+        if (stepExec && stepExec.output) {
+          try {
+            const output = JSON.parse(stepExec.output);
+            const subRunId = output?.__subRunId;
+            if (subRunId) {
+              await this.cascadeRollback(subRunId, errorReason);
+            }
+          } catch (_e) {
+            // ignore parse errors
+          }
+        }
+      }
+
+      this.logger.log('  Rollback completed.\n');
+    } catch (error) {
+      this.logger.error(`  ⚠️ Error during rollback processing: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
    * Stop the runner and cleanup resources
    */
   public async stop(status: RunStatus = WorkflowStatus.FAILED, error?: string): Promise<void> {
@@ -449,6 +531,11 @@ export class WorkflowRunner {
 
     try {
       this.removeSignalHandlers();
+
+      // Trigger rollback if failing or canceled
+      if (status === WorkflowStatus.FAILED || status === WorkflowStatus.CANCELED) {
+        await this.processCompensations(error || status);
+      }
 
       // Update run status in DB
       await this.db.updateRunStatus(
@@ -552,8 +639,8 @@ export class WorkflowRunner {
     try {
       const result = validateJsonSchema(schema, data);
       if (result.valid) return;
-      const details = formatSchemaErrors(result.errors)
-        .map((line) => `  - ${line}`)
+      const details = result.errors
+        .map((line: string) => `  - ${line}`)
         .join('\n');
       throw new Error(
         `${kind === 'input' ? 'Input' : 'Output'} schema validation failed for step "${stepId}":\n${details}`
@@ -588,11 +675,11 @@ export class WorkflowRunner {
         if (step.env) {
           env = {};
           for (const [key, value] of Object.entries(step.env)) {
-            env[key] = ExpressionEvaluator.evaluateString(value, context);
+            env[key] = ExpressionEvaluator.evaluateString(value as string, context);
           }
         }
         return stripUndefined({
-          run: ExpressionEvaluator.evaluateString(step.run, context),
+          run: ExpressionEvaluator.evaluateString((step as import('../parser/schema.ts').ShellStep).run, context),
           dir: step.dir ? ExpressionEvaluator.evaluateString(step.dir, context) : undefined,
           env,
           allowInsecure: step.allowInsecure,
@@ -600,10 +687,10 @@ export class WorkflowRunner {
       }
       case 'file':
         return stripUndefined({
-          path: ExpressionEvaluator.evaluateString(step.path, context),
+          path: ExpressionEvaluator.evaluateString((step as import('../parser/schema.ts').FileStep).path, context),
           content:
-            step.content !== undefined
-              ? ExpressionEvaluator.evaluateString(step.content, context)
+            (step as import('../parser/schema.ts').FileStep).content !== undefined
+              ? ExpressionEvaluator.evaluateString((step as import('../parser/schema.ts').FileStep).content as string, context)
               : undefined,
           op: step.op,
           allowOutsideCwd: step.allowOutsideCwd,
@@ -613,11 +700,11 @@ export class WorkflowRunner {
         if (step.headers) {
           headers = {};
           for (const [key, value] of Object.entries(step.headers)) {
-            headers[key] = ExpressionEvaluator.evaluateString(value, context);
+            headers[key] = ExpressionEvaluator.evaluateString(value as string, context);
           }
         }
         return stripUndefined({
-          url: ExpressionEvaluator.evaluateString(step.url, context),
+          url: ExpressionEvaluator.evaluateString((step as import('../parser/schema.ts').RequestStep).url, context),
           method: step.method,
           headers,
           body: step.body ? ExpressionEvaluator.evaluateObject(step.body, context) : undefined,
@@ -626,7 +713,7 @@ export class WorkflowRunner {
       }
       case 'human':
         return stripUndefined({
-          message: ExpressionEvaluator.evaluateString(step.message, context),
+          message: ExpressionEvaluator.evaluateString((step as import('../parser/schema.ts').HumanStep).message, context),
           inputType: step.inputType,
         });
       case 'sleep': {
@@ -650,7 +737,7 @@ export class WorkflowRunner {
         });
       case 'workflow':
         return stripUndefined({
-          path: step.path,
+          path: (step as import('../parser/schema.ts').WorkflowStep).path,
           inputs: step.inputs
             ? ExpressionEvaluator.evaluateObject(step.inputs, context)
             : undefined,
@@ -1021,11 +1108,11 @@ export class WorkflowRunner {
         scopedIdempotencyKey = scope === 'run' ? `${this.runId}:${idempotencyKey}` : idempotencyKey;
         idempotencyTtlSeconds = step.idempotencyTtlSeconds;
 
-          const claim = await this.claimIdempotencyRecord(
-            scopedIdempotencyKey,
-            step.id,
-            idempotencyTtlSeconds
-          );
+        const claim = await this.claimIdempotencyRecord(
+          scopedIdempotencyKey,
+          step.id,
+          idempotencyTtlSeconds
+        );
         if (claim.status === 'hit') {
           this.logger.log(`  ⟳ Step ${step.id} skipped (idempotency hit: ${idempotencyKey})`);
           const output = claim.output;
@@ -1062,11 +1149,11 @@ export class WorkflowRunner {
     const idempotencyContextForRetry =
       idempotencyClaimed && scopedIdempotencyKey
         ? {
-            rawKey: idempotencyKey || scopedIdempotencyKey,
-            scopedKey: scopedIdempotencyKey,
-            ttlSeconds: idempotencyTtlSeconds,
-            claimed: true,
-          }
+          rawKey: idempotencyKey || scopedIdempotencyKey,
+          scopedKey: scopedIdempotencyKey,
+          ttlSeconds: idempotencyTtlSeconds,
+          claimed: true,
+        }
         : undefined;
 
     let stepToExecute = step;
@@ -1308,6 +1395,32 @@ export class WorkflowRunner {
         const existingTimer = await this.db.getTimerByStep(this.runId, step.id);
         if (existingTimer) {
           await this.db.completeTimer(existingTimer.id);
+        }
+      }
+
+      // Register compensation if step succeeded and defines one
+      if (result.status === StepStatus.SUCCESS && step.compensate) {
+        try {
+          // Ensure compensation step has an ID
+          const compStep = {
+            ...step.compensate,
+            id: step.compensate.id || `${step.id}-compensate`,
+          };
+          const definition = JSON.stringify(compStep);
+          const compensationId = randomUUID();
+
+          this.logger.log(`  📎 Registering compensation for step ${step.id}`);
+          await this.db.registerCompensation(
+            compensationId,
+            this.runId,
+            step.id,
+            compStep.id,
+            definition
+          );
+        } catch (compError) {
+          this.logger.warn(
+            `  ⚠️ Failed to register compensation for step ${step.id}: ${compError instanceof Error ? compError.message : String(compError)}`
+          );
         }
       }
 
@@ -1804,7 +1917,7 @@ Please provide a corrected response that exactly matches the required schema.`;
     step: WorkflowStep,
     context: ExpressionContext
   ): Promise<StepResult> {
-    const workflowPath = WorkflowRegistry.resolvePath(step.path);
+    const workflowPath = WorkflowRegistry.resolvePath(step.path, this.options.workflowDir);
     const workflow = WorkflowParser.loadWorkflow(workflowPath);
     const subWorkflowDir = dirname(workflowPath);
 
@@ -1831,7 +1944,10 @@ Please provide a corrected response that exactly matches the required schema.`;
     try {
       const output = await subRunner.run();
       return {
-        output,
+        output: {
+          ...((typeof output === 'object' && output !== null && !Array.isArray(output)) ? output : {}),
+          __subRunId: subRunner.runId, // Track sub-workflow run ID for rollback
+        },
         status: 'success',
       };
     } catch (error) {
@@ -1932,6 +2048,11 @@ Please provide a corrected response that exactly matches the required schema.`;
         );
       }
 
+      // Register top-level compensation if defined
+      if (this.workflow.compensate) {
+        await this.registerWorkflowCompensation();
+      }
+
       // Execute steps in parallel where possible (respecting dependencies and global concurrency)
       const pendingSteps = new Set(remainingSteps);
       const runningPromises = new Map<string, Promise<void>>();
@@ -1958,7 +2079,13 @@ Please provide a corrected response that exactly matches the required schema.`;
             if (!step) {
               throw new Error(`Step ${stepId} not found in workflow`);
             }
-            const dependenciesMet = step.needs.every((dep: string) => completedSteps.has(dep));
+
+            let dependenciesMet = false;
+            if (step.type === 'join') {
+              dependenciesMet = this.isJoinConditionMet(step as import('../parser/schema.ts').JoinStep, completedSteps);
+            } else {
+              dependenciesMet = step.needs.every((dep: string) => completedSteps.has(dep));
+            }
 
             if (dependenciesMet && runningPromises.size < globalConcurrencyLimit) {
               pendingSteps.delete(stepId);
@@ -2001,8 +2128,23 @@ Please provide a corrected response that exactly matches the required schema.`;
         if (runningPromises.size > 0) {
           await Promise.allSettled(runningPromises.values());
         }
+
+        const msg = error instanceof Error ? error.message : String(error);
+
+        // Trigger rollback
+        await this.processCompensations(msg);
+
+        // Re-throw to be caught by the outer block (which calls stop)
+        // Actually, the outer caller usually handles this. 
+        // But we want to ensure rollback happens BEFORE final status update if possible.
         throw error;
       }
+
+      // Determine final status
+      const failedSteps = remainingSteps.filter(
+        (id) => this.stepContexts.get(id)?.status === StepStatus.FAILED
+      );
+
 
       // Evaluate outputs
       const outputs = this.evaluateOutputs();
@@ -2237,5 +2379,106 @@ Please provide a corrected response that exactly matches the required schema.`;
     }
 
     return outputs;
+  }
+
+  /**
+   * Check if a join condition is met based on completed dependencies
+   */
+  private isJoinConditionMet(
+    step: import('../parser/schema.ts').JoinStep,
+    completedSteps: Set<string>
+  ): boolean {
+    const total = step.needs.length;
+    if (total === 0) return true;
+
+    // Count successful/skipped dependencies
+    const successCount = step.needs.filter((dep) => completedSteps.has(dep)).length;
+
+    // Find failed/suspended dependencies (that we've already tried)
+    // If some dependencies failed (and didn't allowFailure), the whole workflow would usually fail.
+    // If allowFailure was true, they are in completedSteps.
+    // So completedSteps effectively represents "done successfully".
+
+    if (step.condition === 'all') {
+      return successCount === total;
+    }
+    if (step.condition === 'any') {
+      // Met if at least one succeeded, OR if all finished and none succeeded?
+      // Actually strictly "any" means at least one success.
+      return successCount > 0;
+    }
+    if (typeof step.condition === 'number') {
+      return successCount >= step.condition;
+    }
+
+    return successCount === total;
+  }
+
+  /**
+   * Register top-level compensation for the workflow
+   */
+  private async registerWorkflowCompensation(): Promise<void> {
+    if (!this.workflow.compensate) return;
+
+    // Check if already registered (for resume)
+    const existing = await this.db.getAllCompensations(this.runId);
+    if (existing.some((c) => c.step_id === 'workflow')) return;
+
+    const compStep = {
+      ...this.workflow.compensate,
+      id: this.workflow.compensate.id || `${this.workflow.name}-compensate`,
+    };
+    const definition = JSON.stringify(compStep);
+    const compensationId = randomUUID();
+
+    this.logger.log(`  📎 Registering top-level compensation for workflow ${this.workflow.name}`);
+    await this.db.registerCompensation(
+      compensationId,
+      this.runId,
+      'workflow', // use 'workflow' as step_id marker
+      compStep.id,
+      definition
+    );
+  }
+
+  /**
+   * Cascade rollback to a child sub-workflow
+   */
+  private async cascadeRollback(subRunId: string, errorReason: string): Promise<void> {
+    this.logger.log(`  📂 Cascading rollback to sub-workflow: ${subRunId}`);
+    try {
+      const runRecord = await this.db.getRun(subRunId);
+      if (!runRecord) {
+        this.logger.warn(`  ⚠️ Could not find run record for sub-workflow ${subRunId}`);
+        return;
+      }
+
+      const workflowPath = WorkflowRegistry.resolvePath(runRecord.workflow_name, this.options.workflowDir);
+      const workflow = WorkflowParser.loadWorkflow(workflowPath);
+
+      const subRunner = new WorkflowRunner(workflow, {
+        resumeRunId: subRunId,
+        dbPath: this.db.dbPath,
+        logger: this.logger,
+        mcpManager: this.mcpManager,
+        workflowDir: dirname(workflowPath),
+        depth: this.depth + 1,
+        allowSuccessResume: true,
+      });
+
+      // Restore sub-workflow state
+      await subRunner.restoreState();
+
+      // Trigger its compensations
+      // We call the private method directly since we're in the same class (different instance)
+      // but TypeScript might complain if it's strictly private. 
+      // Actually, in TS, private is accessible by other instances of the same class.
+      await subRunner.processCompensations(errorReason);
+
+    } catch (error) {
+      this.logger.error(
+        `  ⚠️ Failed to cascade rollback to ${subRunId}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 }

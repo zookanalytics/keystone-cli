@@ -140,8 +140,8 @@ export async function executeShell(
   const cwd = step.dir ? ExpressionEvaluator.evaluateString(step.dir, context) : undefined;
   const mergedEnv = Object.keys(env).length > 0 ? { ...Bun.env, ...env } : Bun.env;
 
-  // Shell metacharacters that require a real shell
-  const hasShellMetas = /[|&;<>`$!]/.test(command);
+  // Shell metacharacters that require a real shell (including newlines)
+  const hasShellMetas = /[|&;<>`$!\n]/.test(command);
 
   // Common shell builtins that must run in a shell
   const firstWord = command.trim().split(/\s+/)[0];
@@ -208,7 +208,7 @@ export async function executeShell(
       const abortHandler = () => {
         try {
           proc.kill();
-        } catch {}
+        } catch { }
       };
       if (abortSignal) {
         abortSignal.addEventListener('abort', abortHandler, { once: true });
@@ -233,7 +233,7 @@ export async function executeShell(
           if (typeof (proc as unknown as { kill?: () => void }).kill === 'function') {
             (proc as unknown as { kill: () => void }).kill();
           }
-        } catch {}
+        } catch { }
       };
       if (abortSignal) {
         abortSignal.addEventListener('abort', abortHandler, { once: true });
