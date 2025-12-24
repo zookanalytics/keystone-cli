@@ -1943,9 +1943,39 @@ Please provide a corrected response that exactly matches the required schema.`;
 
     try {
       const output = await subRunner.run();
+
+      const rawOutputs = (typeof output === 'object' && output !== null && !Array.isArray(output)) ? output : {};
+      const mappedOutputs: Record<string, unknown> = {};
+
+      // Handle explicit output mapping
+      if (step.outputMapping) {
+        for (const [alias, mapping] of Object.entries(step.outputMapping)) {
+          let originalKey: string;
+          let defaultValue: unknown;
+
+          if (typeof mapping === 'string') {
+            originalKey = mapping;
+          } else {
+            originalKey = mapping.from;
+            defaultValue = mapping.default;
+          }
+
+          if (originalKey in rawOutputs) {
+            mappedOutputs[alias] = rawOutputs[originalKey];
+          } else if (defaultValue !== undefined) {
+            mappedOutputs[alias] = defaultValue;
+          } else {
+            throw new Error(
+              `Sub-workflow output "${originalKey}" not found (required by mapping "${alias}" in step "${step.id}")`
+            );
+          }
+        }
+      }
+
       return {
         output: {
-          ...((typeof output === 'object' && output !== null && !Array.isArray(output)) ? output : {}),
+          ...mappedOutputs,
+          outputs: rawOutputs, // Namespaced raw outputs
           __subRunId: subRunner.runId, // Track sub-workflow run ID for rollback
         },
         status: 'success',
@@ -2360,21 +2390,30 @@ Please provide a corrected response that exactly matches the required schema.`;
    * Evaluate workflow outputs
    */
   private evaluateOutputs(): Record<string, unknown> {
-    if (!this.workflow.outputs) {
-      return {};
-    }
-
     const context = this.buildContext();
     const outputs: Record<string, unknown> = {};
 
-    for (const [key, expression] of Object.entries(this.workflow.outputs)) {
+    if (this.workflow.outputs) {
+      for (const [key, expression] of Object.entries(this.workflow.outputs)) {
+        try {
+          outputs[key] = ExpressionEvaluator.evaluate(expression, context);
+        } catch (error) {
+          this.logger.warn(
+            `Warning: Failed to evaluate output "${key}": ${error instanceof Error ? error.message : String(error)}`
+          );
+          outputs[key] = null;
+        }
+      }
+    }
+
+    // Validate outputs against schema if provided
+    if (this.workflow.outputSchema) {
       try {
-        outputs[key] = ExpressionEvaluator.evaluate(expression, context);
+        this.validateSchema('output', this.workflow.outputSchema, outputs, 'workflow');
       } catch (error) {
-        this.logger.warn(
-          `Warning: Failed to evaluate output "${key}": ${error instanceof Error ? error.message : String(error)}`
+        throw new Error(
+          `Workflow output validation failed: ${error instanceof Error ? error.message : String(error)}`
         );
-        outputs[key] = null;
       }
     }
 

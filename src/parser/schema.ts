@@ -183,10 +183,19 @@ const LlmStepSchema = BaseStepSchema.extend({
   allowInsecure: z.boolean().optional(),
 });
 
+const OutputMappingItemSchema = z.union([
+  z.string(), // Rename: alias -> originalKey
+  z.object({
+    from: z.string(),
+    default: z.any().optional(),
+  }),
+]);
+
 const WorkflowStepSchema = BaseStepSchema.extend({
   type: z.literal('workflow'),
   path: z.string(),
   inputs: z.record(z.string()).optional(),
+  outputMapping: z.record(OutputMappingItemSchema).optional(),
 });
 
 const FileStepSchema = BaseStepSchema.extend({
@@ -268,6 +277,7 @@ export const WorkflowSchema = z.object({
   description: z.string().optional(),
   inputs: z.record(InputSchema).optional(),
   outputs: z.record(z.string()).optional(),
+  outputSchema: z.any().optional(), // JSON Schema for final workflow outputs
   env: z.record(z.string()).optional(),
   concurrency: z.union([z.number().int().positive(), z.string()]).optional(),
   steps: z.array(StepSchema),

@@ -146,18 +146,18 @@ Tasks:
 5. [x] Expose join/compensation status in logs and run metadata.
 6. [x] Ship example workflows that demonstrate fan-out/fan-in and compensation patterns.
 
-### Sub-workflow output contracts and mapping
+### [x] Sub-workflow output contracts and mapping
 Goal: Make sub-workflow outputs predictable, namespaced, and easy to consume.
 Notes:
 1. Output contracts should be declared at the sub-workflow level and be versionable.
 2. Mapping should be explicit (select/rename) with no implicit flattening.
 3. Missing outputs should fail by default, with opt-in defaults or allow-missing.
 Tasks:
-1. Add a workflow-level output contract schema and validation on subflow completion.
-2. Namespace sub-workflow outputs under `steps.<id>.outputs` with optional alias mapping.
-3. Support output mapping (select/rename/defaults) on `type: workflow` steps.
-4. Add validation for missing outputs and type mismatches with path-level errors.
-5. Document patterns for contract-first subflows and migration guidance.
+1. [x] Add a workflow-level output contract schema and validation on subflow completion.
+2. [x] Namespace sub-workflow outputs under `steps.<id>.outputs.outputs` with optional alias mapping.
+3. [x] Support output mapping (select/rename/defaults) on `type: workflow` steps.
+4. [x] Add validation for missing outputs and type mismatches with path-level errors.
+5. [x] Document patterns for contract-first subflows and migration guidance.
 
 ### Concurrency limits and backpressure management
 Goal: Avoid overload by introducing global and per-resource concurrency pools with fair scheduling.
