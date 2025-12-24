@@ -117,10 +117,10 @@ Tasks:
 ### Interrupt support and safe cancellation (AbortSignal)
 Goal: Allow users to stop large parallel loops without corrupting the SQLite state and mark runs as canceled cleanly.
 Tasks:
-1. Add AbortController/Signal to `WorkflowRunner` and step executors.
-2. Handle SIGINT/SIGTERM to request cancellation and persist run state.
-3. Ensure foreach cancellation drains in-flight steps and blocks new scheduling.
-4. Add tests for cancellation, resume, and idempotency interactions.
+1. [x] Add AbortController/Signal to `WorkflowRunner` and step executors.
+2. [x] Handle SIGINT/SIGTERM to request cancellation and persist run state.
+3. [x] Ensure foreach cancellation drains in-flight steps and blocks new scheduling.
+4. [x] Add tests for cancellation, resume, and idempotency interactions.
 
 ## P1 - Developer experience and safe orchestration (next 2-4 releases)
 

@@ -10,6 +10,7 @@ export const StepStatus = {
   SUSPENDED: 'suspended',
   SKIPPED: 'skipped',
   RUNNING: 'running',
+  CANCELED: 'canceled',
 } as const;
 
 export type StepStatusType = (typeof StepStatus)[keyof typeof StepStatus];
@@ -20,6 +21,7 @@ export const WorkflowStatus = {
   PAUSED: 'paused',
   SUSPENDED: 'suspended',
   RUNNING: 'running',
+  CANCELED: 'canceled',
 } as const;
 
 export type WorkflowStatusType = (typeof WorkflowStatus)[keyof typeof WorkflowStatus];

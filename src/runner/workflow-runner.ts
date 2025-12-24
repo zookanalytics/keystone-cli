@@ -124,6 +124,21 @@ export class WorkflowRunner {
   private static readonly REDACTED_PLACEHOLDER = '***REDACTED***';
   private depth = 0;
   private lastFailedStep?: { id: string; error: string };
+  private abortController = new AbortController();
+
+  /**
+   * Get the abort signal for cancellation checks
+   */
+  public get abortSignal(): AbortSignal {
+    return this.abortController.signal;
+  }
+
+  /**
+   * Check if the workflow has been canceled
+   */
+  private get isCanceled(): boolean {
+    return this.abortController.signal.aborted;
+  }
 
   constructor(workflow: Workflow, options: RunOptions = {}) {
     this.workflow = workflow;
@@ -176,14 +191,15 @@ export class WorkflowRunner {
       throw new Error(`Run ${this.runId} not found`);
     }
 
-    // Only allow resuming failed, paused, or running (crash recovery) runs
+    // Only allow resuming failed, paused, canceled, or running (crash recovery) runs
     if (
       run.status !== WorkflowStatus.FAILED &&
       run.status !== WorkflowStatus.PAUSED &&
-      run.status !== WorkflowStatus.RUNNING
+      run.status !== WorkflowStatus.RUNNING &&
+      run.status !== WorkflowStatus.CANCELED
     ) {
       throw new Error(
-        `Cannot resume run with status '${run.status}'. Only 'failed', 'paused', or 'running' runs can be resumed.`
+        `Cannot resume run with status '${run.status}'. Only 'failed', 'paused', 'canceled', or 'running' runs can be resumed.`
       );
     }
 
@@ -191,6 +207,10 @@ export class WorkflowRunner {
       this.logger.warn(
         `⚠️  Resuming a run marked as 'running'. This usually means the previous process crashed or was killed forcefully. Ensure no other instances are running.`
       );
+    }
+
+    if (run.status === WorkflowStatus.CANCELED) {
+      this.logger.log('📋 Resuming a previously canceled run. Completed steps will be skipped.');
     }
 
     // Restore inputs from the previous run to ensure consistency
@@ -384,8 +404,10 @@ export class WorkflowRunner {
   private setupSignalHandlers(): void {
     const handler = async (signal: string) => {
       if (this.isStopping) return;
-      this.logger.log(`\n\n🛑 Received ${signal}. Cleaning up...`);
-      await this.stop(WorkflowStatus.FAILED, `Cancelled by user (${signal})`);
+      this.logger.log(`\n\n🛑 Received ${signal}. Canceling workflow...`);
+      // Signal cancellation to all running steps
+      this.abortController.abort();
+      await this.stop(WorkflowStatus.CANCELED, `Canceled by user (${signal})`);
 
       // Only exit if not embedded
       if (!this.options.preventExit) {
@@ -1438,9 +1460,11 @@ Please provide the fixed step configuration as JSON.`;
     const outputSchema = step.outputSchema;
 
     const strategyInstructions = {
-      reask: `Please try again, carefully following the output format requirements.`,
-      repair: `Please fix the output to match the required schema. You may need to restructure, add missing fields, or correct data types.`,
-      hybrid: `Please fix the output to match the required schema. If you cannot fix it, regenerate a completely new response.`,
+      reask: 'Please try again, carefully following the output format requirements.',
+      repair:
+        'Please fix the output to match the required schema. You may need to restructure, add missing fields, or correct data types.',
+      hybrid:
+        'Please fix the output to match the required schema. If you cannot fix it, regenerate a completely new response.',
     };
 
     return `${originalPrompt}
@@ -1498,7 +1522,8 @@ Please provide a corrected response that exactly matches the required schema.`;
       const executor = new ForeachExecutor(
         this.db,
         this.logger,
-        this.executeStepInternal.bind(this)
+        this.executeStepInternal.bind(this),
+        this.abortSignal
       );
 
       const existingContext = this.stepContexts.get(step.id) as ForeachStepContext;
@@ -1666,8 +1691,22 @@ Please provide a corrected response that exactly matches the required schema.`;
 
       try {
         while (pendingSteps.size > 0 || runningPromises.size > 0) {
+          // Check for cancellation - drain in-flight steps but don't start new ones
+          if (this.isCanceled) {
+            if (runningPromises.size > 0) {
+              this.logger.log(
+                `⏳ Waiting for ${runningPromises.size} in-flight step(s) to complete...`
+              );
+              await Promise.allSettled(runningPromises.values());
+            }
+            throw new Error('Workflow canceled by user');
+          }
+
           // 1. Find runnable steps (all dependencies met)
           for (const stepId of pendingSteps) {
+            // Don't schedule new steps if canceled
+            if (this.isCanceled) break;
+
             const step = stepMap.get(stepId);
             if (!step) {
               throw new Error(`Step ${stepId} not found in workflow`);
@@ -1697,8 +1736,8 @@ Please provide a corrected response that exactly matches the required schema.`;
             }
           }
 
-          // 2. Detect deadlock
-          if (runningPromises.size === 0 && pendingSteps.size > 0) {
+          // 2. Detect deadlock (only if not canceled)
+          if (!this.isCanceled && runningPromises.size === 0 && pendingSteps.size > 0) {
             const pendingList = Array.from(pendingSteps).join(', ');
             throw new Error(
               `Deadlock detected in workflow execution. Pending steps: ${pendingList}`

@@ -20,7 +20,8 @@ export class ForeachExecutor {
   constructor(
     private db: WorkflowDb,
     private logger: Logger,
-    private executeStepFn: ExecuteStepCallback
+    private executeStepFn: ExecuteStepCallback,
+    private abortSignal?: AbortSignal
   ) {}
 
   /**
@@ -131,7 +132,7 @@ export class ForeachExecutor {
         .fill(null)
         .map(async () => {
           const nextIndex = () => {
-            if (aborted) return null;
+            if (aborted || this.abortSignal?.aborted) return null;
             if (currentIndex >= items.length) return null;
             const i = currentIndex;
             currentIndex += 1;
@@ -142,7 +143,7 @@ export class ForeachExecutor {
             const i = nextIndex();
             if (i === null) break;
 
-            if (aborted) break;
+            if (aborted || this.abortSignal?.aborted) break;
 
             const item = items[i];
 
@@ -213,14 +214,14 @@ export class ForeachExecutor {
               continue;
             }
 
-            if (aborted) break;
+            if (aborted || this.abortSignal?.aborted) break;
 
             const stepExecId = randomUUID();
             await this.db.createStep(stepExecId, runId, step.id, i);
 
             // Execute and store result
             try {
-              if (aborted) break;
+              if (aborted || this.abortSignal?.aborted) break;
               this.logger.log(`  ⤷ [${i + 1}/${items.length}] Executing iteration...`);
               itemResults[i] = await this.executeStepFn(step, itemContext, stepExecId);
               if (
