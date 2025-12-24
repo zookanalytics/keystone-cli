@@ -48,6 +48,16 @@ export interface IdempotencyRecord {
   expires_at: string | null;
 }
 
+export interface DurableTimer {
+  id: string;
+  run_id: string;
+  step_id: string;
+  timer_type: 'sleep' | 'human';
+  wake_at: string | null; // ISO datetime - null for human-triggered timers
+  created_at: string;
+  completed_at: string | null;
+}
+
 export class WorkflowDb {
   private db: Database;
 
@@ -155,6 +165,21 @@ export class WorkflowDb {
 
       CREATE INDEX IF NOT EXISTS idx_idempotency_run ON idempotency_records(run_id);
       CREATE INDEX IF NOT EXISTS idx_idempotency_expires ON idempotency_records(expires_at);
+
+      CREATE TABLE IF NOT EXISTS durable_timers (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        step_id TEXT NOT NULL,
+        timer_type TEXT NOT NULL,
+        wake_at TEXT,
+        created_at TEXT NOT NULL,
+        completed_at TEXT,
+        FOREIGN KEY (run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_timers_wake ON durable_timers(wake_at);
+      CREATE INDEX IF NOT EXISTS idx_timers_run ON durable_timers(run_id);
+      CREATE INDEX IF NOT EXISTS idx_timers_pending ON durable_timers(wake_at, completed_at);
     `);
   }
 
@@ -473,6 +498,122 @@ export class WorkflowDb {
   async clearAllIdempotencyRecords(): Promise<number> {
     return await this.withRetry(() => {
       const stmt = this.db.prepare('DELETE FROM idempotency_records');
+      const result = stmt.run();
+      return result.changes;
+    });
+  }
+
+  // ===== Durable Timers =====
+
+  /**
+   * Create a durable timer for a step
+   */
+  async createTimer(
+    id: string,
+    runId: string,
+    stepId: string,
+    timerType: 'sleep' | 'human',
+    wakeAt?: string
+  ): Promise<void> {
+    await this.withRetry(() => {
+      const stmt = this.db.prepare(`
+        INSERT INTO durable_timers (id, run_id, step_id, timer_type, wake_at, created_at)
+        VALUES (?, ?, ?, ?, ?, datetime('now'))
+      `);
+      stmt.run(id, runId, stepId, timerType, wakeAt || null);
+    });
+  }
+
+  /**
+   * Get a durable timer by ID
+   */
+  async getTimer(id: string): Promise<DurableTimer | null> {
+    return this.withRetry(() => {
+      const stmt = this.db.prepare('SELECT * FROM durable_timers WHERE id = ?');
+      return stmt.get(id) as DurableTimer | null;
+    });
+  }
+
+  /**
+   * Get a durable timer by run ID and step ID
+   */
+  async getTimerByStep(runId: string, stepId: string): Promise<DurableTimer | null> {
+    return this.withRetry(() => {
+      const stmt = this.db.prepare(`
+        SELECT * FROM durable_timers
+        WHERE run_id = ? AND step_id = ? AND completed_at IS NULL
+        ORDER BY created_at DESC
+        LIMIT 1
+      `);
+      return stmt.get(runId, stepId) as DurableTimer | null;
+    });
+  }
+
+  /**
+   * Get pending timers that are ready to fire
+   * @param before Optional cutoff time (defaults to now)
+   */
+  async getPendingTimers(before?: Date): Promise<DurableTimer[]> {
+    return this.withRetry(() => {
+      const cutoff = (before || new Date()).toISOString();
+      const stmt = this.db.prepare(`
+        SELECT * FROM durable_timers
+        WHERE completed_at IS NULL
+        AND (wake_at IS NULL OR wake_at <= ?)
+        ORDER BY wake_at ASC
+      `);
+      return stmt.all(cutoff) as DurableTimer[];
+    });
+  }
+
+  /**
+   * Complete a durable timer
+   */
+  async completeTimer(id: string): Promise<void> {
+    await this.withRetry(() => {
+      const stmt = this.db.prepare(`
+        UPDATE durable_timers
+        SET completed_at = datetime('now')
+        WHERE id = ?
+      `);
+      stmt.run(id);
+    });
+  }
+
+  /**
+   * List all timers, optionally filtered by run ID
+   */
+  async listTimers(runId?: string, limit = 50): Promise<DurableTimer[]> {
+    return this.withRetry(() => {
+      if (runId) {
+        const stmt = this.db.prepare(`
+          SELECT * FROM durable_timers
+          WHERE run_id = ?
+          ORDER BY created_at DESC
+          LIMIT ?
+        `);
+        return stmt.all(runId, limit) as DurableTimer[];
+      }
+      const stmt = this.db.prepare(`
+        SELECT * FROM durable_timers
+        ORDER BY created_at DESC
+        LIMIT ?
+      `);
+      return stmt.all(limit) as DurableTimer[];
+    });
+  }
+
+  /**
+   * Clear timers for a specific run or all timers
+   */
+  async clearTimers(runId?: string): Promise<number> {
+    return await this.withRetry(() => {
+      if (runId) {
+        const stmt = this.db.prepare('DELETE FROM durable_timers WHERE run_id = ?');
+        const result = stmt.run(runId);
+        return result.changes;
+      }
+      const stmt = this.db.prepare('DELETE FROM durable_timers');
       const result = stmt.run();
       return result.changes;
     });

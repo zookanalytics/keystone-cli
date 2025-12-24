@@ -38,9 +38,20 @@ export class WorkflowSuspendedError extends Error {
   }
 }
 
+export class WorkflowWaitingError extends Error {
+  constructor(
+    public readonly message: string,
+    public readonly stepId: string,
+    public readonly wakeAt: string
+  ) {
+    super(message);
+    this.name = 'WorkflowWaitingError';
+  }
+}
+
 export interface StepResult {
   output: unknown;
-  status: 'success' | 'failed' | 'suspended' | 'skipped';
+  status: 'success' | 'failed' | 'suspended' | 'skipped' | 'waiting';
   error?: string;
   usage?: {
     prompt_tokens: number;
@@ -482,11 +493,10 @@ async function executeRequestStep(
     status: response.ok ? 'success' : 'failed',
     error: response.ok
       ? undefined
-      : `HTTP ${response.status}: ${response.statusText}${
-          responseText
-            ? `\nResponse Body: ${responseText.substring(0, 500)}${responseText.length > 500 ? '...' : ''}`
-            : ''
-        }`,
+      : `HTTP ${response.status}: ${response.statusText}${responseText
+        ? `\nResponse Body: ${responseText.substring(0, 500)}${responseText.length > 500 ? '...' : ''}`
+        : ''
+      }`,
   };
 }
 
@@ -510,10 +520,10 @@ async function executeHumanStep(
       output:
         step.inputType === 'confirm'
           ? answer === true ||
-            (typeof answer === 'string' &&
-              (answer.toLowerCase() === 'true' ||
-                answer.toLowerCase() === 'yes' ||
-                answer.toLowerCase() === 'y'))
+          (typeof answer === 'string' &&
+            (answer.toLowerCase() === 'true' ||
+              answer.toLowerCase() === 'yes' ||
+              answer.toLowerCase() === 'y'))
           : answer,
       status: 'success',
     };
@@ -587,6 +597,16 @@ async function executeSleepStep(
     throw new Error(`Invalid sleep duration: ${evaluated}`);
   }
 
+  // For durable sleeps, return waiting status with wake time
+  // Threshold: 60s (60000ms) - only durably wait if requested AND long enough
+  if (step.durable && duration >= 60000) {
+    const wakeAt = new Date(Date.now() + duration).toISOString();
+    return {
+      output: { durable: true, wakeAt, durationMs: duration },
+      status: 'waiting',
+    };
+  }
+
   await new Promise((resolve) => setTimeout(resolve, duration));
 
   return {
@@ -607,7 +627,7 @@ async function executeScriptStep(
     if (!step.allowInsecure) {
       throw new Error(
         'Script execution is disabled by default because Bun uses an insecure VM sandbox. ' +
-          "Set 'allowInsecure: true' on the script step to run it anyway."
+        "Set 'allowInsecure: true' on the script step to run it anyway."
       );
     }
 
@@ -675,7 +695,7 @@ async function executeMemoryStep(
       const embedding = await adapter.embed(text, resolvedModel);
       const metadata = step.metadata
         ? // biome-ignore lint/suspicious/noExplicitAny: metadata typing
-          (ExpressionEvaluator.evaluateObject(step.metadata, context) as Record<string, any>)
+        (ExpressionEvaluator.evaluateObject(step.metadata, context) as Record<string, any>)
         : {};
 
       const id = await memoryDb.store(text, embedding, metadata);

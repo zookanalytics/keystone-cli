@@ -23,6 +23,7 @@ import { ConfigLoader } from './utils/config-loader.ts';
 import { ConsoleLogger } from './utils/logger.ts';
 import { generateMermaidGraph, renderWorkflowAsAscii } from './utils/mermaid.ts';
 import { WorkflowRegistry } from './utils/workflow-registry.ts';
+import { WorkflowSuspendedError, WorkflowWaitingError } from './runner/step-executor.ts';
 
 import pkg from '../package.json' with { type: 'json' };
 
@@ -753,6 +754,151 @@ dedup
       console.log(`✓ Pruned ${count} expired idempotency record(s)`);
     } catch (error) {
       console.error('✗ Failed to prune records:', error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+// ===== keystone scheduler =====
+program
+  .command('scheduler')
+  .description('Run the durable timer scheduler (polls for ready timers)')
+  .option('-i, --interval <seconds>', 'Poll interval in seconds', '30')
+  .option('--once', "Run once and exit (don't poll)")
+  .action(async (options) => {
+    const interval = Number.parseInt(options.interval, 10) * 1000;
+    const db = new WorkflowDb();
+
+    console.log('🏛️  Keystone Durable Timer Scheduler');
+    console.log(`📡 Polling every ${options.interval}s for ready timers...`);
+
+    const poll = async () => {
+      try {
+        const pending = await db.getPendingTimers();
+        if (pending.length > 0) {
+          console.log(`\n⏰ Found ${pending.length} ready timer(s)`);
+
+          for (const timer of pending) {
+            console.log(`   - Resuming run ${timer.run_id.slice(0, 8)} (step: ${timer.step_id})`);
+
+            // Load run to get workflow name
+            const run = await db.getRun(timer.run_id);
+            if (!run) {
+              console.warn(`     ⚠️ Run ${timer.run_id} not found in DB`);
+              continue;
+            }
+
+            try {
+              const workflowPath = WorkflowRegistry.resolvePath(run.workflow_name);
+              const workflow = WorkflowParser.loadWorkflow(workflowPath);
+
+              const { WorkflowRunner } = await import('./runner/workflow-runner.ts');
+              const runner = new WorkflowRunner(workflow, {
+                resumeRunId: timer.run_id,
+                workflowDir: dirname(workflowPath),
+                logger: new ConsoleLogger(),
+              });
+
+              // Running this in current process iteration
+              // The runner will handle checking the timer status in restoreState
+              await runner.run();
+              console.log(`     ✓ Run ${timer.run_id.slice(0, 8)} resumed and finished/paused`);
+            } catch (err) {
+              if (err instanceof WorkflowWaitingError || err instanceof WorkflowSuspendedError) {
+                // This is expected if it hits another wait/human step
+                console.log(`     ⏸ Run ${timer.run_id.slice(0, 8)} paused/waiting again`);
+              } else {
+                console.error(
+                  `     ✗ Failed to resume run ${timer.run_id.slice(0, 8)}:`,
+                  err instanceof Error ? err.message : String(err)
+                );
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error('✗ Scheduler error:', err instanceof Error ? err.message : String(err));
+      }
+    };
+
+    if (options.once) {
+      await poll();
+      db.close();
+      process.exit(0);
+    }
+
+    // Polling loop
+    await poll();
+    setInterval(poll, interval);
+
+    // Keep process alive
+    process.on('SIGINT', () => {
+      console.log('\n👋 Scheduler stopping...');
+      db.close();
+      process.exit(0);
+    });
+  });
+
+// ===== keystone timers =====
+const timersCmd = program.command('timers').description('Manage durable timers');
+
+timersCmd
+  .command('list')
+  .description('List pending timers')
+  .option('-r, --run <run_id>', 'Filter by run ID')
+  .action(async (options) => {
+    try {
+      const db = new WorkflowDb();
+      const timers = await db.listTimers(options.run);
+      db.close();
+
+      if (timers.length === 0) {
+        console.log('No durable timers found.');
+        return;
+      }
+
+      console.log('\n⏰ Durable Timers:');
+      console.log(''.padEnd(100, '-'));
+      console.log(
+        `${'ID'.padEnd(10)} ${'Run'.padEnd(15)} ${'Step'.padEnd(20)} ${'Type'.padEnd(10)} ${'Wake At'}`
+      );
+      console.log(''.padEnd(100, '-'));
+
+      for (const timer of timers) {
+        const id = timer.id.slice(0, 8);
+        const run = timer.run_id.slice(0, 8);
+        const wakeAt = timer.wake_at ? new Date(timer.wake_at).toLocaleString() : 'N/A';
+        const statusStr = timer.completed_at ? ` (DONE at ${new Date(timer.completed_at).toLocaleTimeString()})` : '';
+
+        console.log(
+          `${id.padEnd(10)} ${run.padEnd(15)} ${timer.step_id.padEnd(20)} ${timer.timer_type.padEnd(
+            10
+          )} ${wakeAt}${statusStr}`
+        );
+      }
+      console.log(`\nTotal: ${timers.length} timer(s)`);
+    } catch (error) {
+      console.error('✗ Failed to list timers:', error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+timersCmd
+  .command('clear')
+  .description('Clear pending timers')
+  .option('-r, --run <run_id>', 'Clear timers for a specific run')
+  .option('--all', 'Clear all timers')
+  .action(async (options) => {
+    try {
+      if (!options.all && !options.run) {
+        console.error('✗ Please specify --run <id> or --all');
+        process.exit(1);
+      }
+      const db = new WorkflowDb();
+      const count = await db.clearTimers(options.run);
+      db.close();
+      console.log(`✓ Cleared ${count} timer(s)`);
+    } catch (error) {
+      console.error('✗ Failed to clear timers:', error instanceof Error ? error.message : error);
       process.exit(1);
     }
   });

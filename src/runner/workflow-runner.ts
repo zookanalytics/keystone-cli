@@ -16,7 +16,7 @@ import { ForeachExecutor } from './foreach-executor.ts';
 import { type LLMMessage, getAdapter } from './llm-adapter.ts';
 import { MCPManager } from './mcp-manager.ts';
 import { withRetry } from './retry.ts';
-import { type StepResult, WorkflowSuspendedError, executeStep } from './step-executor.ts';
+import { type StepResult, WorkflowSuspendedError, WorkflowWaitingError, executeStep } from './step-executor.ts';
 import { withTimeout } from './timeout.ts';
 
 import { ConsoleLogger, type Logger } from '../utils/logger.ts';
@@ -28,7 +28,7 @@ class RedactingLogger implements Logger {
   constructor(
     private inner: Logger,
     private redactor: Redactor
-  ) {}
+  ) { }
 
   log(msg: string): void {
     this.inner.log(this.redactor.redact(msg));
@@ -369,7 +369,8 @@ export class WorkflowRunner {
         if (
           exec.status === StepStatus.SUCCESS ||
           exec.status === StepStatus.SKIPPED ||
-          exec.status === StepStatus.SUSPENDED
+          exec.status === StepStatus.SUSPENDED ||
+          exec.status === StepStatus.WAITING
         ) {
           let output: unknown = null;
           try {
@@ -378,16 +379,29 @@ export class WorkflowRunner {
             this.logger.warn(`Failed to parse output for step ${stepId}: ${error}`);
             output = { error: 'Failed to parse output' };
           }
+
+          // If step is WAITING, check if timer has elapsed
+          let effectiveStatus = exec.status as StepContext['status'];
+          if (exec.status === StepStatus.WAITING) {
+            const timer = await this.db.getTimerByStep(this.runId, stepId);
+            if (timer && timer.wake_at && new Date(timer.wake_at) <= new Date()) {
+              // Timer elapsed!
+              await this.db.completeTimer(timer.id);
+              await this.db.completeStep(exec.id, StepStatus.SUCCESS, output);
+              effectiveStatus = StepStatus.SUCCESS;
+            }
+          }
+
           this.stepContexts.set(stepId, {
             output,
             outputs:
               typeof output === 'object' && output !== null && !Array.isArray(output)
                 ? (output as Record<string, unknown>)
                 : {},
-            status: exec.status as StepContext['status'],
+            status: effectiveStatus,
             error: exec.error || undefined,
           });
-          if (exec.status !== StepStatus.SUSPENDED) {
+          if (effectiveStatus !== StepStatus.SUSPENDED && effectiveStatus !== StepStatus.WAITING) {
             completedStepIds.add(stepId);
           }
         }
@@ -1075,6 +1089,33 @@ export class WorkflowRunner {
         return result;
       }
 
+      if (result.status === StepStatus.WAITING) {
+        const wakeAt = (result.output as any)?.wakeAt;
+        // Avoid creating duplicate timers for the same step execution
+        const existingTimer = await this.db.getTimerByStep(this.runId, step.id);
+        if (!existingTimer) {
+          const timerId = randomUUID();
+          await this.db.createTimer(
+            timerId,
+            this.runId,
+            step.id,
+            'sleep',
+            wakeAt
+          );
+        }
+        await this.db.completeStep(
+          stepExecId,
+          StepStatus.WAITING,
+          persistedOutput,
+          this.redactAtRest
+            ? this.redactor.redact(`Waiting until ${wakeAt}`)
+            : `Waiting until ${wakeAt}`,
+          result.usage
+        );
+        result.error = `Waiting until ${wakeAt}`;
+        return result;
+      }
+
       await this.db.completeStep(
         stepExecId,
         result.status,
@@ -1545,6 +1586,11 @@ Please provide a corrected response that exactly matches the required schema.`;
         throw new WorkflowSuspendedError(result.error || 'Workflow suspended', step.id, inputType);
       }
 
+      if (result.status === 'waiting') {
+        const wakeAt = (result.output as any)?.wakeAt;
+        throw new WorkflowWaitingError(result.error || `Waiting until ${wakeAt}`, step.id, wakeAt);
+      }
+
       if (result.status === 'failed') {
         throw new Error(`Step ${step.id} failed`);
       }
@@ -1618,7 +1664,7 @@ Please provide a corrected response that exactly matches the required schema.`;
     this.logger.log(`Run ID: ${this.runId}`);
     this.logger.log(
       '\n⚠️  Security Warning: Only run workflows from trusted sources.\n' +
-        '   Workflows can execute arbitrary shell commands and access your environment.\n'
+      '   Workflows can execute arbitrary shell commands and access your environment.\n'
     );
 
     this.redactAtRest = ConfigLoader.load().storage?.redact_secrets_at_rest ?? true;
@@ -1770,6 +1816,12 @@ Please provide a corrected response that exactly matches the required schema.`;
       if (error instanceof WorkflowSuspendedError) {
         await this.db.updateRunStatus(this.runId, 'paused');
         this.logger.log(`\n⏸  Workflow paused: ${error.message}`);
+        throw error;
+      }
+
+      if (error instanceof WorkflowWaitingError) {
+        await this.db.updateRunStatus(this.runId, 'paused');
+        this.logger.log(`\n⏳ Workflow waiting: ${error.message}`);
         throw error;
       }
 

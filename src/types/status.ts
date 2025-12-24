@@ -11,6 +11,7 @@ export const StepStatus = {
   SKIPPED: 'skipped',
   RUNNING: 'running',
   CANCELED: 'canceled',
+  WAITING: 'waiting', // Waiting on durable timer
 } as const;
 
 export type StepStatusType = (typeof StepStatus)[keyof typeof StepStatus];

@@ -124,13 +124,13 @@ Tasks:
 
 ## P1 - Developer experience and safe orchestration (next 2-4 releases)
 
-### Durable timers for long-running workflows
+### [x] Durable timers for long-running workflows
 Goal: Allow sleeps and human waits to persist across restarts and pause for hours or days without losing state.
 Tasks:
-1. Persist sleep and human wait states with wake-up timestamps in the DB.
-2. Add a lightweight scheduler to resume runs at the right time.
-3. Ensure timeouts and retries are consistent across restarts.
-4. Document semantics and edge cases (clock skew, daylight changes).
+1. [x] Persist sleep and human wait states with wake-up timestamps in the DB.
+2. [x] Add a lightweight scheduler to resume runs at the right time.
+3. [x] Ensure timeouts and retries are consistent across restarts.
+4. [x] Document semantics and edge cases (clock skew, daylight changes).
 
 ### Dynamic subflows with fan-out/fan-in and compensations
 Goal: Support complex orchestration patterns with safe rollbacks for side effects.
