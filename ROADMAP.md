@@ -287,7 +287,7 @@ Tasks:
 
 ## P2 - Observability, AI evaluation, and ecosystem (later)
 
-### Multi-provider routing with failover
+### Multi-provider routing with failover (Descoped)
 Goal: Improve reliability and cost control with policy-driven provider selection and automatic failover.
 Notes:
 1. Policies should support deterministic ordering and optional weights.
@@ -300,7 +300,7 @@ Tasks:
 4. Expose provider choice, fallback events, and policy decisions in logs and metrics.
 5. Add config examples, migration notes, and tests with simulated outages.
 
-### Built-in evaluation framework for workflows
+### Built-in evaluation framework for workflows (Descoped)
 Goal: Measure workflow quality against datasets and track metrics over time.
 Notes:
 1. Dataset runs should be deterministic and resumable.
@@ -313,7 +313,7 @@ Tasks:
 4. Support custom metric hooks and evaluator prompts.
 5. Document evaluation workflows, metrics definitions, and report formats.
 
-### OpenTelemetry tracing and Prometheus-style metrics
+### OpenTelemetry tracing and Prometheus-style metrics (Descoped)
 Goal: Provide standard observability signals for runs, steps, and resource usage.
 Notes:
 1. Use standard semantic conventions and include run_id/step_id.
@@ -326,7 +326,7 @@ Tasks:
 4. Provide deployment guides and reference dashboards for common stacks.
 5. Add tests for instrumentation toggles and no-op mode.
 
-### Enhanced terminal UI with live DAG and resource usage
+### Enhanced terminal UI with live DAG and resource usage (Descoped)
 Goal: Improve operational visibility with live graphs and capacity signals.
 Notes:
 1. UI should degrade gracefully based on terminal capabilities.
@@ -341,7 +341,7 @@ Tasks:
 6. Add a configurable refresh interval with sensible defaults.
 7. Keep the UI performant and detect terminal capabilities (color, background).
 
-### Configurable retention, archival, and one-click replay
+### Configurable retention, archival, and one-click replay (Descoped)
 Goal: Make historical runs easy to retain, share, and replay consistently.
 Notes:
 1. Retention policies should be global with per-workflow overrides.
@@ -354,7 +354,7 @@ Tasks:
 4. Add UI hooks for replay and archive management.
 5. Document retention, archival, and replay workflows.
 
-### Plugin system and curated plugin library
+### Plugin system and curated plugin library (Descoped)
 Goal: Make providers, tools, and step types extensible via a stable plugin API.
 Notes:
 1. The plugin API should be versioned with a manifest and capabilities.
@@ -368,7 +368,7 @@ Tasks:
 5. Build at least one reference plugin for the curated registry.
 6. Document plugin authoring and distribution.
 
-### Import/export bridges for external workflow formats
+### Import/export bridges for external workflow formats (Descoped)
 Goal: Ease migration and interoperability with popular orchestrators.
 Notes:
 1. Provide mapping docs for unsupported features and lossy conversions.
@@ -381,7 +381,7 @@ Tasks:
 4. Add CLI commands for import/export with dry-run.
 5. Add tests with sample workflows.
 
-### Event triggers for scheduled and webhook-driven runs
+### Event triggers for scheduled and webhook-driven runs (Descoped)
 Goal: Enable event-driven workflows while keeping local-first defaults.
 Notes:
 1. Triggers should be off by default and opt-in per workflow.
@@ -421,7 +421,7 @@ Tasks:
 4. Add audit logs and summary of changes for human review.
 5. Document recommended human-in-the-loop checks.
 
-### Lightweight distributed mode with remote runners
+### Lightweight distributed mode with remote runners (Descoped)
 Goal: Support scaling beyond a single machine while keeping local-first defaults.
 Notes:
 1. The remote runner protocol should be versioned with compatibility checks.
