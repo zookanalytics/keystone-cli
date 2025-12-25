@@ -75,8 +75,8 @@ describe('ProcessSandbox', () => {
   // Security tests
   it('should sanitize context to prevent prototype pollution', async () => {
     // Attempt to pass a context with __proto__ manipulation
-    const context = { normal: 'value' };
-    // @ts-ignore - intentionally testing prototype pollution
+    const context: Record<string, unknown> = { normal: 'value' };
+    // biome-ignore lint/complexity/useLiteralKeys: intentionally testing prototype pollution
     context['__proto__'] = { polluted: true };
 
     const result = await ProcessSandbox.execute(

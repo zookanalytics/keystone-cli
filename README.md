@@ -14,6 +14,26 @@ Keystone allows you to define complex automation workflows using a simple YAML s
 
 ---
 
+## 📚 Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Bundled Workflows](#bundled-workflows)
+- [Configuration](#configuration)
+- [Workflow Example](#workflow-example)
+- [Expression Syntax](#expression-syntax)
+- [Step Types](#step-types)
+- [Advanced Features](#advanced-features)
+- [Agent Definitions](#agent-definitions)
+- [CLI Commands](#cli-commands)
+- [Security](#security)
+- [Architecture](#architecture)
+- [Project Structure](#project-structure)
+- [License](#license)
+
+---
+
 ## ✨ Features
 
 - ⚡ **Local-First:** Built on Bun with a local SQLite database for state management.
@@ -27,32 +47,6 @@ Keystone allows you to define complex automation workflows using a simple YAML s
 - 🛡️ **Secret Redaction:** Automatically redacts environment variables and secrets from logs and outputs.
 - 🧠 **Semantic Memory:** Store/search text with vector embeddings (and auto-index via `learn`).
 - 🎯 **Prompt Optimization:** Iteratively optimize prompts via `keystone optimize` + workflow `eval`.
-
----
-
-## 🏗️ Architecture
-
-```mermaid
-graph TD
-    CLI[CLI Entry Point] --> WR[WorkflowRunner]
-    CLI --> MCP[MCP Server]
-    WR --> SE[Step Executor]
-    WR --> FE[ForeachExecutor]
-    WR --> DB[(WorkflowDb)]
-    SE --> LLM[LLM Executor]
-    SE --> Shell[Shell Executor]
-    SE --> File[File Operations]
-    SE --> HTTP[HTTP Requests]
-    SE --> Human[Human Input]
-    LLM --> Adapters[LLM Adapters]
-    Adapters --> OpenAI
-    Adapters --> Anthropic
-    Adapters --> Copilot
-    Adapters --> ChatGPT
-    LLM --> MCPClient[MCP Client]
-    WR --> Eval[Expression Evaluator]
-    WR --> Pool[Resource Pool Manager]
-```
 
 ---
 
@@ -555,7 +549,7 @@ When a step fails, the specified agent is invoked with the error details. The ag
   type: script
   allowInsecure: true
   run: |
-    const data = context.steps.fetch_data.output;
+    const data = steps.fetch_data.output;
     return data.map(i => i.value * 2).reduce((a, b) => a + b, 0);
 ```
 
@@ -817,7 +811,7 @@ In these examples, the agent will have access to all tools provided by the MCP s
 | `logs <run_id>` | View logs, outputs, and errors for a specific run (`-v` for full output) |
 | `graph <workflow>` | Generate a Mermaid diagram of the workflow |
 | `test [path]` | Run workflow tests with fixtures and snapshots |
-| `optimize <workflow>` | Optimize a specific step in a workflow (requires --target) |
+| `optimize <workflow>` | Optimize a specific step in a workflow (requires --target and workflow `eval`) |
 | `compile` | Compile a project into a single executable with embedded assets |
 | `dev <task>` | Run the self-bootstrapping DevMode workflow |
 | `manifest` | Show embedded assets manifest |
@@ -846,7 +840,7 @@ In these examples, the agent will have access to all tools provided by the MCP s
 ## 🛡️ Security
 
 ### Shell Execution
-Keystone blocks shell commands that match common injection/destructive patterns (like `rm -rf` or pipes to shells). To run them, set `allowInsecure: true` on the step. Prefer `${{ escape(...) }}` when interpolating user input.
+Keystone blocks shell commands that match common injection/destructive patterns (like `rm -rf /` or pipes to shells). To run them, set `allowInsecure: true` on the step. Prefer `${{ escape(...) }}` when interpolating user input.
 
 You can bypass this check if you trust the command:
 ```yaml
@@ -867,8 +861,32 @@ Expressions `${{ }}` are evaluated using a safe AST parser (`jsep`) which:
 Script steps run in a separate subprocess by default. This reduces risk but is **not a security boundary** for malicious code. Script steps are disabled by default; set `allowInsecure: true` to run them.
 
 ---
- 
- ## 📂 Project Structure
+
+## 🏗️ Architecture
+
+```mermaid
+graph TD
+    CLI[CLI Entry Point] --> WR[WorkflowRunner]
+    CLI --> MCP[MCP Server]
+    WR --> SE[Step Executor]
+    WR --> FE[ForeachExecutor]
+    WR --> DB[(WorkflowDb)]
+    SE --> LLM[LLM Executor]
+    SE --> Shell[Shell Executor]
+    SE --> File[File Operations]
+    SE --> HTTP[HTTP Requests]
+    SE --> Human[Human Input]
+    LLM --> Adapters[LLM Adapters]
+    Adapters --> OpenAI
+    Adapters --> Anthropic
+    Adapters --> Copilot
+    Adapters --> ChatGPT
+    LLM --> MCPClient[MCP Client]
+    WR --> Eval[Expression Evaluator]
+    WR --> Pool[Resource Pool Manager]
+```
+
+## 📂 Project Structure
 
 - `src/db/`: SQLite persistence layer.
 - `src/runner/`: The core execution engine, handles parallelization and retries.
