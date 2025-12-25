@@ -868,6 +868,43 @@ export class WorkflowRunner {
   }
 
   /**
+   * Collect primitive secret values from structured inputs.
+   */
+  private static collectSecretValues(
+    value: unknown,
+    sink: Set<string>,
+    seen: WeakSet<object>
+  ): void {
+    if (value === null || value === undefined) return;
+
+    if (typeof value === 'string') {
+      sink.add(value);
+      return;
+    }
+
+    if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+      sink.add(String(value));
+      return;
+    }
+
+    if (typeof value !== 'object') return;
+
+    if (seen.has(value)) return;
+    seen.add(value);
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        WorkflowRunner.collectSecretValues(item, sink, seen);
+      }
+      return;
+    }
+
+    for (const item of Object.values(value as Record<string, unknown>)) {
+      WorkflowRunner.collectSecretValues(item, sink, seen);
+    }
+  }
+
+  /**
    * Apply workflow defaults to inputs and validate types
    */
   private applyDefaultsAndValidate(): void {
@@ -940,11 +977,7 @@ export class WorkflowRunner {
       }
 
       if (config.secret && value !== undefined && value !== WorkflowRunner.REDACTED_PLACEHOLDER) {
-        if (typeof value === 'string') {
-          secretValues.add(value);
-        } else if (typeof value === 'number' || typeof value === 'boolean') {
-          secretValues.add(String(value));
-        }
+        WorkflowRunner.collectSecretValues(value, secretValues, new WeakSet());
       }
     }
 

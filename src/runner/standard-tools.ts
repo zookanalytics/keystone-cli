@@ -296,6 +296,34 @@ export function validateStandardToolSecurity(
   args: any,
   options: { allowOutsideCwd?: boolean; allowInsecure?: boolean }
 ): void {
+  const cwd = process.cwd();
+  const realCwd = fs.realpathSync(cwd);
+  const normalizePath = (rawPath: unknown): string => {
+    if (typeof rawPath === 'string' && rawPath.trim() !== '') {
+      return rawPath;
+    }
+    return '.';
+  };
+  const isWithin = (rawPath: string) => {
+    const resolvedPath = path.resolve(cwd, rawPath);
+    // Find the first existing ancestor to resolve the real path correctly
+    let current = resolvedPath;
+    while (current !== path.dirname(current) && !fs.existsSync(current)) {
+      current = path.dirname(current);
+    }
+    const realTarget = fs.existsSync(current) ? fs.realpathSync(current) : current;
+    const relativePath = path.relative(realCwd, realTarget);
+    return !(relativePath.startsWith('..') || path.isAbsolute(relativePath));
+  };
+  const assertWithinCwd = (rawPath: unknown, label = 'Path') => {
+    const normalizedPath = normalizePath(rawPath);
+    if (!options.allowOutsideCwd && !isWithin(normalizedPath)) {
+      throw new Error(
+        `Access denied: ${label} '${normalizedPath}' resolves outside the working directory. Use 'allowOutsideCwd: true' to override.`
+      );
+    }
+  };
+
   // 1. Check path traversal for file tools
   if (
     [
@@ -308,31 +336,13 @@ export function validateStandardToolSecurity(
     ].includes(toolName)
   ) {
     const rawPath = args.path || args.dir || '.';
-    const cwd = process.cwd();
-    const resolvedPath = path.resolve(cwd, rawPath);
-    const realCwd = fs.realpathSync(cwd);
-
-    const isWithin = (target: string) => {
-      // Find the first existing ancestor to resolve the real path correctly
-      let current = target;
-      while (current !== path.dirname(current) && !fs.existsSync(current)) {
-        current = path.dirname(current);
-      }
-      const realTarget = fs.existsSync(current) ? fs.realpathSync(current) : current;
-      const relativePath = path.relative(realCwd, realTarget);
-      return !(relativePath.startsWith('..') || path.isAbsolute(relativePath));
-    };
-
-    if (!options.allowOutsideCwd && !isWithin(resolvedPath)) {
-      throw new Error(
-        `Access denied: Path '${rawPath}' resolves outside the working directory. Use 'allowOutsideCwd: true' to override.`
-      );
-    }
+    assertWithinCwd(rawPath);
   }
 
-  // 2. Check shell risk for run_command
-  if (toolName === 'run_command' && !options.allowInsecure) {
-    if (detectShellInjectionRisk(args.command)) {
+  // 2. Check shell risk for run_command and guard working directory
+  if (toolName === 'run_command') {
+    assertWithinCwd(args.dir, 'Directory');
+    if (!options.allowInsecure && detectShellInjectionRisk(args.command)) {
       throw new Error(
         `Security Error: Command contains risky shell characters. Use 'allowInsecure: true' on the llm step to execute this.`
       );

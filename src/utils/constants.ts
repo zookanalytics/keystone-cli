@@ -9,6 +9,8 @@ export const TIMEOUTS = {
   DEFAULT_SCRIPT_TIMEOUT_MS: 5000,
   /** Default base delay for retry backoff */
   DEFAULT_RETRY_BASE_DELAY_MS: 1000,
+  /** Default timeout for HTTP requests */
+  DEFAULT_HTTP_TIMEOUT_MS: 30000,
   /** Default regex execution timeout for search operations */
   REGEX_TIMEOUT_MS: 1000,
 } as const;
@@ -17,6 +19,8 @@ export const TIMEOUTS = {
 export const LIMITS = {
   /** Maximum size for LLM responses to prevent memory exhaustion */
   MAX_RESPONSE_SIZE_BYTES: 1024 * 1024,
+  /** Maximum bytes to read from a file in file read steps */
+  MAX_FILE_READ_BYTES: 5 * 1024 * 1024,
   /** Maximum length for search query strings */
   MAX_SEARCH_QUERY_LENGTH: 500,
   /** Maximum length for regex patterns in search queries */
@@ -25,6 +29,8 @@ export const LIMITS = {
   MAX_SEARCH_FILE_BYTES: 1024 * 1024,
   /** Maximum line length to evaluate in content search */
   MAX_SEARCH_LINE_LENGTH: 2000,
+  /** Maximum bytes to read from HTTP responses */
+  MAX_HTTP_RESPONSE_BYTES: 2 * 1024 * 1024,
   /** Maximum messages to keep in LLM conversation history */
   MAX_MESSAGE_HISTORY: 50,
   /** Maximum bytes to keep per tool output in LLM history */

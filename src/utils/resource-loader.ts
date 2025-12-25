@@ -62,10 +62,12 @@ export class ResourceLoader {
     const files = new Set<string>();
 
     // 1. Add local files
-    if (existsSync(dirPath) && statSync(dirPath).isDirectory()) {
+    if (existsSync(dirPath)) {
       try {
-        for (const file of readdirSync(dirPath)) {
-          files.add(file);
+        if (statSync(dirPath).isDirectory()) {
+          for (const file of readdirSync(dirPath)) {
+            files.add(file);
+          }
         }
       } catch {
         // Directory cannot be read (permissions, etc.) - continue with embedded assets only
@@ -100,7 +102,11 @@ export class ResourceLoader {
    */
   static isDirectory(path: string): boolean {
     if (existsSync(path)) {
-      return statSync(path).isDirectory();
+      try {
+        return statSync(path).isDirectory();
+      } catch {
+        return false;
+      }
     }
 
     const projectRelPath = ResourceLoader.getProjectRelativePath(path);

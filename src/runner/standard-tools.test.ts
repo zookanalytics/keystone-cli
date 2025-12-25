@@ -43,6 +43,28 @@ describe('Standard Tools Security', () => {
     }).toThrow(/Security Error/);
   });
 
+  it('should block run_command outside CWD by default', () => {
+    const outsideDir = path.resolve(path.parse(process.cwd()).root, 'tmp');
+    expect(() => {
+      validateStandardToolSecurity(
+        'run_command',
+        { command: 'pwd', dir: outsideDir },
+        options
+      );
+    }).toThrow(/Access denied/);
+  });
+
+  it('should allow run_command outside CWD when allowOutsideCwd is true', () => {
+    const outsideDir = path.resolve(path.parse(process.cwd()).root, 'tmp');
+    expect(() => {
+      validateStandardToolSecurity(
+        'run_command',
+        { command: 'pwd', dir: outsideDir },
+        { allowOutsideCwd: true }
+      );
+    }).not.toThrow();
+  });
+
   it('should allow risky commands if allowInsecure is true', () => {
     expect(() => {
       validateStandardToolSecurity(

@@ -62,6 +62,26 @@ function truncateToolOutput(content: string, maxBytes: number): string {
   return `${truncated}${suffix}`;
 }
 
+function safeJsonStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    const seen = new WeakSet<object>();
+    try {
+      return JSON.stringify(value, (_key, val) => {
+        if (typeof val === 'bigint') return val.toString();
+        if (typeof val === 'object' && val !== null) {
+          if (seen.has(val)) return '[Circular]';
+          seen.add(val);
+        }
+        return val;
+      });
+    } catch {
+      return String(value);
+    }
+  }
+}
+
 function truncateMessages(
   messages: LLMMessage[],
   maxHistory: number,
@@ -543,7 +563,7 @@ export async function executeLlmStep(
               role: 'tool',
               tool_call_id: toolCall.id,
               name: toolCall.function.name,
-              content: formatToolContent(JSON.stringify(result)),
+              content: formatToolContent(safeJsonStringify(result)),
             });
           } catch (error) {
             messages.push({
@@ -589,7 +609,9 @@ export async function executeLlmStep(
             tool_call_id: toolCall.id,
             name: toolCall.function.name,
             content: formatToolContent(
-              result.status === 'success' ? JSON.stringify(result.output) : `Error: ${result.error}`
+              result.status === 'success'
+                ? safeJsonStringify(result.output)
+                : `Error: ${result.error}`
             ),
           });
         }

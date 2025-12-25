@@ -53,7 +53,6 @@ const ANTHROPIC_OAUTH_REDIRECT_URI = 'https://console.anthropic.com/oauth/code/c
 const ANTHROPIC_OAUTH_SCOPE = 'org:create_api_key user:profile user:inference';
 const GOOGLE_GEMINI_OAUTH_CLIENT_ID =
   '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com';
-const GOOGLE_GEMINI_OAUTH_CLIENT_SECRET = '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';
 const GOOGLE_GEMINI_OAUTH_REDIRECT_URI = 'http://localhost:51121/oauth-callback';
 const GOOGLE_GEMINI_OAUTH_SCOPES = [
   'https://www.googleapis.com/auth/cloud-platform',
@@ -256,6 +255,18 @@ export class AuthManager {
     return hash.toString('base64url');
   }
 
+  private static getGoogleGeminiClientSecret(): string {
+    const secret =
+      process.env.GOOGLE_GEMINI_OAUTH_CLIENT_SECRET ||
+      process.env.KEYSTONE_GEMINI_CLIENT_SECRET;
+    if (!secret) {
+      throw new Error(
+        'Missing Google Gemini OAuth client secret. Set GOOGLE_GEMINI_OAUTH_CLIENT_SECRET or KEYSTONE_GEMINI_CLIENT_SECRET.'
+      );
+    }
+    return secret;
+  }
+
   static createAnthropicClaudeAuth(): { url: string; verifier: string } {
     const verifier = AuthManager.generateCodeVerifier();
     const challenge = AuthManager.createCodeChallenge(verifier);
@@ -279,6 +290,9 @@ export class AuthManager {
     verifier: string
   ): Promise<{ access_token: string; refresh_token: string; expires_in: number }> {
     const [authCode, stateFromCode] = code.split('#');
+    if (stateFromCode && stateFromCode !== verifier) {
+      throw new Error('Invalid OAuth state');
+    }
     const response = await fetch('https://console.anthropic.com/v1/oauth/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -402,7 +416,7 @@ export class AuthManager {
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                 body: new URLSearchParams({
                   client_id: GOOGLE_GEMINI_OAUTH_CLIENT_ID,
-                  client_secret: GOOGLE_GEMINI_OAUTH_CLIENT_SECRET,
+                  client_secret: AuthManager.getGoogleGeminiClientSecret(),
                   code,
                   grant_type: 'authorization_code',
                   redirect_uri: GOOGLE_GEMINI_OAUTH_REDIRECT_URI,
@@ -680,7 +694,7 @@ export class AuthManager {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
           client_id: GOOGLE_GEMINI_OAUTH_CLIENT_ID,
-          client_secret: GOOGLE_GEMINI_OAUTH_CLIENT_SECRET,
+          client_secret: AuthManager.getGoogleGeminiClientSecret(),
           grant_type: 'refresh_token',
           refresh_token,
         }),
