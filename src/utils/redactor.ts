@@ -99,10 +99,10 @@ export class Redactor {
       // Check if key contains any sensitive term
       const isSensitiveKey = Array.from(sensitiveKeys).some((k) => lowerKey.includes(k));
 
-      // If it's a sensitive key, redact it even if short (>=3)
-      // Otherwise, only redact if it's long enough to be likely a real secret
+      // If it's a sensitive key, redact values >= 6 chars to avoid false positives on short common values
+      // For non-sensitive keys, only redact if >= 10 chars (likely a real secret)
       if (isSensitiveKey) {
-        if (value.length >= 3) {
+        if (value.length >= 6) {
           secretsToRedact.add(value);
         }
       } else if (value.length >= 10) {

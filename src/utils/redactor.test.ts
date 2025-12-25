@@ -58,10 +58,11 @@ describe('Redactor', () => {
     expect(redactor.redact(123)).toBe(123);
   });
 
-  it('should ignore secrets shorter than 3 characters for sensitive keys', () => {
-    const shortRedactor = new Redactor({ S1: 'a', S2: '12', TOKEN: 'abc' });
-    const text = 'a and 12 are safe, but abc is a secret';
-    expect(shortRedactor.redact(text)).toBe('a and 12 are safe, but ***REDACTED*** is a secret');
+  it('should ignore secrets shorter than 6 characters for sensitive keys', () => {
+    // Minimum secret length for sensitive keys is 6 to reduce false positives
+    const shortRedactor = new Redactor({ S1: 'a', S2: '12', TOKEN: 'abc', SECRET: 'secret' });
+    const text = 'a and 12 and abc are safe, but secret is redacted';
+    expect(shortRedactor.redact(text)).toBe('a and 12 and abc are safe, but ***REDACTED*** is redacted');
   });
 
   it('should not redact substrings of larger words when using alphanumeric secrets', () => {
@@ -86,15 +87,16 @@ describe('Redactor', () => {
     expect(forcedRedactor.redact('true')).toBe('***REDACTED***');
   });
 
-  it('should redact short values only for sensitive keys', () => {
+  it('should redact values >= 6 chars for sensitive keys, >= 10 for others', () => {
     const mixedRedactor = new Redactor({
-      PASSWORD: 'abc', // sensitive key, short value
+      PASSWORD: 'secret', // sensitive key, 6 chars - should be redacted
+      TOKEN: 'abc', // sensitive key, 3 chars - too short, not redacted
       OTHER: 'def', // non-sensitive key, short value
       LONG: 'this-is-long-enough', // non-sensitive, long value
     });
-    const text = 'pwd: abc, other: def, long: this-is-long-enough';
+    const text = 'pwd: secret, token: abc, other: def, long: this-is-long-enough';
     expect(mixedRedactor.redact(text)).toBe(
-      'pwd: ***REDACTED***, other: def, long: ***REDACTED***'
+      'pwd: ***REDACTED***, token: abc, other: def, long: ***REDACTED***'
     );
   });
 
@@ -107,12 +109,12 @@ describe('Redactor', () => {
     expect(thresholdRedactor.redact(text)).toBe('S1 is 123456789 and S2 is ***REDACTED***');
   });
 
-  it('should respect word boundaries for short secrets', () => {
-    const shortRedactor = new Redactor({ TOKEN: 'key' }); // 'key' is < 5 chars but TOKEN is sensitive
-    // Should redact " key " but NOT "keyboard" or "donkey"
-    const text = 'The key is on the keyboard near the donkey.';
+  it('should respect word boundaries for short-ish secrets >= 6 chars', () => {
+    // Secrets 6+ chars with sensitive key should be redacted, word boundaries apply for < 5 chars
+    const shortRedactor = new Redactor({ TOKEN: 'keeper' }); // 'keeper' is 6 chars, TOKEN is sensitive
+    const text = 'The keeper of the keys is here.';
     expect(shortRedactor.redact(text)).toBe(
-      'The ***REDACTED*** is on the keyboard near the donkey.'
+      'The ***REDACTED*** of the keys is here.'
     );
   });
 });

@@ -86,6 +86,10 @@ export class ExpressionEvaluator {
   private static readonly MAX_NESTING_DEPTH = 50;
   // Maximum array literal size (prevents memory exhaustion)
   private static readonly MAX_ARRAY_SIZE = 1000;
+  // Maximum total nodes to evaluate (prevents DoS via complex expressions)
+  private static readonly MAX_TOTAL_NODES = 10000;
+  // Maximum arrow function nesting depth
+  private static readonly MAX_ARROW_DEPTH = 3;
 
   /**
    * Helper to scan string for matches of ${{ ... }} handling nested braces manually
@@ -247,7 +251,9 @@ export class ExpressionEvaluator {
   static evaluateExpression(expr: string, context: ExpressionContext): unknown {
     try {
       const ast = jsep(expr);
-      return ExpressionEvaluator.evaluateNode(ast, context);
+      // Track total nodes evaluated to prevent DoS
+      const nodeCounter = { count: 0 };
+      return ExpressionEvaluator.evaluateNode(ast, context, 0, nodeCounter);
     } catch (error) {
       throw new Error(
         `Failed to evaluate expression "${expr}": ${error instanceof Error ? error.message : String(error)}`
@@ -258,7 +264,18 @@ export class ExpressionEvaluator {
   /**
    * Evaluate an AST node recursively
    */
-  private static evaluateNode(node: ASTNode, context: ExpressionContext, depth = 0): unknown {
+  private static evaluateNode(
+    node: ASTNode,
+    context: ExpressionContext,
+    depth = 0,
+    nodeCounter: { count: number } = { count: 0 },
+    arrowDepth = 0
+  ): unknown {
+    // Increment node counter for DoS protection
+    nodeCounter.count++;
+    if (nodeCounter.count > ExpressionEvaluator.MAX_TOTAL_NODES) {
+      throw new Error(`Expression exceeds maximum complexity of ${ExpressionEvaluator.MAX_TOTAL_NODES} nodes`);
+    }
     if (depth > ExpressionEvaluator.MAX_NESTING_DEPTH) {
       throw new Error(`Expression nesting exceeds maximum depth of ${ExpressionEvaluator.MAX_NESTING_DEPTH}`);
     }

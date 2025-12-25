@@ -53,8 +53,8 @@ export class ProcessSandbox {
         const tempDir = join(tmpdir(), `keystone-sandbox-${randomUUID()}`);
 
         try {
-            // Create temp directory for the script
-            await mkdir(tempDir, { recursive: true });
+            // Create temp directory with restrictive permissions (0o700 = owner only)
+            await mkdir(tempDir, { recursive: true, mode: 0o700 });
 
             // Write the runner script
             const runnerScript = ProcessSandbox.createRunnerScript(code, context);

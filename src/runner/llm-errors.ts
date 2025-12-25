@@ -5,14 +5,18 @@
  */
 
 export class LLMProviderError extends Error {
+    public readonly retryAfterMs?: number;
+
     constructor(
         public readonly provider: string,
         public readonly statusCode: number,
         message: string,
-        public readonly retryable = false
+        public readonly retryable = false,
+        retryAfterMs?: number
     ) {
         super(`[${provider}] API error (${statusCode}): ${message}`);
         this.name = 'LLMProviderError';
+        this.retryAfterMs = retryAfterMs;
     }
 
     /**
@@ -36,14 +40,36 @@ export class LLMProviderError extends Error {
         // 429 and 5xx errors are typically retryable
         const retryable = response.status === 429 || response.status >= 500;
 
-        return new LLMProviderError(provider, response.status, message, retryable);
+        // Parse Retry-After header if present
+        let retryAfterMs: number | undefined;
+        const retryAfterHeader = response.headers.get('Retry-After');
+        if (retryAfterHeader) {
+            const seconds = parseInt(retryAfterHeader, 10);
+            if (!isNaN(seconds)) {
+                retryAfterMs = seconds * 1000;
+            }
+        }
+
+        return new LLMProviderError(provider, response.status, message, retryable, retryAfterMs);
     }
 
     /**
      * Check if error is a rate limit error
+     * Detects both 429 (Too Many Requests) and 503 (Service Unavailable) with rate-related messages
      */
     isRateLimitError(): boolean {
-        return this.statusCode === 429;
+        if (this.statusCode === 429) {
+            return true;
+        }
+        // Some providers return 503 for rate limits
+        if (this.statusCode === 503) {
+            const lowerMessage = this.message.toLowerCase();
+            return lowerMessage.includes('rate') ||
+                lowerMessage.includes('quota') ||
+                lowerMessage.includes('capacity') ||
+                lowerMessage.includes('overloaded');
+        }
+        return false;
     }
 
     /**

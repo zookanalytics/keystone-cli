@@ -19,16 +19,21 @@ export class RateLimiter {
   private readonly maxTokens: number;
   private readonly refillRate: number;
   private readonly refillInterval: number;
+  private readonly maxQueueSize: number;
   private waitQueue: Array<{
     resolve: () => void;
     reject: (error: Error) => void;
   }> = [];
   private refillTimer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(options: RateLimiterOptions) {
+  /** Default maximum queue size to prevent memory exhaustion */
+  private static readonly DEFAULT_MAX_QUEUE_SIZE = 1000;
+
+  constructor(options: RateLimiterOptions & { maxQueueSize?: number }) {
     this.maxTokens = options.maxTokens;
     this.refillRate = options.refillRate;
     this.refillInterval = options.refillInterval;
+    this.maxQueueSize = options.maxQueueSize ?? RateLimiter.DEFAULT_MAX_QUEUE_SIZE;
     this.tokens = options.maxTokens; // Start with full bucket
     this.lastRefill = Date.now();
   }
@@ -128,6 +133,12 @@ export class RateLimiter {
 
     // Otherwise wait for a token
     return new Promise<void>((resolve, reject) => {
+      // Check queue size limit to prevent memory exhaustion
+      if (this.waitQueue.length >= this.maxQueueSize) {
+        reject(new Error(`Rate limiter queue full (max ${this.maxQueueSize}) - system under excessive load`));
+        return;
+      }
+
       const waiter = { resolve, reject };
       this.waitQueue.push(waiter);
 
