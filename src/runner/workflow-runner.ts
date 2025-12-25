@@ -1321,7 +1321,8 @@ export class WorkflowRunner {
     }
 
     const operation = async (attemptContext: ExpressionContext) => {
-      const result = await executeStep(stepToExecute, attemptContext, this.logger, {
+      const exec = this.options.executeStep || executeStep;
+      const result = await exec(stepToExecute, attemptContext, this.logger, {
         executeWorkflowFn: this.executeSubWorkflow.bind(this),
         mcpManager: this.mcpManager,
         memoryDb: this.memoryDb,
@@ -1332,7 +1333,7 @@ export class WorkflowRunner {
         stepExecutionId: stepExecId,
         redactForStorage: this.redactForStorage.bind(this),
         getAdapter: this.options.getAdapter,
-        executeStep: this.options.executeStep,
+        executeStep: this.options.executeStep || executeStep,
       });
       if (result.status === 'failed') {
         throw new StepExecutionError(result);
@@ -1385,7 +1386,8 @@ export class WorkflowRunner {
             };
 
             // Execute the repair step
-            const repairResult = await executeStep(repairStep, repairContext, this.logger, {
+            const exec = this.options.executeStep || executeStep;
+            const repairResult = await exec(repairStep, repairContext, this.logger, {
               executeWorkflowFn: this.executeSubWorkflow.bind(this),
               mcpManager: this.mcpManager,
               memoryDb: this.memoryDb,
@@ -1395,6 +1397,7 @@ export class WorkflowRunner {
               runId: this.runId,
               stepExecutionId: stepExecId,
               redactForStorage: this.redactForStorage.bind(this),
+              executeStep: this.options.executeStep || executeStep,
             });
 
             if (repairResult.status === 'failed') {
@@ -1841,7 +1844,8 @@ Do not change the 'id' or 'type' or 'auto_heal' fields.
 
     // Execute the agent step
     // We use a fresh context but share secrets/env
-    const result = await executeStep(agentStep, context, this.logger, {
+    const exec = this.options.executeStep || executeStep;
+    const result = await exec(agentStep, context, this.logger, {
       executeWorkflowFn: this.executeSubWorkflow.bind(this),
       mcpManager: this.mcpManager,
       memoryDb: this.memoryDb,
@@ -1851,6 +1855,7 @@ Do not change the 'id' or 'type' or 'auto_heal' fields.
       runId: this.runId,
       redactForStorage: this.redactForStorage.bind(this),
       allowInsecure: this.options.allowInsecure,
+      executeStep: this.options.executeStep || executeStep,
     });
 
     if (result.status !== 'success' || !result.output) {

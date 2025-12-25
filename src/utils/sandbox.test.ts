@@ -45,4 +45,3 @@ describe('SafeSandbox', () => {
     expect(true).toBe(true);
   });
 });
-

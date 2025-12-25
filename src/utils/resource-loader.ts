@@ -2,8 +2,15 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { bundleAssets } from './assets.macro.ts' with { type: 'macro' };
 
-// These are bundled at build-time.
-const EMBEDDED_ASSETS = bundleAssets();
+// These are bundled at build-time (macro). If macros are unavailable at runtime,
+// fall back to an empty set so local filesystem reads still work.
+const EMBEDDED_ASSETS = (() => {
+  try {
+    return bundleAssets();
+  } catch {
+    return {};
+  }
+})();
 
 export class ResourceLoader {
   /**

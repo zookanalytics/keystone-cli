@@ -968,7 +968,6 @@ async function executeScriptStep(
         // biome-ignore lint/suspicious/noExplicitAny: args is dynamic
         args: (context as any).args,
         require: requireFn,
-        console,
       },
       {
         timeout: step.timeout,

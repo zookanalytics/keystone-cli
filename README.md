@@ -156,6 +156,13 @@ The sub-workflows are used by the top-level workflows, but can be run directly i
 
 Keystone loads configuration from project `.keystone/config.yaml` (and user-level config; see `keystone config show` for search order) to manage model providers and model mappings.
 
+Search order (highest precedence first):
+- `KEYSTONE_CONFIG`
+- `.keystone/config.yaml` or `.keystone/config.yml`
+- `$XDG_CONFIG_HOME/keystone/config.yaml` or `~/.config/keystone/config.yaml` (and `.yml`)
+
+Global state (when enabled) is stored at `$XDG_DATA_HOME/keystone/state.db` or `~/.local/share/keystone/state.db`.
+
 ```yaml
 default_provider: openai
 

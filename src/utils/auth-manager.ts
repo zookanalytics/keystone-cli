@@ -257,8 +257,7 @@ export class AuthManager {
 
   private static getGoogleGeminiClientSecret(): string {
     const secret =
-      process.env.GOOGLE_GEMINI_OAUTH_CLIENT_SECRET ||
-      process.env.KEYSTONE_GEMINI_CLIENT_SECRET;
+      process.env.GOOGLE_GEMINI_OAUTH_CLIENT_SECRET || process.env.KEYSTONE_GEMINI_CLIENT_SECRET;
     if (!secret) {
       throw new Error(
         'Missing Google Gemini OAuth client secret. Set GOOGLE_GEMINI_OAUTH_CLIENT_SECRET or KEYSTONE_GEMINI_CLIENT_SECRET.'

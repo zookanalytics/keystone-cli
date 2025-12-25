@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import {
-  formatError,
-  formatExpressionError,
-  formatYamlError,
-  renderError,
-} from './error-renderer';
+import { formatError, formatExpressionError, formatYamlError, renderError } from './error-renderer';
 
 describe('error-renderer', () => {
   describe('formatError', () => {

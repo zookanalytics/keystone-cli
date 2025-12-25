@@ -46,11 +46,7 @@ describe('Standard Tools Security', () => {
   it('should block run_command outside CWD by default', () => {
     const outsideDir = path.resolve(path.parse(process.cwd()).root, 'tmp');
     expect(() => {
-      validateStandardToolSecurity(
-        'run_command',
-        { command: 'pwd', dir: outsideDir },
-        options
-      );
+      validateStandardToolSecurity('run_command', { command: 'pwd', dir: outsideDir }, options);
     }).toThrow(/Access denied/);
   });
 

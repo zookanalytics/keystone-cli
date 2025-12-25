@@ -22,6 +22,8 @@ steps:
     inputs:
       requirements: ${{ steps.get_requirements.output }}
       blueprint: ${{ steps.blueprint.output }}
+    outputMapping:
+      files: files
 
   - id: generate
     type: workflow
@@ -31,6 +33,8 @@ steps:
       requirements: ${{ steps.get_requirements.output }}
       blueprint: ${{ steps.blueprint.output }}
       files: ${{ steps.plan.outputs.files }}
+    outputMapping:
+      files: files
 
   - id: write_files
     type: file
@@ -45,4 +49,4 @@ steps:
     needs: [write_files]
     run: |
       echo "Scaffolding complete. Files created:"
-      echo "${{ steps.generate.outputs.files.map(f => f.path).join('\n') }}"
+      echo "${{ steps.generate.outputs && steps.generate.outputs.files ? steps.generate.outputs.files.map(f => f.path).join('\n') : '(dry run: no files generated)' }}"
