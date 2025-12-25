@@ -188,19 +188,19 @@ Tasks:
 6. [x] Add safety controls (allowlists/denylists, idempotencyKey, redaction) with defaults.
 7. [x] Provide examples and docs for engine handoffs and summaries.
 
-### Blueprint -> Plan -> Engineer workflow specialization
+### [x] Blueprint -> Plan -> Engineer workflow specialization
 Goal: Produce a system blueprint artifact before planning and generation to ensure consistency across parallel work.
 Notes:
 1. The blueprint should be persisted with a version and hash and treated as immutable per run.
 2. Plan and generation steps must reference the blueprint and enforce per-file constraints.
 3. Drift between the blueprint and outputs should be detectable and reported.
 Tasks:
-1. Define a blueprint schema (JSON Schema) covering APIs, files, dependencies, and constraints.
-2. Update scaffold workflows to require a blueprint creation step and artifact.
-3. Validate blueprint and persist it with hash/version; reject unvalidated artifacts.
-4. Make plan and generation steps consume the blueprint and enforce constraints per file/task.
-5. Add tooling to diff blueprint vs outputs and report drift.
-6. Add examples and migration notes for existing scaffold workflows.
+1. [x] Define a blueprint schema (JSON Schema) covering APIs, files, dependencies, and constraints.
+2. [x] Update scaffold workflows to require a blueprint creation step and artifact.
+3. [x] Validate blueprint and persist it with hash/version; reject unvalidated artifacts.
+4. [x] Make plan and generation steps consume the blueprint and enforce constraints per file/task.
+5. [x] Add tooling to diff blueprint vs outputs and report drift.
+6. [x] Add examples and migration notes for existing scaffold workflows.
 
 ### [x] XDG compliance and workspace isolation
 Goal: Support global config and shared memory in XDG paths while keeping project state in the CWD.

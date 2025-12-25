@@ -100,20 +100,20 @@ describe('ConfigLoader', () => {
     writeFileSync(
       join(userConfigDir, 'keystone', 'config.yaml'),
       'default_provider: anthropic\n' +
-      'providers:\n' +
-      '  anthropic:\n' +
-      '    type: anthropic\n' +
-      '    default_model: user-model\n'
+        'providers:\n' +
+        '  anthropic:\n' +
+        '    type: anthropic\n' +
+        '    default_model: user-model\n'
     );
 
     // Project config
     writeFileSync(
       join(keystoneDir, 'config.yaml'),
       'default_provider: openai\n' +
-      'providers:\n' +
-      '  openai:\n' +
-      '    type: openai\n' +
-      '    default_model: project-model\n'
+        'providers:\n' +
+        '  openai:\n' +
+        '    type: openai\n' +
+        '    default_model: project-model\n'
     );
 
     const cwdSpy = spyOn(process, 'cwd').mockReturnValue(tempDir);

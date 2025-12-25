@@ -3,6 +3,7 @@ description: "Plan the files for a new workflow and optional agents"
 
 inputs:
   requirements: { type: string }
+  blueprint: { type: object }
 
 outputs:
   files: ${{ steps.plan.output.files }}
@@ -14,12 +15,17 @@ steps:
     allowClarification: true
     useStandardTools: true
     prompt: |
-      The user wants to build the following:
-      <user_requirements>
-        ${{ inputs.requirements }}
-      </user_requirements>
+      You are planning a file structure based on a system blueprint.
+      
+      <system_blueprint>
+        ${{ inputs.blueprint }}
+      </system_blueprint>
 
-      Create a file plan. Use paths under:
+      User requirements:
+      ${{ inputs.requirements }}
+
+      Create a file plan. Follow the architecture and file list provided in the blueprint.
+      Use paths under:
       - .keystone/workflows/ for workflows
       - .keystone/workflows/agents/ for agents
 

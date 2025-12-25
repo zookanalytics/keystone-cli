@@ -235,7 +235,7 @@ const FileStepSchema = BaseStepSchema.extend({
 const RequestStepSchema = BaseStepSchema.extend({
   type: z.literal('request'),
   url: z.string(),
-  method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']).default('GET'),
+  method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD']).default('GET'),
   body: z.any().optional(),
   headers: z.record(z.string()).optional(),
   allowInsecure: z.boolean().optional(),
@@ -263,6 +263,53 @@ const EngineStepSchema = BaseStepSchema.extend({
   type: z.literal('engine'),
 }).merge(EngineConfigSchema);
 
+const BlueprintSchema = z.object({
+  architecture: z.object({
+    description: z.string(),
+    patterns: z.array(z.string()).optional(),
+  }),
+  apis: z
+    .array(
+      z.object({
+        name: z.string(),
+        description: z.string(),
+        endpoints: z
+          .array(
+            z.object({
+              path: z.string(),
+              method: z.string(),
+              purpose: z.string(),
+            })
+          )
+          .optional(),
+      })
+    )
+    .optional(),
+  files: z.array(
+    z.object({
+      path: z.string(),
+      purpose: z.string(),
+      constraints: z.array(z.string()).optional(),
+    })
+  ),
+  dependencies: z
+    .array(
+      z.object({
+        name: z.string(),
+        version: z.string().optional(),
+        purpose: z.string(),
+      })
+    )
+    .optional(),
+  constraints: z.array(z.string()).optional(),
+});
+
+const BlueprintStepSchema = BaseStepSchema.extend({
+  type: z.literal('blueprint'),
+  prompt: z.string(),
+  agent: z.string().optional().default('keystone-architect'),
+});
+
 const MemoryStepSchema = BaseStepSchema.extend({
   type: z.literal('memory'),
   op: z.enum(['search', 'store']),
@@ -289,6 +336,7 @@ export const StepSchema: z.ZodType<any> = z.lazy(() =>
     EngineStepSchema,
     MemoryStepSchema,
     JoinStepSchema,
+    BlueprintStepSchema,
   ])
 );
 
@@ -346,6 +394,8 @@ export type ScriptStep = z.infer<typeof ScriptStepSchema>;
 export type MemoryStep = z.infer<typeof MemoryStepSchema>;
 export type EngineStep = z.infer<typeof EngineStepSchema>;
 export type JoinStep = z.infer<typeof JoinStepSchema>;
+export type BlueprintStep = z.infer<typeof BlueprintStepSchema>;
+export type Blueprint = z.infer<typeof BlueprintSchema>;
 export type Workflow = z.infer<typeof WorkflowSchema>;
 export type AgentTool = z.infer<typeof AgentToolSchema>;
 export type Agent = z.infer<typeof AgentSchema>;

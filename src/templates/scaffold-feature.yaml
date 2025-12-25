@@ -7,19 +7,29 @@ steps:
     message: "Describe the workflow you want to build:"
     inputType: text
 
+  - id: blueprint
+    type: blueprint
+    needs: [get_requirements]
+    agent: keystone-architect
+    prompt: |
+      Generate a system blueprint for the following requirements:
+      ${{ steps.get_requirements.output }}
+
   - id: plan
     type: workflow
-    needs: [get_requirements]
+    needs: [blueprint]
     path: scaffold-plan
     inputs:
       requirements: ${{ steps.get_requirements.output }}
+      blueprint: ${{ steps.blueprint.output }}
 
   - id: generate
     type: workflow
-    needs: [plan]
+    needs: [blueprint, plan]
     path: scaffold-generate
     inputs:
       requirements: ${{ steps.get_requirements.output }}
+      blueprint: ${{ steps.blueprint.output }}
       files: ${{ steps.plan.outputs.files }}
 
   - id: write_files

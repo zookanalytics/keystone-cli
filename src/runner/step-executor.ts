@@ -3,6 +3,7 @@ import type { ExpressionContext } from '../expression/evaluator.ts';
 import { ExpressionEvaluator } from '../expression/evaluator.ts';
 // Removed synchronous file I/O imports - using Bun's async file API instead
 import type {
+  BlueprintStep,
   EngineStep,
   FileStep,
   HumanStep,
@@ -15,6 +16,7 @@ import type {
   WorkflowStep,
 } from '../parser/schema.ts';
 import { ConsoleLogger, type Logger } from '../utils/logger.ts';
+import { executeBlueprintStep } from './blueprint-executor.ts';
 import { executeEngineStep } from './engine-executor.ts';
 import { getAdapter } from './llm-adapter.ts';
 import { detectShellInjectionRisk, executeShell } from './shell-executor.ts';
@@ -102,7 +104,7 @@ async function executeJoinStep(
   const errors: string[] = [];
 
   for (const depId of step.needs) {
-    const depContext = context.steps[depId];
+    const depContext = context.steps?.[depId];
     if (depContext) {
       inputs[depId] = depContext.output;
       if (depContext.status) {
@@ -249,6 +251,21 @@ export async function executeStep(
           artifactRoot,
           redactForStorage,
         });
+        break;
+      case 'blueprint':
+        result = await executeBlueprintStep(
+          step,
+          context,
+          (s, c) => executeStep(s, c, logger, options),
+          logger,
+          {
+            mcpManager,
+            workflowDir,
+            abortSignal,
+            runId,
+            artifactRoot,
+          }
+        );
         break;
       case 'join':
         // Join is handled by the runner logic for aggregation, but we need a placeholder here
@@ -682,11 +699,10 @@ async function executeRequestStep(
     status: response.ok ? 'success' : 'failed',
     error: response.ok
       ? undefined
-      : `HTTP ${response.status}: ${response.statusText}${
-          responseText
-            ? `\nResponse Body: ${responseText.substring(0, 500)}${responseText.length > 500 ? '...' : ''}`
-            : ''
-        }`,
+      : `HTTP ${response.status}: ${response.statusText}${responseText
+        ? `\nResponse Body: ${responseText.substring(0, 500)}${responseText.length > 500 ? '...' : ''}`
+        : ''
+      }`,
   };
 }
 
@@ -714,10 +730,10 @@ async function executeHumanStep(
       output:
         step.inputType === 'confirm'
           ? answer === true ||
-            (typeof answer === 'string' &&
-              (answer.toLowerCase() === 'true' ||
-                answer.toLowerCase() === 'yes' ||
-                answer.toLowerCase() === 'y'))
+          (typeof answer === 'string' &&
+            (answer.toLowerCase() === 'true' ||
+              answer.toLowerCase() === 'yes' ||
+              answer.toLowerCase() === 'y'))
           : answer,
       status: 'success',
     };
@@ -851,7 +867,7 @@ async function executeScriptStep(
     if (!step.allowInsecure) {
       throw new Error(
         'Script execution is disabled by default because Bun uses an insecure VM sandbox. ' +
-          "Set 'allowInsecure: true' on the script step to run it anyway."
+        "Set 'allowInsecure: true' on the script step to run it anyway."
       );
     }
 
@@ -919,7 +935,7 @@ async function executeMemoryStep(
       const embedding = await adapter.embed(text, resolvedModel);
       const metadata = step.metadata
         ? // biome-ignore lint/suspicious/noExplicitAny: metadata typing
-          (ExpressionEvaluator.evaluateObject(step.metadata, context) as Record<string, any>)
+        (ExpressionEvaluator.evaluateObject(step.metadata, context) as Record<string, any>)
         : {};
 
       const id = await memoryDb.store(text, embedding, metadata);

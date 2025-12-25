@@ -3,6 +3,7 @@ description: "Generate file contents from a file plan"
 
 inputs:
   requirements: { type: string }
+  blueprint: { type: object }
   files: { type: array }
 
 outputs:
@@ -16,15 +17,19 @@ steps:
     useStandardTools: true
     foreach: ${{ inputs.files }}
     prompt: |
-      You are generating the content for a single file.
+      You are generating the content for a single file based on a system blueprint and a specific file spec.
 
-      Overall requirements:
+      <system_blueprint>
+        ${{ inputs.blueprint }}
+      </system_blueprint>
+
+      Overall user requirements:
       ${{ inputs.requirements }}
 
-      File spec:
+      File spec for this file:
       ${{ item }}
 
-      Produce the full file content for the given path.
+      Produce the full file content for the given path. Ensure it aligns with the architectural constraints and dependencies defined in the blueprint.
       Return only JSON with fields: path, content.
     outputSchema:
       type: object
