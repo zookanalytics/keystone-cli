@@ -9,6 +9,47 @@ import type { EngineStep } from '../parser/schema';
 import { ConfigLoader } from '../utils/config-loader';
 import { extractJson } from '../utils/json-parser';
 import { ConsoleLogger, type Logger } from '../utils/logger';
+import { LIMITS } from '../utils/constants';
+
+/**
+ * Simple LRU cache with maximum size to prevent memory leaks.
+ */
+class LRUCache<K, V> {
+  private cache = new Map<K, V>();
+
+  constructor(private maxSize: number) { }
+
+  get(key: K): V | undefined {
+    const value = this.cache.get(key);
+    if (value !== undefined) {
+      // Move to end (most recently used)
+      this.cache.delete(key);
+      this.cache.set(key, value);
+    }
+    return value;
+  }
+
+  set(key: K, value: V): void {
+    // Delete existing to update order
+    if (this.cache.has(key)) {
+      this.cache.delete(key);
+    }
+    // Evict oldest if at capacity
+    if (this.cache.size >= this.maxSize) {
+      const oldest = this.cache.keys().next().value;
+      if (oldest !== undefined) {
+        this.cache.delete(oldest);
+      }
+    }
+    this.cache.set(key, value);
+  }
+
+  get size(): number {
+    return this.cache.size;
+  }
+}
+
+const VERSION_CACHE = new LRUCache<string, string>(LIMITS.VERSION_CACHE_MAX_SIZE);
 
 export interface EngineExecutionResult {
   stdout: string;
@@ -29,8 +70,6 @@ export interface EngineExecutorOptions {
   artifactRoot?: string;
   redactForStorage?: (value: unknown) => unknown;
 }
-
-const VERSION_CACHE = new Map<string, string>();
 
 function matchesPattern(value: string, pattern: string): boolean {
   if (pattern.includes('*')) {

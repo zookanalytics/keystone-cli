@@ -184,6 +184,7 @@ const LlmStepSchema = BaseStepSchema.extend({
   prompt: z.string(),
   tools: z.array(AgentToolSchema).optional(),
   maxIterations: z.number().int().positive().default(10),
+  maxMessageHistory: z.number().int().positive().optional(), // Max messages to keep in conversation history
   useGlobalMcp: z.boolean().optional(),
   allowClarification: z.boolean().optional(),
   mcpServers: z

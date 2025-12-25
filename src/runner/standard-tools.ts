@@ -173,6 +173,22 @@ export const STANDARD_TOOLS: AgentTool[] = [
             throw new Error('Search query exceeds maximum length of 500 characters');
           }
           const isRegex = query.startsWith('/') && query.endsWith('/');
+          
+          // ReDoS protection: detect dangerous regex patterns
+          if (isRegex) {
+            const pattern = query.slice(1, -1);
+            // Detect common ReDoS patterns: nested quantifiers, overlapping alternations
+            const dangerousPatterns = [
+              /\\([^)]*[+*]\\)[+*]/,           // (x+)+ or (x*)*
+              /\\([^)]*\\|[^)]*\\)[+*]/,        // (a|aa)+
+              /\\(\\?:[^)]*[+*]\\)[+*]/,        // (?:x+)+
+              /[+*]{2,}/,                     // consecutive quantifiers
+            ];
+            if (dangerousPatterns.some(p => p.test(pattern))) {
+              throw new Error('Regex pattern contains potentially dangerous constructs (possible ReDoS). Simplify the pattern.');
+            }
+          }
+          
           let regex;
           try {
             regex = isRegex ? new RegExp(query.slice(1, -1)) : new RegExp(query.replace(/[.*+?^$\\{}()|[\\]\\\\]/g, '\\\\$&'), 'i');

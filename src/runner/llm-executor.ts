@@ -6,11 +6,28 @@ import type { AgentTool, LlmStep, Step } from '../parser/schema';
 import { extractJson } from '../utils/json-parser';
 import { ConsoleLogger, type Logger } from '../utils/logger.ts';
 import { RedactionBuffer, Redactor } from '../utils/redactor';
+import { LIMITS } from '../utils/constants';
 import { type LLMMessage, getAdapter } from './llm-adapter';
 import { MCPClient } from './mcp-client';
 import type { MCPManager, MCPServerConfig } from './mcp-manager';
 import { STANDARD_TOOLS, validateStandardToolSecurity } from './standard-tools';
 import type { StepResult } from './step-executor';
+
+/**
+ * Truncate message history to prevent unbounded memory growth.
+ * Preserves system messages and keeps the most recent messages.
+ */
+function truncateMessages(messages: LLMMessage[], maxHistory: number): LLMMessage[] {
+  if (messages.length <= maxHistory) return messages;
+
+  // Keep all system messages
+  const systemMessages = messages.filter(m => m.role === 'system');
+  const nonSystem = messages.filter(m => m.role !== 'system');
+
+  // Keep most recent non-system messages, accounting for system messages
+  const keep = nonSystem.slice(-(maxHistory - systemMessages.length));
+  return [...systemMessages, ...keep];
+}
 
 interface ToolDefinition {
   name: string;
@@ -293,7 +310,11 @@ export async function executeLlmStep(
         throw new Error('Step canceled');
       }
 
-      const response = await adapter.chat(messages, {
+      // Truncate message history to prevent unbounded growth
+      const maxHistory = step.maxMessageHistory || LIMITS.MAX_MESSAGE_HISTORY;
+      const truncatedMessages = truncateMessages(messages, maxHistory);
+
+      const response = await adapter.chat(truncatedMessages, {
         model: resolvedModel,
         tools: llmTools.length > 0 ? llmTools : undefined,
         onStream: (chunk) => {
