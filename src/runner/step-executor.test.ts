@@ -13,6 +13,7 @@ import * as dns from 'node:dns/promises';
 import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import * as readlinePromises from 'node:readline/promises';
 import type { MemoryDb } from '../db/memory-db';
 import type { ExpressionContext } from '../expression/evaluator';
 import type {
@@ -27,15 +28,8 @@ import type {
 import { ConfigLoader } from '../utils/config-loader';
 import type { SafeSandbox } from '../utils/sandbox';
 import type { getAdapter } from './llm-adapter';
+import type { executeLlmStep } from './llm-executor';
 import { executeStep } from './step-executor';
-
-// Mock executeLlmStep
-mock.module('./llm-executor', () => ({
-  // @ts-ignore
-  executeLlmStep: mock((_step, _context, _callback) => {
-    return Promise.resolve({ status: 'success', output: 'llm-output' });
-  }),
-}));
 
 interface StepOutput {
   stdout: string;
@@ -48,15 +42,10 @@ interface RequestOutput {
   data: unknown;
 }
 
-// Mock node:readline/promises
 const mockRl = {
   question: mock(() => Promise.resolve('')),
   close: mock(() => {}),
 };
-
-mock.module('node:readline/promises', () => ({
-  createInterface: mock(() => mockRl),
-}));
 
 describe('step-executor', () => {
   let context: ExpressionContext;
@@ -698,13 +687,18 @@ describe('step-executor', () => {
 
   describe('human', () => {
     const originalIsTTY = process.stdin.isTTY;
+    let createInterfaceSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
       process.stdin.isTTY = true;
+      createInterfaceSpy = spyOn(readlinePromises, 'createInterface').mockReturnValue(
+        mockRl as unknown as ReturnType<typeof readlinePromises.createInterface>
+      );
     });
 
     afterEach(() => {
       process.stdin.isTTY = originalIsTTY;
+      createInterfaceSpy.mockRestore();
     });
 
     it('should handle human confirmation', async () => {
@@ -846,7 +840,13 @@ describe('step-executor', () => {
         type: 'llm',
         prompt: 'hello',
       };
-      const result = await executeStep(step, context);
+      const executeLlmStepMock = mock(async () => ({
+        status: 'success',
+        output: 'llm-output',
+      })) as unknown as typeof executeLlmStep;
+      const result = await executeStep(step, context, undefined, {
+        executeLlmStep: executeLlmStepMock,
+      });
       expect(result.status).toBe('success');
       expect(result.output).toBe('llm-output');
     });

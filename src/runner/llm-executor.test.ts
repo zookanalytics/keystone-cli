@@ -1,14 +1,4 @@
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  mock,
-  spyOn,
-} from 'bun:test';
+import { afterAll, beforeAll, describe, expect, it, mock, spyOn } from 'bun:test';
 import * as child_process from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -16,12 +6,10 @@ import { join } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import type { ExpressionContext } from '../expression/evaluator';
 import type { LlmStep, Step } from '../parser/schema';
-import { ConfigLoader } from '../utils/config-loader';
 import type { LLMAdapter, LLMMessage, LLMResponse, LLMTool } from './llm-adapter';
 import { executeLlmStep } from './llm-executor';
-import { MCPClient, type MCPResponse } from './mcp-client';
-import { MCPManager } from './mcp-manager';
-import { type StepResult, executeStep } from './step-executor';
+import type { MCPServerConfig } from './mcp-manager';
+import { type StepResult } from './step-executor';
 import type { Logger } from './workflow-runner';
 
 // Mock adapters
@@ -31,9 +19,6 @@ import type { Logger } from './workflow-runner';
 describe('llm-executor', () => {
   const agentsDir = join(process.cwd(), '.keystone', 'workflows', 'agents');
   let spawnSpy: ReturnType<typeof spyOn>;
-  let initSpy: ReturnType<typeof spyOn>;
-  let listToolsSpy: ReturnType<typeof spyOn>;
-  let stopSpy: ReturnType<typeof spyOn>;
 
   const mockChat: LLMAdapter['chat'] = async (messages, _options) => {
     const lastMessage = messages[messages.length - 1];
@@ -132,6 +117,39 @@ describe('llm-executor', () => {
   // Default mock adapter factory using the standard mockChat
   const mockGetAdapter = createMockGetAdapter();
 
+  const createMockMcpClient = (options: {
+    tools?: { name: string; description?: string; inputSchema: Record<string, unknown> }[];
+    callTool?: (name: string, args: Record<string, unknown>) => Promise<unknown>;
+  } = {}) => {
+    const listTools = mock(async () => options.tools ?? []);
+    const callTool =
+      options.callTool || (mock(async () => ({})) as unknown as typeof options.callTool);
+    return {
+      listTools,
+      callTool,
+    };
+  };
+
+  const createMockMcpManager = (options: {
+    clients?: Record<string, ReturnType<typeof createMockMcpClient> | undefined>;
+    defaultClient?: ReturnType<typeof createMockMcpClient>;
+    errors?: Record<string, Error>;
+    globalServers?: MCPServerConfig[];
+  } = {}) => {
+    const getClient = mock(async (serverRef: string | { name: string }) => {
+      const name = typeof serverRef === 'string' ? serverRef : serverRef.name;
+      if (options.errors?.[name]) {
+        throw options.errors[name];
+      }
+      if (options.clients && name in options.clients) {
+        return options.clients[name];
+      }
+      return options.defaultClient;
+    });
+    const getGlobalServers = mock(() => options.globalServers ?? []);
+    return { getClient, getGlobalServers };
+  };
+
   beforeAll(async () => {
     // Mock spawn to avoid actual process creation
     const mockProcess = Object.assign(new EventEmitter(), {
@@ -165,23 +183,6 @@ tools:
 ---
 You are a test agent.`;
     writeFileSync(join(agentsDir, 'test-agent.md'), agentContent);
-  });
-
-  beforeEach(() => {
-    // Global MCP mocks to avoid hangs
-    initSpy = spyOn(MCPClient.prototype, 'initialize').mockResolvedValue({
-      jsonrpc: '2.0',
-      id: 0,
-      result: { protocolVersion: '2024-11-05' },
-    } as MCPResponse);
-    listToolsSpy = spyOn(MCPClient.prototype, 'listTools').mockResolvedValue([]);
-    stopSpy = spyOn(MCPClient.prototype, 'stop').mockReturnValue(undefined);
-  });
-
-  afterEach(() => {
-    initSpy.mockRestore();
-    listToolsSpy.mockRestore();
-    stopSpy.mockRestore();
   });
 
   afterAll(() => {
@@ -453,11 +454,8 @@ You are a test agent.`;
     const context: ExpressionContext = { inputs: {}, steps: {} };
     const executeStepFn = mock(async () => ({ status: 'success' as const, output: 'ok' }));
 
-    const createLocalSpy = spyOn(MCPClient, 'createLocal').mockImplementation(async () => {
-      const client = Object.create(MCPClient.prototype);
-      spyOn(client, 'initialize').mockRejectedValue(new Error('Connect failed'));
-      spyOn(client, 'stop').mockReturnValue(undefined);
-      return client;
+    const mcpManager = createMockMcpManager({
+      errors: { 'fail-mcp': new Error('Connect failed') },
     });
     const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
 
@@ -465,8 +463,8 @@ You are a test agent.`;
       step,
       context,
       executeStepFn as unknown as (step: Step, context: ExpressionContext) => Promise<StepResult>,
-      undefined,
-      undefined,
+      console,
+      mcpManager as unknown as { getClient: () => Promise<unknown> },
       undefined,
       undefined,
       mockGetAdapter
@@ -475,7 +473,6 @@ You are a test agent.`;
     expect(consoleSpy).toHaveBeenCalledWith(
       expect.stringContaining('Failed to list tools from MCP server fail-mcp')
     );
-    createLocalSpy.mockRestore();
     consoleSpy.mockRestore();
   });
 
@@ -492,13 +489,14 @@ You are a test agent.`;
     const context: ExpressionContext = { inputs: {}, steps: {} };
     const executeStepFn = mock(async () => ({ status: 'success' as const, output: 'ok' }));
 
-    const createLocalSpy = spyOn(MCPClient, 'createLocal').mockImplementation(async () => {
-      const client = Object.create(MCPClient.prototype);
-      spyOn(client, 'initialize').mockResolvedValue({} as MCPResponse);
-      spyOn(client, 'listTools').mockResolvedValue([{ name: 'mcp-tool', inputSchema: {} }]);
-      spyOn(client, 'callTool').mockRejectedValue(new Error('Tool failed'));
-      spyOn(client, 'stop').mockReturnValue(undefined);
-      return client;
+    const mockClient = createMockMcpClient({
+      tools: [{ name: 'mcp-tool', inputSchema: {} }],
+      callTool: async () => {
+        throw new Error('Tool failed');
+      },
+    });
+    const mcpManager = createMockMcpManager({
+      clients: { 'test-mcp': mockClient },
     });
 
     let toolErrorCaptured = false;
@@ -525,33 +523,23 @@ You are a test agent.`;
       context,
       executeStepFn as unknown as (step: Step, context: ExpressionContext) => Promise<StepResult>,
       undefined,
-      undefined,
+      mcpManager as unknown as { getClient: () => Promise<unknown> },
       undefined,
       undefined,
       getAdapter
     );
 
     expect(toolErrorCaptured).toBe(true);
-
-    createLocalSpy.mockRestore();
   });
 
   it('should use global MCP servers when useGlobalMcp is true', async () => {
-    ConfigLoader.setConfig({
-      mcp_servers: {
-        'global-mcp': { type: 'local', command: 'node', args: ['server.js'], timeout: 1000 },
-      },
-      providers: {
-        openai: { type: 'openai', api_key_env: 'OPENAI_API_KEY' },
-      },
-      model_mappings: {},
-      default_provider: 'openai',
-      storage: { retention_days: 30, redact_secrets_at_rest: true },
-      engines: { allowlist: {}, denylist: [] },
-      concurrency: { default: 10, pools: { llm: 2, shell: 5, http: 10, engine: 2 } },
+    const mockClient = createMockMcpClient({
+      tools: [{ name: 'global-tool', description: 'A global tool', inputSchema: {} }],
     });
-
-    const manager = new MCPManager();
+    const manager = createMockMcpManager({
+      globalServers: [{ name: 'global-mcp', command: 'node', args: ['server.js'] }],
+      defaultClient: mockClient,
+    });
     const step: LlmStep = {
       id: 'l1',
       type: 'llm',
@@ -563,16 +551,6 @@ You are a test agent.`;
     };
     const context: ExpressionContext = { inputs: {}, steps: {} };
     const executeStepFn = mock(async () => ({ status: 'success' as const, output: 'ok' }));
-
-    const createLocalSpy = spyOn(MCPClient, 'createLocal').mockImplementation(async () => {
-      const client = Object.create(MCPClient.prototype);
-      spyOn(client, 'initialize').mockResolvedValue({} as MCPResponse);
-      spyOn(client, 'listTools').mockResolvedValue([
-        { name: 'global-tool', description: 'A global tool', inputSchema: {} },
-      ]);
-      spyOn(client, 'stop').mockReturnValue(undefined);
-      return client;
-    });
 
     let toolFound = false;
     const chatMock = mock(async (_messages: LLMMessage[], options: { tools?: LLMTool[] }) => {
@@ -588,16 +566,13 @@ You are a test agent.`;
       context,
       executeStepFn as unknown as (step: Step, context: ExpressionContext) => Promise<StepResult>,
       console,
-      manager,
+      manager as unknown as { getClient: () => Promise<unknown>; getGlobalServers: () => unknown[] },
       undefined,
       undefined,
       getAdapter
     );
 
     expect(toolFound).toBe(true);
-
-    createLocalSpy.mockRestore();
-    ConfigLoader.clear();
   });
 
   it('should support ad-hoc tools defined in the step', async () => {
@@ -747,19 +722,11 @@ You are a test agent.`;
   });
 
   it('should not add global MCP server if already explicitly listed', async () => {
-    ConfigLoader.setConfig({
-      mcp_servers: {
-        'test-mcp': { type: 'local', command: 'node', args: ['server.js'], timeout: 1000 },
-      },
-      providers: { openai: { type: 'openai', api_key_env: 'OPENAI_API_KEY' } },
-      model_mappings: {},
-      default_provider: 'openai',
-      storage: { retention_days: 30, redact_secrets_at_rest: true },
-      engines: { allowlist: {}, denylist: [] },
-      concurrency: { default: 10, pools: { llm: 2, shell: 5, http: 10, engine: 2 } },
+    const mockClient = createMockMcpClient();
+    const manager = createMockMcpManager({
+      globalServers: [{ name: 'test-mcp', command: 'node', args: ['server.js'] }],
+      defaultClient: mockClient,
     });
-
-    const manager = new MCPManager();
     const step: LlmStep = {
       id: 'l1',
       type: 'llm',
@@ -773,43 +740,24 @@ You are a test agent.`;
     const context: ExpressionContext = { inputs: {}, steps: {} };
     const executeStepFn = mock(async () => ({ status: 'success' as const, output: 'ok' }));
 
-    const createLocalSpy = spyOn(MCPClient, 'createLocal').mockImplementation(async () => {
-      const client = Object.create(MCPClient.prototype);
-      spyOn(client, 'initialize').mockResolvedValue({} as MCPResponse);
-      spyOn(client, 'listTools').mockResolvedValue([]);
-      spyOn(client, 'stop').mockReturnValue(undefined);
-      return client;
-    });
-
     const chatMock = mock(async () => ({
       message: { role: 'assistant', content: 'hello' },
     })) as unknown as LLMAdapter['chat'];
     const getAdapter = createMockGetAdapter(chatMock);
-
-    const managerSpy = spyOn(manager, 'getGlobalServers');
 
     await executeLlmStep(
       step,
       context,
       executeStepFn as unknown as (step: Step, context: ExpressionContext) => Promise<StepResult>,
       console,
-      manager,
+      manager as unknown as { getClient: () => Promise<unknown>; getGlobalServers: () => unknown[] },
       undefined,
       undefined,
       getAdapter
     );
 
-    expect(managerSpy).toHaveBeenCalled();
-    // It should only have 1 MCP server (the explicit one)
-    // We can check this by seeing how many times initialize was called if they were different,
-    // but here we just want to ensure it didn't push the global one again.
-
-    // Actually, createLocal will be called for 'test-mcp' (explicitly listed)
-    expect(createLocalSpy).toHaveBeenCalledTimes(1);
-
-    createLocalSpy.mockRestore();
-    managerSpy.mockRestore();
-    ConfigLoader.clear();
+    expect(manager.getGlobalServers).toHaveBeenCalled();
+    expect(manager.getClient).toHaveBeenCalledTimes(1);
   });
 
   it('should handle object prompts by stringifying them', async () => {

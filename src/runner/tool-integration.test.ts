@@ -5,7 +5,6 @@ import type { ExpressionContext } from '../expression/evaluator';
 import type { LlmStep, Step } from '../parser/schema';
 import type { LLMAdapter } from './llm-adapter';
 import { executeLlmStep } from './llm-executor';
-import { MCPClient, type MCPResponse } from './mcp-client';
 import type { StepResult } from './step-executor';
 
 interface MockToolCall {
@@ -22,6 +21,27 @@ describe('llm-executor with tools and MCP', () => {
       adapter: { chat: chatFn } as LLMAdapter,
       resolvedModel: 'gpt-4',
     });
+  };
+  const createMockMcpClient = (options: {
+    tools?: { name: string; description?: string; inputSchema: Record<string, unknown> }[];
+    callTool?: (name: string, args: Record<string, unknown>) => Promise<unknown>;
+  } = {}) => {
+    const listTools = mock(async () => options.tools ?? []);
+    const callTool =
+      options.callTool || (mock(async () => ({})) as unknown as typeof options.callTool);
+    return {
+      listTools,
+      callTool,
+    };
+  };
+  const createMockMcpManager = (options: {
+    clients?: Record<string, ReturnType<typeof createMockMcpClient> | undefined>;
+  } = {}) => {
+    const getClient = mock(async (serverRef: string | { name: string }) => {
+      const name = typeof serverRef === 'string' ? serverRef : serverRef.name;
+      return options.clients?.[name];
+    });
+    return { getClient };
   };
 
   beforeAll(() => {
@@ -62,24 +82,18 @@ Test system prompt`;
     }) as unknown as LLMAdapter['chat'];
     const getAdapter = createMockGetAdapter(mockChat);
 
-    // Use mock.module for MCPClient
-    const originalInitialize = MCPClient.prototype.initialize;
-    const originalListTools = MCPClient.prototype.listTools;
-    const originalStop = MCPClient.prototype.stop;
-
-    const mockInitialize = mock(async () => ({}) as MCPResponse);
-    const mockListTools = mock(async () => [
-      {
-        name: 'mcp-tool',
-        description: 'MCP tool',
-        inputSchema: { type: 'object', properties: {} },
-      },
-    ]);
-    const mockStop = mock(() => {});
-
-    MCPClient.prototype.initialize = mockInitialize;
-    MCPClient.prototype.listTools = mockListTools;
-    MCPClient.prototype.stop = mockStop;
+    const mockClient = createMockMcpClient({
+      tools: [
+        {
+          name: 'mcp-tool',
+          description: 'MCP tool',
+          inputSchema: { type: 'object', properties: {} },
+        },
+      ],
+    });
+    const mcpManager = createMockMcpManager({
+      clients: { 'test-mcp': mockClient },
+    });
 
     const step: LlmStep = {
       id: 'l1',
@@ -105,7 +119,7 @@ Test system prompt`;
       context,
       executeStepFn as unknown as (step: Step, context: ExpressionContext) => Promise<StepResult>,
       undefined,
-      undefined,
+      mcpManager as unknown as { getClient: () => Promise<unknown> },
       undefined,
       undefined,
       getAdapter
@@ -116,9 +130,6 @@ Test system prompt`;
     expect(toolNames).toContain('step-tool');
     expect(toolNames).toContain('mcp-tool');
 
-    MCPClient.prototype.initialize = originalInitialize;
-    MCPClient.prototype.listTools = originalListTools;
-    MCPClient.prototype.stop = originalStop;
   });
 
   it('should execute MCP tool when called', async () => {
@@ -146,26 +157,20 @@ Test system prompt`;
     }) as unknown as LLMAdapter['chat'];
     const getAdapter = createMockGetAdapter(mockChat);
 
-    const originalInitialize = MCPClient.prototype.initialize;
-    const originalListTools = MCPClient.prototype.listTools;
-    const originalCallTool = MCPClient.prototype.callTool;
-    const originalStop = MCPClient.prototype.stop;
-
-    const mockInitialize = mock(async () => ({}) as MCPResponse);
-    const mockListTools = mock(async () => [
-      {
-        name: 'mcp-tool',
-        description: 'MCP tool',
-        inputSchema: { type: 'object', properties: {} },
-      },
-    ]);
     const mockCallTool = mock(async () => ({ result: 'mcp success' }));
-    const mockStop = mock(() => {});
-
-    MCPClient.prototype.initialize = mockInitialize;
-    MCPClient.prototype.listTools = mockListTools;
-    MCPClient.prototype.callTool = mockCallTool;
-    MCPClient.prototype.stop = mockStop;
+    const mockClient = createMockMcpClient({
+      tools: [
+        {
+          name: 'mcp-tool',
+          description: 'MCP tool',
+          inputSchema: { type: 'object', properties: {} },
+        },
+      ],
+      callTool: mockCallTool,
+    });
+    const mcpManager = createMockMcpManager({
+      clients: { 'test-mcp': mockClient },
+    });
 
     const step: LlmStep = {
       id: 'l1',
@@ -185,7 +190,7 @@ Test system prompt`;
       context,
       executeStepFn as unknown as (step: Step, context: ExpressionContext) => Promise<StepResult>,
       undefined,
-      undefined,
+      mcpManager as unknown as { getClient: () => Promise<unknown> },
       undefined,
       undefined,
       getAdapter
@@ -193,10 +198,5 @@ Test system prompt`;
 
     expect(mockCallTool).toHaveBeenCalledWith('mcp-tool', {});
     expect(chatCount).toBe(2);
-
-    MCPClient.prototype.initialize = originalInitialize;
-    MCPClient.prototype.listTools = originalListTools;
-    MCPClient.prototype.callTool = originalCallTool;
-    MCPClient.prototype.stop = originalStop;
   });
 });

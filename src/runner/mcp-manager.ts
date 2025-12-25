@@ -2,6 +2,8 @@ import { ConfigLoader } from '../utils/config-loader';
 import { ConsoleLogger, type Logger } from '../utils/logger.ts';
 import { MCPClient } from './mcp-client';
 
+export type MCPClientFactory = Pick<typeof MCPClient, 'createLocal' | 'createRemote'>;
+
 // Private/internal IP ranges that should be blocked for SSRF protection
 const PRIVATE_IP_RANGES = [
   /^127\./, // Loopback
@@ -93,9 +95,11 @@ export class MCPManager {
   private connectionPromises: Map<string, Promise<MCPClient | undefined>> = new Map();
   private sharedServers: Map<string, MCPServerConfig> = new Map();
   private logger: Logger;
+  private clientFactory: MCPClientFactory;
 
-  constructor(logger: Logger = new ConsoleLogger()) {
-    this.logger = logger;
+  constructor(logger?: Logger, clientFactory: MCPClientFactory = MCPClient) {
+    this.logger = logger || new ConsoleLogger();
+    this.clientFactory = clientFactory;
     this.loadGlobalConfig();
 
     // Ensure cleanup on process exit
@@ -177,7 +181,7 @@ export class MCPManager {
             headers.Authorization = `Bearer ${token}`;
           }
 
-          client = await MCPClient.createRemote(config.url, headers, config.timeout, {
+          client = await this.clientFactory.createRemote(config.url, headers, config.timeout, {
             logger: activeLogger,
           });
         } else {
@@ -202,7 +206,7 @@ export class MCPManager {
             env.MCP_TOKEN = token;
           }
 
-          client = await MCPClient.createLocal(
+          client = await this.clientFactory.createLocal(
             config.command,
             config.args || [],
             env,

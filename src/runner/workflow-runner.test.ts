@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
+import { afterAll, afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import { existsSync, rmSync } from 'node:fs';
 import { WorkflowDb } from '../db/workflow-db';
 import type { Workflow } from '../parser/schema';
@@ -9,6 +9,11 @@ import { WorkflowRunner } from './workflow-runner';
 
 describe('WorkflowRunner', () => {
   const dbPath = ':memory:';
+  const activeSpies: Array<{ mockRestore: () => void }> = [];
+  const trackSpy = <T extends { mockRestore: () => void }>(spy: T): T => {
+    activeSpies.push(spy);
+    return spy;
+  };
 
   afterAll(() => {
     if (existsSync('test-resume.db')) {
@@ -19,8 +24,12 @@ describe('WorkflowRunner', () => {
     }
   });
 
-  beforeEach(() => {
-    mock.restore();
+  afterEach(() => {
+    for (const spy of activeSpies) {
+      spy.mockRestore();
+    }
+    activeSpies.length = 0;
+    ConfigLoader.clear();
   });
 
   const workflow: Workflow = {
@@ -531,8 +540,8 @@ describe('WorkflowRunner', () => {
       },
     } as unknown as Workflow;
 
-    spyOn(WorkflowRegistry, 'resolvePath').mockReturnValue('child.yaml');
-    spyOn(WorkflowParser, 'loadWorkflow').mockReturnValue(childWorkflow);
+    trackSpy(spyOn(WorkflowRegistry, 'resolvePath')).mockReturnValue('child.yaml');
+    trackSpy(spyOn(WorkflowParser, 'loadWorkflow')).mockReturnValue(childWorkflow);
 
     const runner = new WorkflowRunner(parentWorkflow, { dbPath });
     const outputs = await runner.run();
@@ -649,15 +658,14 @@ describe('WorkflowRunner', () => {
       },
     } as unknown as Workflow;
 
-    // @ts-ignore
-    spyOn(WorkflowRunner.prototype, 'loadSecrets').mockReturnValue({
-      MY_SECRET: 'my-super-secret',
+    const secretValue = 'my-super-secret';
+    const runner = new WorkflowRunner(workflow, {
+      dbPath,
+      secrets: { KEYSTONE_TEST_REDACTION_SECRET: secretValue },
     });
-
-    const runner = new WorkflowRunner(workflow, { dbPath });
     await runner.run();
 
-    expect(runner.redact('my-super-secret')).toBe('***REDACTED***');
+    expect(runner.redact(secretValue)).toBe('***REDACTED***');
   });
 
   it('should redact secret inputs at rest', async () => {

@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
+import { afterAll, describe, expect, it } from 'bun:test';
 import { existsSync, rmSync } from 'node:fs';
 import { WorkflowDb } from '../db/workflow-db';
 import type { Workflow } from '../parser/schema';
@@ -7,10 +7,6 @@ import { WorkflowRunner } from './workflow-runner';
 
 describe('WorkflowRunner - Subflows & Compensations', () => {
   const dbPath = ':memory:';
-
-  beforeEach(() => {
-    mock.restore();
-  });
 
   it('should execute parallel branches and join with "all" condition', async () => {
     const workflow: Workflow = {

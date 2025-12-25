@@ -5,12 +5,8 @@ import type { ExpressionContext } from '../expression/evaluator';
 import type { Blueprint, BlueprintStep, Step } from '../parser/schema';
 import type { Logger } from '../utils/logger';
 import { executeBlueprintStep } from './blueprint-executor';
-import * as llmExecutor from './llm-executor';
+import type { executeLlmStep } from './llm-executor';
 import type { StepResult } from './step-executor';
-
-mock.module('./llm-executor', () => ({
-  executeLlmStep: mock(),
-}));
 
 describe('BlueprintExecutor', () => {
   const tempDir = path.join(process.cwd(), '.tmp-blueprint-test');
@@ -31,12 +27,11 @@ describe('BlueprintExecutor', () => {
       files: [{ path: 'todo.ts', purpose: 'logic' }],
     };
 
-    const mockExecuteLlmStep = llmExecutor.executeLlmStep as ReturnType<typeof mock>;
-    mockExecuteLlmStep.mockResolvedValue({
+    const mockExecuteLlmStep = mock(async () => ({
       status: 'success',
       output: mockBlueprint,
       usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
-    } as StepResult);
+    })) as unknown as typeof executeLlmStep;
 
     const mockExecuteStep = mock(async () => ({ status: 'success', output: null }) as StepResult);
 
@@ -52,6 +47,7 @@ describe('BlueprintExecutor', () => {
       const result = await executeBlueprintStep(mockStep, context, mockExecuteStep, logger, {
         artifactRoot: tempDir,
         runId: 'test-run',
+        executeLlmStep: mockExecuteLlmStep,
       });
 
       expect(result.status).toBe('success');

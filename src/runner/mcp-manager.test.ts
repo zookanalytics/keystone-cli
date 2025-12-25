@@ -3,13 +3,31 @@ import * as child_process from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { Readable, Writable } from 'node:stream';
 import { ConfigLoader } from '../utils/config-loader';
-import { MCPClient, type MCPResponse } from './mcp-client';
-import { MCPManager } from './mcp-manager';
+import type { MCPClient } from './mcp-client';
+import { MCPManager, type MCPClientFactory } from './mcp-manager';
 
 import type { Config } from '../parser/config-schema';
 
 describe('MCPManager', () => {
   let spawnSpy: ReturnType<typeof spyOn>;
+  const createMockClient = (initializeImpl?: () => Promise<unknown>) => {
+    const initialize = mock(
+      initializeImpl ||
+        (async () => ({
+          result: { protocolVersion: '1.0' },
+          jsonrpc: '2.0',
+          id: 0,
+        }))
+    );
+    const stop = mock(() => undefined);
+    const client = { initialize, stop } as unknown as MCPClient;
+    return { client, initialize, stop };
+  };
+
+  const createMockFactory = (client: MCPClient): MCPClientFactory => ({
+    createLocal: mock(async () => client),
+    createRemote: mock(async () => client),
+  });
 
   beforeEach(() => {
     ConfigLoader.clear();
@@ -74,39 +92,27 @@ describe('MCPManager', () => {
       concurrency: { default: 10, pools: { llm: 2, shell: 5, http: 10, engine: 2 } },
     } as unknown as Config);
 
-    const initSpy = spyOn(MCPClient.prototype, 'initialize').mockResolvedValue({
-      result: { protocolVersion: '1.0' },
-      jsonrpc: '2.0',
-      id: 0,
-    });
-    const stopSpy = spyOn(MCPClient.prototype, 'stop').mockReturnValue(undefined);
-
-    const manager = new MCPManager();
+    const { client: mockClient, initialize, stop } = createMockClient();
+    const clientFactory = createMockFactory(mockClient);
+    const manager = new MCPManager(undefined, clientFactory);
     const client = await manager.getClient('test-server');
 
     expect(client).toBeDefined();
-    expect(initSpy).toHaveBeenCalled();
+    expect(initialize).toHaveBeenCalled();
 
     // Should reuse client
     const client2 = await manager.getClient('test-server');
     expect(client2).toBe(client);
-    expect(initSpy).toHaveBeenCalledTimes(1);
+    expect(initialize).toHaveBeenCalledTimes(1);
 
     await manager.stopAll();
-    expect(stopSpy).toHaveBeenCalled();
-
-    initSpy.mockRestore();
-    stopSpy.mockRestore();
+    expect(stop).toHaveBeenCalled();
   });
 
   it('should get client for ad-hoc server config', async () => {
-    const initSpy = spyOn(MCPClient.prototype, 'initialize').mockResolvedValue({
-      result: { protocolVersion: '1.0' },
-      jsonrpc: '2.0',
-      id: 0,
-    });
-
-    const manager = new MCPManager();
+    const { client: mockClient, initialize } = createMockClient();
+    const clientFactory = createMockFactory(mockClient);
+    const manager = new MCPManager(undefined, clientFactory);
     const client = await manager.getClient({
       name: 'adhoc',
       type: 'local',
@@ -114,9 +120,7 @@ describe('MCPManager', () => {
     });
 
     expect(client).toBeDefined();
-    expect(initSpy).toHaveBeenCalled();
-
-    initSpy.mockRestore();
+    expect(initialize).toHaveBeenCalled();
   });
 
   it('should return undefined if global server not found', async () => {
@@ -143,17 +147,17 @@ describe('MCPManager', () => {
 
     // Mock initialize to take some time
     let initCalls = 0;
-    const initSpy = spyOn(MCPClient.prototype, 'initialize').mockImplementation(async () => {
+    const { client: mockClient, initialize } = createMockClient(async () => {
       initCalls++;
       await new Promise((resolve) => setTimeout(resolve, 50));
       return {
         result: { protocolVersion: '1.0' },
         jsonrpc: '2.0',
         id: 0,
-      } as MCPResponse;
+      };
     });
-
-    const manager = new MCPManager();
+    const clientFactory = createMockFactory(mockClient);
+    const manager = new MCPManager(undefined, clientFactory);
 
     // Fire off multiple requests concurrently
     const p1 = manager.getClient('concurrent-server');
@@ -166,8 +170,7 @@ describe('MCPManager', () => {
     expect(c1).toBe(c2);
     expect(c1).toBe(c3);
     expect(initCalls).toBe(1); // Crucial: only one initialization
-
-    initSpy.mockRestore();
+    expect(initialize).toHaveBeenCalledTimes(1);
   });
 
   it('should handle connection failure', async () => {
@@ -186,20 +189,13 @@ describe('MCPManager', () => {
       concurrency: { default: 10, pools: { llm: 2, shell: 5, http: 10, engine: 2 } },
     } as unknown as Config);
 
-    const createLocalSpy = spyOn(MCPClient, 'createLocal').mockImplementation(
-      async (_cmd: string) => {
-        const client = Object.create(MCPClient.prototype);
-        spyOn(client, 'initialize').mockRejectedValue(new Error('Connection failed'));
-        spyOn(client, 'stop').mockReturnValue(undefined);
-        return client;
-      }
-    );
-
-    const manager = new MCPManager();
+    const { client: mockClient } = createMockClient(async () => {
+      throw new Error('Connection failed');
+    });
+    const clientFactory = createMockFactory(mockClient);
+    const manager = new MCPManager(undefined, clientFactory);
     const client = await manager.getClient('fail-server');
 
     expect(client).toBeUndefined();
-
-    createLocalSpy.mockRestore();
   });
 });

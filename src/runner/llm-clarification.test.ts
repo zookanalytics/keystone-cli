@@ -14,10 +14,12 @@ describe('LLM Clarification', () => {
       resolvedModel: 'gpt-4o',
     });
   };
+  let resolveAgentPathSpy: ReturnType<typeof spyOn>;
+  let parseAgentSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    spyOn(agentParser, 'resolveAgentPath').mockReturnValue('test-agent.md');
-    spyOn(agentParser, 'parseAgent').mockReturnValue({
+    resolveAgentPathSpy = spyOn(agentParser, 'resolveAgentPath').mockReturnValue('test-agent.md');
+    parseAgentSpy = spyOn(agentParser, 'parseAgent').mockReturnValue({
       name: 'test-agent',
       systemPrompt: 'test system prompt',
       tools: [],
@@ -38,7 +40,9 @@ describe('LLM Clarification', () => {
   });
 
   afterEach(() => {
-    mock.restore();
+    resolveAgentPathSpy.mockRestore();
+    parseAgentSpy.mockRestore();
+    ConfigLoader.clear();
   });
 
   it('should inject ask tool when allowClarification is true', async () => {

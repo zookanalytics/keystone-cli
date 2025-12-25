@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import { WorkflowDb } from '../db/workflow-db';
 import { WorkflowParser } from '../parser/workflow-parser';
+import { ConsoleLogger } from '../utils/logger';
 import { WorkflowRegistry } from '../utils/workflow-registry';
 import { MCPServer } from './mcp-server';
 import { WorkflowSuspendedError } from './step-executor';
@@ -9,16 +10,29 @@ import { WorkflowRunner } from './workflow-runner';
 describe('MCPServer', () => {
   let db: WorkflowDb;
   let server: MCPServer;
+  const activeSpies: Array<{ mockRestore: () => void }> = [];
+  const trackSpy = <T extends { mockRestore: () => void }>(spy: T): T => {
+    activeSpies.push(spy);
+    return spy;
+  };
 
   beforeEach(() => {
     db = new WorkflowDb(':memory:');
     server = new MCPServer(db);
-    mock.restore();
+  });
+  afterEach(() => {
+    for (const spy of activeSpies) {
+      spy.mockRestore();
+    }
+    activeSpies.length = 0;
   });
 
-  const handleMessage = (msg: unknown) => {
+  const createServerWithRunner = (runner: WorkflowRunner) =>
+    new MCPServer(db, process.stdin, process.stdout, new ConsoleLogger(), () => runner);
+
+  const handleMessage = (msg: unknown, targetServer: MCPServer = server) => {
     // @ts-ignore
-    return server.handleMessage(msg);
+    return targetServer.handleMessage(msg);
   };
 
   it('should handle initialize request', async () => {
@@ -44,7 +58,7 @@ describe('MCPServer', () => {
   });
 
   it('should call list_workflows tool', async () => {
-    spyOn(WorkflowRegistry, 'listWorkflows').mockReturnValue([
+    trackSpy(spyOn(WorkflowRegistry, 'listWorkflows')).mockReturnValue([
       { name: 'test-wf', description: 'Test Workflow' },
     ]);
 
@@ -59,17 +73,16 @@ describe('MCPServer', () => {
   });
 
   it('should call run_workflow tool successfully', async () => {
-    spyOn(WorkflowRegistry, 'resolvePath').mockReturnValue('test.yaml');
+    trackSpy(spyOn(WorkflowRegistry, 'resolvePath')).mockReturnValue('test.yaml');
     // @ts-ignore
-    spyOn(WorkflowParser, 'loadWorkflow').mockReturnValue({
+    trackSpy(spyOn(WorkflowParser, 'loadWorkflow')).mockReturnValue({
       name: 'test-wf',
       steps: [],
     });
 
-    // Mock WorkflowRunner
     const mockRun = mock(() => Promise.resolve({ result: 'ok' }));
-    // @ts-ignore
-    spyOn(WorkflowRunner.prototype, 'run').mockImplementation(mockRun);
+    const runner = { run: mockRun } as unknown as WorkflowRunner;
+    const testServer = createServerWithRunner(runner);
 
     const response = await handleMessage({
       jsonrpc: '2.0',
@@ -79,20 +92,23 @@ describe('MCPServer', () => {
         name: 'run_workflow',
         arguments: { workflow_name: 'test-wf', inputs: {} },
       },
-    });
+    }, testServer);
 
     expect(JSON.parse(response?.result?.content?.[0]?.text || '{}').status).toBe('success');
   });
 
   it('should handle run_workflow failure', async () => {
-    spyOn(WorkflowRegistry, 'resolvePath').mockReturnValue('test.yaml');
+    trackSpy(spyOn(WorkflowRegistry, 'resolvePath')).mockReturnValue('test.yaml');
     // @ts-ignore
-    spyOn(WorkflowParser, 'loadWorkflow').mockReturnValue({
+    trackSpy(spyOn(WorkflowParser, 'loadWorkflow')).mockReturnValue({
       name: 'test-wf',
       steps: [],
     });
 
-    spyOn(WorkflowRunner.prototype, 'run').mockRejectedValue(new Error('workflow failed'));
+    const runner = {
+      run: mock(() => Promise.reject(new Error('workflow failed'))),
+    } as unknown as WorkflowRunner;
+    const testServer = createServerWithRunner(runner);
 
     const response = await handleMessage({
       jsonrpc: '2.0',
@@ -102,23 +118,26 @@ describe('MCPServer', () => {
         name: 'run_workflow',
         arguments: { workflow_name: 'test-wf' },
       },
-    });
+    }, testServer);
 
     expect(response?.result?.isError).toBe(true);
     expect(response?.result?.content?.[0]?.text).toContain('Workflow failed');
   });
 
   it('should handle workflow suspension in run_workflow', async () => {
-    spyOn(WorkflowRegistry, 'resolvePath').mockReturnValue('test.yaml');
+    trackSpy(spyOn(WorkflowRegistry, 'resolvePath')).mockReturnValue('test.yaml');
     // @ts-ignore
-    spyOn(WorkflowParser, 'loadWorkflow').mockReturnValue({
+    trackSpy(spyOn(WorkflowParser, 'loadWorkflow')).mockReturnValue({
       name: 'test-wf',
       steps: [],
     });
 
     const suspendedError = new WorkflowSuspendedError('Input needed', 'step1', 'text');
-    spyOn(WorkflowRunner.prototype, 'run').mockRejectedValue(suspendedError);
-    spyOn(WorkflowRunner.prototype, 'getRunId').mockReturnValue('run123');
+    const runner = {
+      run: mock(() => Promise.reject(suspendedError)),
+      getRunId: mock(() => 'run123'),
+    } as unknown as WorkflowRunner;
+    const testServer = createServerWithRunner(runner);
 
     const response = await handleMessage({
       jsonrpc: '2.0',
@@ -128,7 +147,7 @@ describe('MCPServer', () => {
         name: 'run_workflow',
         arguments: { workflow_name: 'test-wf' },
       },
-    });
+    }, testServer);
 
     const result = JSON.parse(response?.result?.content?.[0]?.text || '{}');
     expect(result.status).toBe('paused');
@@ -142,16 +161,16 @@ describe('MCPServer', () => {
     await db.updateRunStatus(runId, 'paused');
     await db.createStep('step-exec-1', runId, 's1');
 
-    spyOn(WorkflowRegistry, 'resolvePath').mockReturnValue('test.yaml');
+    trackSpy(spyOn(WorkflowRegistry, 'resolvePath')).mockReturnValue('test.yaml');
     // @ts-ignore
-    spyOn(WorkflowParser, 'loadWorkflow').mockReturnValue({
+    trackSpy(spyOn(WorkflowParser, 'loadWorkflow')).mockReturnValue({
       name: 'test-wf',
       steps: [{ id: 's1', type: 'human' }],
     });
 
     const mockRun = mock(() => Promise.resolve({ result: 'resumed' }));
-    // @ts-ignore
-    spyOn(WorkflowRunner.prototype, 'run').mockImplementation(mockRun);
+    const runner = { run: mockRun } as unknown as WorkflowRunner;
+    const testServer = createServerWithRunner(runner);
 
     const response = await handleMessage({
       jsonrpc: '2.0',
@@ -161,7 +180,7 @@ describe('MCPServer', () => {
         name: 'answer_human_input',
         arguments: { run_id: runId, input: 'my response' },
       },
-    });
+    }, testServer);
 
     expect(JSON.parse(response?.result?.content?.[0]?.text || '{}').status).toBe('success');
 
@@ -223,8 +242,8 @@ describe('MCPServer', () => {
     // Create a new server for this test to use the streams
     const testServer = new MCPServer(db, input, outputStream);
 
-    const writeSpy = spyOn(outputStream, 'write').mockImplementation(() => true);
-    const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
+    const writeSpy = trackSpy(spyOn(outputStream, 'write')).mockImplementation(() => true);
+    const consoleSpy = trackSpy(spyOn(console, 'error')).mockImplementation(() => {});
 
     const startPromise = testServer.start();
 
@@ -246,25 +265,24 @@ describe('MCPServer', () => {
     input.end();
     await startPromise;
 
-    writeSpy.mockRestore();
-    consoleSpy.mockRestore();
   });
 
   it('should call start_workflow tool and return immediately', async () => {
-    spyOn(WorkflowRegistry, 'resolvePath').mockReturnValue('test.yaml');
+    trackSpy(spyOn(WorkflowRegistry, 'resolvePath')).mockReturnValue('test.yaml');
     // @ts-ignore
-    spyOn(WorkflowParser, 'loadWorkflow').mockReturnValue({
+    trackSpy(spyOn(WorkflowParser, 'loadWorkflow')).mockReturnValue({
       name: 'test-wf',
       steps: [],
     });
 
-    // Mock WorkflowRunner - simulate a slow workflow
     const mockRun = mock(
       () => new Promise((resolve) => setTimeout(() => resolve({ result: 'ok' }), 100))
     );
-    // @ts-ignore
-    spyOn(WorkflowRunner.prototype, 'run').mockImplementation(mockRun);
-    spyOn(WorkflowRunner.prototype, 'getRunId').mockReturnValue('async-run-123');
+    const runner = {
+      run: mockRun,
+      getRunId: mock(() => 'async-run-123'),
+    } as unknown as WorkflowRunner;
+    const testServer = createServerWithRunner(runner);
 
     const response = await handleMessage({
       jsonrpc: '2.0',
@@ -274,7 +292,7 @@ describe('MCPServer', () => {
         name: 'start_workflow',
         arguments: { workflow_name: 'test-wf', inputs: {} },
       },
-    });
+    }, testServer);
 
     const result = JSON.parse(response?.result?.content?.[0]?.text || '{}');
     expect(result.status).toBe('running');

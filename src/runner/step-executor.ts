@@ -83,6 +83,7 @@ export interface StepExecutorOptions {
   // Dependency injection for testing
   getAdapter?: typeof getAdapter;
   executeStep?: typeof executeStep;
+  executeLlmStep?: typeof executeLlmStep;
   sandbox?: typeof SafeSandbox;
 }
 
@@ -188,6 +189,7 @@ export async function executeStep(
     redactForStorage,
     getAdapter: injectedGetAdapter,
     executeStep: injectedExecuteStep,
+    executeLlmStep: injectedExecuteLlmStep,
     sandbox: injectedSandbox,
   } = options;
 
@@ -221,7 +223,7 @@ export async function executeStep(
         result = await executeSleepStep(step, context, logger, abortSignal);
         break;
       case 'llm':
-        result = await executeLlmStep(
+        result = await (injectedExecuteLlmStep || executeLlmStep)(
           step,
           context,
           (s, c) => {

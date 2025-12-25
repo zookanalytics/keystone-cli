@@ -16,22 +16,31 @@ interface MCPMessage {
   id?: string | number;
 }
 
+type WorkflowRunnerFactory = (
+  workflow: ConstructorParameters<typeof WorkflowRunner>[0],
+  options: ConstructorParameters<typeof WorkflowRunner>[1]
+) => WorkflowRunner;
+
 export class MCPServer {
   private db: WorkflowDb;
   private input: Readable;
   private output: Writable;
   private logger: Logger;
+  private runnerFactory: WorkflowRunnerFactory;
 
   constructor(
     db?: WorkflowDb,
     input: Readable = process.stdin,
     output: Writable = process.stdout,
-    logger: Logger = new ConsoleLogger()
+    logger: Logger = new ConsoleLogger(),
+    runnerFactory: WorkflowRunnerFactory = (workflow, options) =>
+      new WorkflowRunner(workflow, options)
   ) {
     this.db = db || new WorkflowDb();
     this.input = input;
     this.output = output;
     this.logger = logger;
+    this.runnerFactory = runnerFactory;
   }
 
   async start() {
@@ -235,7 +244,7 @@ export class MCPServer {
               debug: (msg: string) => logs.push(`DEBUG: ${msg}`),
             };
 
-            const runner = new WorkflowRunner(workflow, {
+            const runner = this.runnerFactory(workflow, {
               inputs,
               logger,
               preventExit: true,
@@ -417,7 +426,7 @@ export class MCPServer {
               debug: (msg: string) => logs.push(`DEBUG: ${msg}`),
             };
 
-            const runner = new WorkflowRunner(workflow, {
+            const runner = this.runnerFactory(workflow, {
               resumeRunId: run_id,
               resumeInputs: { [pendingStep.step_id]: { __answer: output } },
               logger,
@@ -513,7 +522,7 @@ export class MCPServer {
               debug: () => {},
             };
 
-            const runner = new WorkflowRunner(workflow, {
+            const runner = this.runnerFactory(workflow, {
               inputs: inputs || {},
               logger,
               preventExit: true,

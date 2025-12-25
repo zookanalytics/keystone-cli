@@ -45,14 +45,14 @@ describe('Audit Fixes Verification', () => {
       // The sandbox now uses node:vm directly with security warnings.
       SafeSandbox.resetWarning();
       const code = '1 + 1';
-      const result = await SafeSandbox.execute(code, {});
+      const result = await SafeSandbox.execute(code, {}, { useProcessIsolation: false });
       expect(result).toBe(2);
     });
 
     it('should show security warning on first execution', async () => {
       SafeSandbox.resetWarning();
       const code = '2 + 2';
-      const result = await SafeSandbox.execute(code, {});
+      const result = await SafeSandbox.execute(code, {}, { useProcessIsolation: false });
       expect(result).toBe(4);
       // Warning is shown to stderr, we just verify execution works
     });

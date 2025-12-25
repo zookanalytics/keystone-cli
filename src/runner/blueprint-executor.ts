@@ -22,9 +22,12 @@ export async function executeBlueprintStep(
     abortSignal?: AbortSignal;
     runId?: string;
     artifactRoot?: string;
+    executeLlmStep?: typeof executeLlmStep;
   }
 ): Promise<StepResult> {
-  const { mcpManager, workflowDir, abortSignal, runId, artifactRoot } = options;
+  const { mcpManager, workflowDir, abortSignal, runId, artifactRoot, executeLlmStep: injected } =
+    options;
+  const runLlmStep = injected || executeLlmStep;
 
   // 1. Create a virtual LLM step to generate the blueprint
   // We reuse the BlueprintSchema as the outputSchema for validation
@@ -107,7 +110,7 @@ export async function executeBlueprintStep(
 
   logger.log(`  🎨 Generating system blueprint using agent: ${llmStep.agent}`);
 
-  const llmResult = await executeLlmStep(
+  const llmResult = await runLlmStep(
     llmStep,
     context,
     executeStepFn,
