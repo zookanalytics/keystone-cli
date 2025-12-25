@@ -86,4 +86,25 @@ describe('ProcessSandbox', () => {
 
     expect(result).toEqual({ hasNormal: true, hasPolluted: false });
   });
+
+  it('should handle null results', async () => {
+    const result = await ProcessSandbox.execute('return null', {});
+    expect(result).toBeNull();
+  });
+
+  it('should handle string results', async () => {
+    const result = await ProcessSandbox.execute('return "hello world"', {});
+    expect(result).toBe('hello world');
+  });
+
+  it('should use custom cwd if provided', async () => {
+    const result = await ProcessSandbox.execute('return true', {}, { cwd: '/tmp' });
+    expect(result).toBe(true);
+  });
+
+  it('should fail gracefully on syntax error', async () => {
+    const promise = ProcessSandbox.execute('return {{{invalid}}}', {});
+    await expect(promise).rejects.toThrow();
+  });
 });
+

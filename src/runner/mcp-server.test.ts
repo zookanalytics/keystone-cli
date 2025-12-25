@@ -255,7 +255,7 @@ describe('MCPServer', () => {
     const testServer = new MCPServer(db, input, outputStream);
 
     const writeSpy = trackSpy(spyOn(outputStream, 'write')).mockImplementation(() => true);
-    const consoleSpy = trackSpy(spyOn(console, 'error')).mockImplementation(() => {});
+    const consoleSpy = trackSpy(spyOn(console, 'error')).mockImplementation(() => { });
 
     const startPromise = testServer.start();
 
@@ -397,5 +397,12 @@ describe('MCPServer', () => {
     });
 
     expect(response?.error?.message).toContain('not found');
+  });
+
+  it('should close database connection when stop is called', () => {
+    const dbCloseSpy = spyOn(db, 'close');
+    server.stop();
+    expect(dbCloseSpy).toHaveBeenCalled();
+    dbCloseSpy.mockRestore();
   });
 });
