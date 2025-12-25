@@ -1,6 +1,6 @@
+import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { createHash, randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 
 export interface AuthData {
@@ -256,18 +256,16 @@ export class AuthManager {
     const verifier = AuthManager.generateCodeVerifier();
     const challenge = AuthManager.createCodeChallenge(verifier);
 
-    const authUrl =
-      `https://claude.ai/oauth/authorize?` +
-      new URLSearchParams({
-        code: 'true',
-        client_id: ANTHROPIC_OAUTH_CLIENT_ID,
-        response_type: 'code',
-        redirect_uri: ANTHROPIC_OAUTH_REDIRECT_URI,
-        scope: ANTHROPIC_OAUTH_SCOPE,
-        code_challenge: challenge,
-        code_challenge_method: 'S256',
-        state: verifier,
-      }).toString();
+    const authUrl = `https://claude.ai/oauth/authorize?${new URLSearchParams({
+      code: 'true',
+      client_id: ANTHROPIC_OAUTH_CLIENT_ID,
+      response_type: 'code',
+      redirect_uri: ANTHROPIC_OAUTH_REDIRECT_URI,
+      scope: ANTHROPIC_OAUTH_SCOPE,
+      code_challenge: challenge,
+      code_challenge_method: 'S256',
+      state: verifier,
+    }).toString()}`;
 
     return { url: authUrl, verifier };
   }
@@ -345,9 +343,7 @@ export class AuthManager {
         ) {
           return data.cloudaicompanionProject.id;
         }
-      } catch {
-        continue;
-      }
+      } catch {}
     }
 
     return undefined;
@@ -360,10 +356,13 @@ export class AuthManager {
 
     return new Promise((resolve, reject) => {
       let server: any;
-      const timeout = setTimeout(() => {
-        if (server) server.stop();
-        reject(new Error('Login timed out after 5 minutes'));
-      }, 5 * 60 * 1000);
+      const timeout = setTimeout(
+        () => {
+          if (server) server.stop();
+          reject(new Error('Login timed out after 5 minutes'));
+        },
+        5 * 60 * 1000
+      );
 
       server = Bun.serve({
         port: 51121,
@@ -471,19 +470,17 @@ export class AuthManager {
         },
       });
 
-      const authUrl =
-        `https://accounts.google.com/o/oauth2/v2/auth?` +
-        new URLSearchParams({
-          client_id: GOOGLE_GEMINI_OAUTH_CLIENT_ID,
-          response_type: 'code',
-          redirect_uri: GOOGLE_GEMINI_OAUTH_REDIRECT_URI,
-          scope: GOOGLE_GEMINI_OAUTH_SCOPES.join(' '),
-          code_challenge: challenge,
-          code_challenge_method: 'S256',
-          access_type: 'offline',
-          prompt: 'consent',
-          state,
-        }).toString();
+      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${new URLSearchParams({
+        client_id: GOOGLE_GEMINI_OAUTH_CLIENT_ID,
+        response_type: 'code',
+        redirect_uri: GOOGLE_GEMINI_OAUTH_REDIRECT_URI,
+        scope: GOOGLE_GEMINI_OAUTH_SCOPES.join(' '),
+        code_challenge: challenge,
+        code_challenge_method: 'S256',
+        access_type: 'offline',
+        prompt: 'consent',
+        state,
+      }).toString()}`;
 
       console.log('\nTo login with Google Gemini (OAuth):');
       console.log('1. Visit the following URL in your browser:');
@@ -492,7 +489,8 @@ export class AuthManager {
 
       try {
         const { platform } = process;
-        const command = platform === 'win32' ? 'start' : platform === 'darwin' ? 'open' : 'xdg-open';
+        const command =
+          platform === 'win32' ? 'start' : platform === 'darwin' ? 'open' : 'xdg-open';
         const { spawn } = require('node:child_process');
         spawn(command, [authUrl]);
       } catch {
@@ -507,10 +505,13 @@ export class AuthManager {
 
     return new Promise((resolve, reject) => {
       let server: any;
-      const timeout = setTimeout(() => {
-        if (server) server.stop();
-        reject(new Error('Login timed out after 5 minutes'));
-      }, 5 * 60 * 1000);
+      const timeout = setTimeout(
+        () => {
+          if (server) server.stop();
+          reject(new Error('Login timed out after 5 minutes'));
+        },
+        5 * 60 * 1000
+      );
 
       server = Bun.serve({
         port: 1455,
@@ -574,16 +575,14 @@ export class AuthManager {
         },
       });
 
-      const authUrl =
-        `https://chatgpt.com/oauth/authorize?` +
-        new URLSearchParams({
-          client_id: OPENAI_CHATGPT_CLIENT_ID,
-          code_challenge: challenge,
-          code_challenge_method: 'S256',
-          redirect_uri: OPENAI_CHATGPT_REDIRECT_URI,
-          response_type: 'code',
-          scope: 'openid profile email offline_access',
-        }).toString();
+      const authUrl = `https://chatgpt.com/oauth/authorize?${new URLSearchParams({
+        client_id: OPENAI_CHATGPT_CLIENT_ID,
+        code_challenge: challenge,
+        code_challenge_method: 'S256',
+        redirect_uri: OPENAI_CHATGPT_REDIRECT_URI,
+        response_type: 'code',
+        scope: 'openid profile email offline_access',
+      }).toString()}`;
 
       console.log('\nTo login with OpenAI ChatGPT:');
       console.log('1. Visit the following URL in your browser:');
@@ -593,7 +592,8 @@ export class AuthManager {
       // Attempt to open the browser
       try {
         const { platform } = process;
-        const command = platform === 'win32' ? 'start' : platform === 'darwin' ? 'open' : 'xdg-open';
+        const command =
+          platform === 'win32' ? 'start' : platform === 'darwin' ? 'open' : 'xdg-open';
         const { spawn } = require('node:child_process');
         spawn(command, [authUrl]);
       } catch (e) {

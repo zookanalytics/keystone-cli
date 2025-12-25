@@ -24,7 +24,7 @@ describe('PathResolver', () => {
   });
 
   it('should fallback to ~/.config if XDG_CONFIG_HOME is not set', () => {
-    delete process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = undefined;
     expect(PathResolver.getUserConfigDir()).toBe(join(homedir(), '.config', 'keystone'));
   });
 

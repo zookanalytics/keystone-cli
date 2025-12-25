@@ -2,10 +2,10 @@ import { dirname, join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { z } from 'zod';
 import { ExpressionEvaluator } from '../expression/evaluator.ts';
+import { ResourceLoader } from '../utils/resource-loader.ts';
 import { validateJsonSchemaDefinition } from '../utils/schema-validator.ts';
 import { resolveAgentPath } from './agent-parser.ts';
 import { type Workflow, WorkflowSchema } from './schema.ts';
-import { ResourceLoader } from '../utils/resource-loader.ts';
 
 export class WorkflowParser {
   /**

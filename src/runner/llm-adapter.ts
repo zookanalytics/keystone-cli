@@ -17,7 +17,8 @@ const GEMINI_DEFAULT_PROJECT_ID = 'rising-fact-p41fc';
 const GEMINI_HEADERS = {
   'User-Agent': 'antigravity/1.11.5 windows/amd64',
   'X-Goog-Api-Client': 'google-cloud-sdk vscode_cloudshelleditor/0.1',
-  'Client-Metadata': '{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}',
+  'Client-Metadata':
+    '{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}',
 };
 
 export interface LLMMessage {
@@ -199,7 +200,11 @@ export class AnthropicAdapter implements LLMAdapter {
     this.baseUrl = baseUrl || Bun.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com/v1';
     this.authMode = authMode;
 
-    if (this.authMode === 'api-key' && !this.apiKey && this.baseUrl === 'https://api.anthropic.com/v1') {
+    if (
+      this.authMode === 'api-key' &&
+      !this.apiKey &&
+      this.baseUrl === 'https://api.anthropic.com/v1'
+    ) {
       console.warn('Warning: ANTHROPIC_API_KEY is not set.');
     }
   }
@@ -309,10 +314,10 @@ export class AnthropicAdapter implements LLMAdapter {
 
     const anthropicTools = options?.tools
       ? options.tools.map((t) => ({
-        name: t.function.name,
-        description: t.function.description,
-        input_schema: t.function.parameters,
-      }))
+          name: t.function.name,
+          description: t.function.description,
+          input_schema: t.function.parameters,
+        }))
       : undefined;
 
     const authHeaders = await this.getAuthHeaders();
@@ -491,14 +496,15 @@ export class OpenAIChatGPTAdapter implements LLMAdapter {
     // Stateless mode requires stripping all IDs and filtering out item_references
     return messages.map((m) => {
       // Create a shallow copy and remove id if it exists
-      // biome-ignore lint/unused-variables: id is intentionally stripped
+      // biome-ignore lint/correctness/noUnusedVariables: id is intentionally stripped
+      // biome-ignore lint/suspicious/noExplicitAny: required for stripping id from messages
       const { id, ...rest } = m as any;
 
       if (m.tool_calls) {
         return {
           ...rest,
           tool_calls: m.tool_calls.map((tc) => {
-            // biome-ignore lint/unused-variables: id is intentionally stripped
+            // biome-ignore lint/correctness/noUnusedVariables: id is intentionally stripped
             const { id: tcId, ...tcRest } = tc;
             return tcRest;
           }),
@@ -598,8 +604,10 @@ export class GoogleGeminiAdapter implements LLMAdapter {
   private projectId?: string;
 
   constructor(baseUrl?: string, projectId?: string) {
-    this.baseUrl =
-      (baseUrl || Bun.env.GOOGLE_GEMINI_BASE_URL || GEMINI_DEFAULT_BASE_URL).replace(/\/$/, '');
+    this.baseUrl = (baseUrl || Bun.env.GOOGLE_GEMINI_BASE_URL || GEMINI_DEFAULT_BASE_URL).replace(
+      /\/$/,
+      ''
+    );
     this.projectId =
       projectId || Bun.env.GOOGLE_GEMINI_PROJECT_ID || Bun.env.KEYSTONE_GEMINI_PROJECT_ID;
   }
@@ -619,7 +627,9 @@ export class GoogleGeminiAdapter implements LLMAdapter {
   private buildToolMaps(tools?: LLMTool[]): {
     nameToSanitized: Map<string, string>;
     sanitizedToName: Map<string, string>;
-    tools?: { functionDeclarations: Array<{ name: string; description: string; parameters: unknown }> }[];
+    tools?: {
+      functionDeclarations: Array<{ name: string; description: string; parameters: unknown }>;
+    }[];
     toolConfig?: { functionCallingConfig: { mode: 'AUTO' } };
   } {
     const nameToSanitized = new Map<string, string>();
@@ -680,7 +690,9 @@ export class GoogleGeminiAdapter implements LLMAdapter {
       const parts: GeminiPart[] = [];
 
       if (message.role === 'tool') {
-        const toolName = message.name ? nameToSanitized.get(message.name) || message.name : undefined;
+        const toolName = message.name
+          ? nameToSanitized.get(message.name) || message.name
+          : undefined;
         if (toolName) {
           parts.push({
             functionResponse: {
@@ -698,8 +710,7 @@ export class GoogleGeminiAdapter implements LLMAdapter {
 
         if (message.tool_calls) {
           for (const toolCall of message.tool_calls) {
-            const toolName =
-              nameToSanitized.get(toolCall.function.name) || toolCall.function.name;
+            const toolName = nameToSanitized.get(toolCall.function.name) || toolCall.function.name;
             let args: Record<string, unknown> | string = {};
             if (typeof toolCall.function.arguments === 'string') {
               try {
@@ -728,8 +739,8 @@ export class GoogleGeminiAdapter implements LLMAdapter {
     const systemInstruction =
       systemParts.length > 0
         ? {
-          parts: [{ text: systemParts.join('\n\n') }],
-        }
+            parts: [{ text: systemParts.join('\n\n') }],
+          }
         : undefined;
 
     return { contents, systemInstruction };
@@ -760,7 +771,11 @@ export class GoogleGeminiAdapter implements LLMAdapter {
   private extractGeminiParts(
     data: {
       candidates?: Array<{ content?: { parts?: GeminiPart[] } }>;
-      usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number };
+      usageMetadata?: {
+        promptTokenCount?: number;
+        candidatesTokenCount?: number;
+        totalTokenCount?: number;
+      };
     },
     sanitizedToName: Map<string, string>,
     onStream?: (chunk: string) => void,
@@ -853,7 +868,9 @@ export class GoogleGeminiAdapter implements LLMAdapter {
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`Google Gemini API error: ${response.status} ${response.statusText} - ${error}`);
+      throw new Error(
+        `Google Gemini API error: ${response.status} ${response.statusText} - ${error}`
+      );
     }
 
     if (isStreaming) {
@@ -1033,8 +1050,8 @@ export class LocalEmbeddingAdapter implements LLMAdapter {
   ): Promise<LLMResponse> {
     throw new Error(
       'Local models in Keystone currently only support memory/embedding operations. ' +
-      'To use a local LLM for chat/generation, please use an OpenAI-compatible local server ' +
-      '(like Ollama, LM Studio, or LocalAI) and configure it as an OpenAI provider in your config.'
+        'To use a local LLM for chat/generation, please use an OpenAI-compatible local server ' +
+        '(like Ollama, LM Studio, or LocalAI) and configure it as an OpenAI provider in your config.'
     );
   }
 

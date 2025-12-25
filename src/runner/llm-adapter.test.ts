@@ -362,7 +362,9 @@ describe('CopilotAdapter', () => {
 describe('LocalEmbeddingAdapter', () => {
   it('should throw on chat', async () => {
     const adapter = new LocalEmbeddingAdapter();
-    await expect(adapter.chat([])).rejects.toThrow(/Local models in Keystone currently only support/);
+    await expect(adapter.chat([])).rejects.toThrow(
+      /Local models in Keystone currently only support/
+    );
   });
 });
 

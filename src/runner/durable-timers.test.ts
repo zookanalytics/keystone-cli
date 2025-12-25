@@ -79,6 +79,9 @@ describe('Durable Timers Integration', () => {
   });
 
   it('should persist human waits without scheduling', async () => {
+    const originalIsTTY = process.stdin.isTTY;
+    process.stdin.isTTY = false; // Ensure human step suspends instead of waiting for input
+
     const runner = new WorkflowRunner(humanWorkflow, { dbPath });
     const runId = runner.getRunId();
 
@@ -89,6 +92,8 @@ describe('Durable Timers Integration', () => {
         throw error;
       }
       expect(error.stepId).toBe('approve');
+    } finally {
+      process.stdin.isTTY = originalIsTTY;
     }
 
     const run = await db.getRun(runId);

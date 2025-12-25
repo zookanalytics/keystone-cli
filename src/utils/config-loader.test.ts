@@ -128,7 +128,7 @@ describe('ConfigLoader', () => {
       expect(config.providers.anthropic?.default_model).toBe('user-model');
     } finally {
       cwdSpy.mockRestore();
-      delete process.env.XDG_CONFIG_HOME;
+      process.env.XDG_CONFIG_HOME = undefined;
       rmSync(tempDir, { recursive: true, force: true });
       ConfigLoader.clear();
     }
@@ -146,7 +146,7 @@ describe('ConfigLoader', () => {
       const config = ConfigLoader.load();
       expect(config.default_provider).toBe('env-provider');
     } finally {
-      delete process.env.KEYSTONE_CONFIG;
+      process.env.KEYSTONE_CONFIG = undefined;
       rmSync(tempDir, { recursive: true, force: true });
       ConfigLoader.clear();
     }

@@ -45,12 +45,12 @@ export class PathResolver {
     }
 
     // 2. Project-local config
-    const projectDir = this.getProjectDir();
+    const projectDir = PathResolver.getProjectDir();
     paths.push(join(projectDir, 'config.yaml'));
     paths.push(join(projectDir, 'config.yml'));
 
     // 3. User-level (XDG) config
-    const userConfigDir = this.getUserConfigDir();
+    const userConfigDir = PathResolver.getUserConfigDir();
     paths.push(join(userConfigDir, 'config.yaml'));
     paths.push(join(userConfigDir, 'config.yml'));
 
@@ -63,8 +63,8 @@ export class PathResolver {
    */
   static resolveDbPath(isGlobal = false): string {
     if (isGlobal) {
-      return join(this.getUserDataDir(), 'state.db');
+      return join(PathResolver.getUserDataDir(), 'state.db');
     }
-    return join(this.getProjectDir(), 'state.db');
+    return join(PathResolver.getProjectDir(), 'state.db');
   }
 }

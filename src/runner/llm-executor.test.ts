@@ -32,9 +32,8 @@ import { type StepResult, executeStep } from './step-executor';
 import type { Logger } from './workflow-runner';
 
 // Mock adapters
-const originalOpenAIChat = OpenAIAdapter.prototype.chat;
-const originalCopilotChat = CopilotAdapter.prototype.chat;
-const originalAnthropicChat = AnthropicAdapter.prototype.chat;
+// Instead of mutating prototypes (which causes cross-test contamination),
+// we use the getAdapterFn parameter to inject a mock adapter factory.
 
 describe('llm-executor', () => {
   const agentsDir = join(process.cwd(), '.keystone', 'workflows', 'agents');
@@ -130,18 +129,31 @@ describe('llm-executor', () => {
     };
   };
 
+  // Create a mock adapter factory that doesn't rely on prototype mutation
+  const createMockGetAdapter = (chatFn: typeof mockChat = mockChat) => {
+    return (_modelString: string) => {
+      const mockAdapter = {
+        chat: chatFn,
+      } as unknown as InstanceType<typeof OpenAIAdapter>;
+      return { adapter: mockAdapter, resolvedModel: 'gpt-4' };
+    };
+  };
+
+  // Default mock adapter factory using the standard mockChat
+  const mockGetAdapter = createMockGetAdapter();
+
   beforeAll(async () => {
     // Mock spawn to avoid actual process creation
     const mockProcess = Object.assign(new EventEmitter(), {
       stdout: new Readable({
-        read() {},
+        read() { },
       }),
       stdin: new Writable({
         write(_chunk, _encoding, cb: (error?: Error | null) => void) {
           cb();
         },
       }),
-      kill: mock(() => {}),
+      kill: mock(() => { }),
     });
     spawnSpy = spyOn(child_process, 'spawn').mockReturnValue(
       mockProcess as unknown as child_process.ChildProcess
@@ -165,7 +177,17 @@ You are a test agent.`;
     writeFileSync(join(agentsDir, 'test-agent.md'), agentContent);
   });
 
+  // Store original adapter methods at runtime to avoid cross-file contamination
+  let savedOpenAIChat: typeof OpenAIAdapter.prototype.chat;
+  let savedCopilotChat: typeof CopilotAdapter.prototype.chat;
+  let savedAnthropicChat: typeof AnthropicAdapter.prototype.chat;
+
   beforeEach(() => {
+    // Capture current state of prototype methods
+    savedOpenAIChat = OpenAIAdapter.prototype.chat;
+    savedCopilotChat = CopilotAdapter.prototype.chat;
+    savedAnthropicChat = AnthropicAdapter.prototype.chat;
+
     // Global MCP mocks to avoid hangs
     initSpy = spyOn(MCPClient.prototype, 'initialize').mockResolvedValue({
       jsonrpc: '2.0',
@@ -175,22 +197,23 @@ You are a test agent.`;
     listToolsSpy = spyOn(MCPClient.prototype, 'listTools').mockResolvedValue([]);
     stopSpy = spyOn(MCPClient.prototype, 'stop').mockReturnValue(undefined);
 
-    // Set adapters to global mock
-    OpenAIAdapter.prototype.chat = mock(mockChat) as unknown as typeof originalOpenAIChat;
-    CopilotAdapter.prototype.chat = mock(mockChat) as unknown as typeof originalCopilotChat;
-    AnthropicAdapter.prototype.chat = mock(mockChat) as unknown as typeof originalAnthropicChat;
+    // Set adapters to global mock for this test
+    OpenAIAdapter.prototype.chat = mock(mockChat) as unknown as typeof OpenAIAdapter.prototype.chat;
+    CopilotAdapter.prototype.chat = mock(mockChat) as unknown as typeof CopilotAdapter.prototype.chat;
+    AnthropicAdapter.prototype.chat = mock(mockChat) as unknown as typeof AnthropicAdapter.prototype.chat;
   });
 
   afterEach(() => {
     initSpy.mockRestore();
     listToolsSpy.mockRestore();
     stopSpy.mockRestore();
+    // Restore adapter mocks to what they were before this test
+    OpenAIAdapter.prototype.chat = savedOpenAIChat;
+    CopilotAdapter.prototype.chat = savedCopilotChat;
+    AnthropicAdapter.prototype.chat = savedAnthropicChat;
   });
 
   afterAll(() => {
-    OpenAIAdapter.prototype.chat = originalOpenAIChat;
-    CopilotAdapter.prototype.chat = originalCopilotChat;
-    AnthropicAdapter.prototype.chat = originalAnthropicChat;
     spawnSpy.mockRestore();
   });
 
@@ -261,9 +284,9 @@ You are a test agent.`;
     };
 
     const logger: Logger = {
-      log: mock(() => {}),
-      error: mock(() => {}),
-      warn: mock(() => {}),
+      log: mock(() => { }),
+      error: mock(() => { }),
+      warn: mock(() => { }),
     };
 
     await executeLlmStep(
@@ -331,7 +354,7 @@ You are a test agent.`;
         return { message: { role: 'assistant', content: 'Not JSON' } };
       }
       return { message: { role: 'assistant', content: '{"success": true}' } };
-    }) as unknown as typeof originalOpenAIChat;
+    }) as unknown as typeof OpenAIAdapter.prototype.chat;
 
     OpenAIAdapter.prototype.chat = mockChat;
     CopilotAdapter.prototype.chat = mockChat;
@@ -371,7 +394,7 @@ You are a test agent.`;
 
     const mockChat = mock(async () => ({
       message: { role: 'assistant', content: 'Not JSON' },
-    })) as unknown as typeof originalOpenAIChat;
+    })) as unknown as typeof OpenAIAdapter.prototype.chat;
 
     OpenAIAdapter.prototype.chat = mockChat;
     CopilotAdapter.prototype.chat = mockChat;
@@ -426,7 +449,7 @@ You are a test agent.`;
           ],
         },
       } as LLMResponse;
-    }) as unknown as typeof originalOpenAIChat;
+    }) as unknown as typeof OpenAIAdapter.prototype.chat;
 
     OpenAIAdapter.prototype.chat = mockChat;
     CopilotAdapter.prototype.chat = mockChat;
@@ -463,7 +486,7 @@ You are a test agent.`;
       spyOn(client, 'stop').mockReturnValue(undefined);
       return client;
     });
-    const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
+    const consoleSpy = spyOn(console, 'error').mockImplementation(() => { });
 
     await executeLlmStep(
       step,
@@ -519,7 +542,7 @@ You are a test agent.`;
           ],
         },
       };
-    }) as unknown as typeof originalOpenAIChat;
+    }) as unknown as typeof OpenAIAdapter.prototype.chat;
 
     OpenAIAdapter.prototype.chat = mockChat;
     CopilotAdapter.prototype.chat = mockChat;
@@ -582,7 +605,7 @@ You are a test agent.`;
         toolFound = true;
       }
       return { message: { role: 'assistant', content: 'hello' } };
-    }) as unknown as typeof originalOpenAIChat;
+    }) as unknown as typeof OpenAIAdapter.prototype.chat;
 
     OpenAIAdapter.prototype.chat = mockChat;
 
@@ -661,7 +684,7 @@ You are a test agent.`;
       return {
         message: { role: 'assistant', content: 'done' },
       };
-    }) as unknown as typeof originalOpenAIChat;
+    }) as unknown as typeof OpenAIAdapter.prototype.chat;
 
     const originalChat = OpenAIAdapter.prototype.chat;
     OpenAIAdapter.prototype.chat = handoffChat;
@@ -720,7 +743,7 @@ You are a test agent.`;
     };
     const context: ExpressionContext = { inputs: {}, steps: {} };
     const executeStepFn = mock(async () => ({ status: 'success' as const, output: 'ok' }));
-    const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
+    const consoleSpy = spyOn(console, 'error').mockImplementation(() => { });
 
     await executeLlmStep(
       step,
@@ -775,7 +798,7 @@ You are a test agent.`;
     const originalOpenAIChatInner = OpenAIAdapter.prototype.chat;
     const mockChat = mock(async () => ({
       message: { role: 'assistant', content: 'hello' },
-    })) as unknown as typeof originalOpenAIChat;
+    })) as unknown as typeof OpenAIAdapter.prototype.chat;
     OpenAIAdapter.prototype.chat = mockChat;
 
     const managerSpy = spyOn(manager, 'getGlobalServers');
@@ -824,7 +847,7 @@ You are a test agent.`;
       // console.log('MESSAGES:', JSON.stringify(messages, null, 2));
       capturedPrompt = messages.find((m) => m.role === 'user')?.content || '';
       return { message: { role: 'assistant', content: 'Response' } };
-    }) as unknown as typeof originalOpenAIChat;
+    }) as unknown as typeof OpenAIAdapter.prototype.chat;
     OpenAIAdapter.prototype.chat = mockChat;
     CopilotAdapter.prototype.chat = mockChat;
     AnthropicAdapter.prototype.chat = mockChat;

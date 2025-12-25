@@ -7,6 +7,7 @@ import { ResourceLoader } from './resource-loader';
 export class ConfigLoader {
   private static instance: Config;
 
+  // biome-ignore lint/suspicious/noExplicitAny: Generic deep merge utility
   private static deepMerge(target: any, source: any): any {
     const output = { ...target };
     if (source && typeof source === 'object' && !Array.isArray(source)) {

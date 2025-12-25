@@ -8,27 +8,27 @@ import generalAgent from './templates/agents/general.md' with { type: 'text' };
 import architectAgent from './templates/agents/keystone-architect.md' with { type: 'text' };
 import softwareEngineerAgent from './templates/agents/software-engineer.md' with { type: 'text' };
 import summarizerAgent from './templates/agents/summarizer.md' with { type: 'text' };
+import testerAgent from './templates/agents/tester.md' with { type: 'text' };
 import decomposeImplementWorkflow from './templates/decompose-implement.yaml' with { type: 'text' };
 import decomposeWorkflow from './templates/decompose-problem.yaml' with { type: 'text' };
 import decomposeResearchWorkflow from './templates/decompose-research.yaml' with { type: 'text' };
 import decomposeReviewWorkflow from './templates/decompose-review.yaml' with { type: 'text' };
 import devWorkflow from './templates/dev.yaml' with { type: 'text' };
-import testerAgent from './templates/agents/tester.md' with { type: 'text' };
 // Default templates
 import scaffoldWorkflow from './templates/scaffold-feature.yaml' with { type: 'text' };
 import scaffoldGenerateWorkflow from './templates/scaffold-generate.yaml' with { type: 'text' };
 import scaffoldPlanWorkflow from './templates/scaffold-plan.yaml' with { type: 'text' };
 
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { WorkflowDb, type WorkflowRun } from './db/workflow-db.ts';
+import type { TestDefinition } from './parser/test-schema.ts';
 import { WorkflowParser } from './parser/workflow-parser.ts';
 import { WorkflowSuspendedError, WorkflowWaitingError } from './runner/step-executor.ts';
+import { TestHarness } from './runner/test-harness.ts';
 import { ConfigLoader } from './utils/config-loader.ts';
 import { ConsoleLogger } from './utils/logger.ts';
 import { generateMermaidGraph, renderWorkflowAsAscii } from './utils/mermaid.ts';
 import { WorkflowRegistry } from './utils/workflow-registry.ts';
-import { TestHarness } from './runner/test-harness.ts';
-import type { TestDefinition } from './parser/test-schema.ts';
-import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
 import pkg from '../package.json' with { type: 'json' };
 
@@ -480,11 +480,13 @@ program
             console.error(`    ✗ Snapshot mismatch in ${file}`);
             totalFailed++;
           } else {
-            console.log(`    ✓ Passed`);
+            console.log('    ✓ Passed');
             totalPassed++;
           }
         } catch (error) {
-          console.error(`    ✗ Test failed: ${error instanceof Error ? error.message : String(error)}`);
+          console.error(
+            `    ✗ Test failed: ${error instanceof Error ? error.message : String(error)}`
+          );
           totalFailed++;
         }
       }
@@ -733,13 +735,7 @@ program
     // Find the CLI source path
     const cliSource = resolve(import.meta.dir, 'cli.ts');
 
-    const buildArgs = [
-      'build',
-      cliSource,
-      '--compile',
-      '--outfile',
-      options.outfile,
-    ];
+    const buildArgs = ['build', cliSource, '--compile', '--outfile', options.outfile];
 
     console.log(`🚀 Running: ASSETS_DIR=${keystoneDir} bun ${buildArgs.join(' ')}`);
 
@@ -769,7 +765,7 @@ program
   .action(async (task, options) => {
     try {
       // Find the dev workflow path
-      // Priority: 
+      // Priority:
       // 1. Local .keystone/workflows/dev.yaml
       // 2. Embedded resource
       let devPath: string;
@@ -1378,7 +1374,8 @@ auth
 
         try {
           const { platform } = process;
-          const command = platform === 'win32' ? 'start' : platform === 'darwin' ? 'open' : 'xdg-open';
+          const command =
+            platform === 'win32' ? 'start' : platform === 'darwin' ? 'open' : 'xdg-open';
           const { spawn } = require('node:child_process');
           spawn(command, [url]);
         } catch (e) {
