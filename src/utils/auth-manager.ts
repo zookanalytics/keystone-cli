@@ -355,16 +355,19 @@ export class AuthManager {
     const state = randomBytes(16).toString('hex');
 
     return new Promise((resolve, reject) => {
-      let server: any;
+      const serverRef: { current?: ReturnType<typeof Bun.serve> } = {};
+      const stopServer = () => {
+        serverRef.current?.stop();
+      };
       const timeout = setTimeout(
         () => {
-          if (server) server.stop();
+          stopServer();
           reject(new Error('Login timed out after 5 minutes'));
         },
         5 * 60 * 1000
       );
 
-      server = Bun.serve({
+      serverRef.current = Bun.serve({
         port: 51121,
         async fetch(req) {
           const url = new URL(req.url);
@@ -372,7 +375,7 @@ export class AuthManager {
             const error = url.searchParams.get('error');
             if (error) {
               clearTimeout(timeout);
-              setTimeout(() => server.stop(), 100);
+              setTimeout(stopServer, 100);
               reject(new Error(`Authorization error: ${error}`));
               return new Response(`Error: ${error}`, { status: 400 });
             }
@@ -384,7 +387,7 @@ export class AuthManager {
             }
             if (returnedState && returnedState !== state) {
               clearTimeout(timeout);
-              setTimeout(() => server.stop(), 100);
+              setTimeout(stopServer, 100);
               reject(new Error('Invalid OAuth state'));
               return new Response('Invalid state parameter', { status: 400 });
             }
@@ -451,7 +454,7 @@ export class AuthManager {
               });
 
               clearTimeout(timeout);
-              setTimeout(() => server.stop(), 100);
+              setTimeout(stopServer, 100);
               resolve();
               return new Response(
                 '<h1>Authentication Successful!</h1><p>You can close this window and return to the terminal.</p>',
@@ -459,7 +462,7 @@ export class AuthManager {
               );
             } catch (err) {
               clearTimeout(timeout);
-              setTimeout(() => server.stop(), 100);
+              setTimeout(stopServer, 100);
               reject(err);
               return new Response(`Error: ${err instanceof Error ? err.message : String(err)}`, {
                 status: 500,
@@ -504,16 +507,19 @@ export class AuthManager {
     const challenge = AuthManager.createCodeChallenge(verifier);
 
     return new Promise((resolve, reject) => {
-      let server: any;
+      const serverRef: { current?: ReturnType<typeof Bun.serve> } = {};
+      const stopServer = () => {
+        serverRef.current?.stop();
+      };
       const timeout = setTimeout(
         () => {
-          if (server) server.stop();
+          stopServer();
           reject(new Error('Login timed out after 5 minutes'));
         },
         5 * 60 * 1000
       );
 
-      server = Bun.serve({
+      serverRef.current = Bun.serve({
         port: 1455,
         async fetch(req) {
           const url = new URL(req.url);
@@ -553,7 +559,7 @@ export class AuthManager {
                 });
 
                 clearTimeout(timeout);
-                setTimeout(() => server.stop(), 100);
+                setTimeout(stopServer, 100);
                 resolve();
                 return new Response(
                   '<h1>Authentication Successful!</h1><p>You can close this window and return to the terminal.</p>',
@@ -561,7 +567,7 @@ export class AuthManager {
                 );
               } catch (err) {
                 clearTimeout(timeout);
-                setTimeout(() => server.stop(), 100);
+                setTimeout(stopServer, 100);
                 reject(err);
                 return new Response(`Error: ${err instanceof Error ? err.message : String(err)}`, {
                   status: 500,

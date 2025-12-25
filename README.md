@@ -30,6 +30,32 @@ Keystone allows you to define complex automation workflows using a simple YAML s
 
 ---
 
+## 🏗️ Architecture
+
+```mermaid
+graph TD
+    CLI[CLI Entry Point] --> WR[WorkflowRunner]
+    CLI --> MCP[MCP Server]
+    WR --> SE[Step Executor]
+    WR --> FE[ForeachExecutor]
+    WR --> DB[(WorkflowDb)]
+    SE --> LLM[LLM Executor]
+    SE --> Shell[Shell Executor]
+    SE --> File[File Operations]
+    SE --> HTTP[HTTP Requests]
+    SE --> Human[Human Input]
+    LLM --> Adapters[LLM Adapters]
+    Adapters --> OpenAI
+    Adapters --> Anthropic
+    Adapters --> Copilot
+    Adapters --> ChatGPT
+    LLM --> MCPClient[MCP Client]
+    WR --> Eval[Expression Evaluator]
+    WR --> Pool[Resource Pool Manager]
+```
+
+---
+
 ## 🚀 Installation
 
 Ensure you have [Bun](https://bun.sh) installed.

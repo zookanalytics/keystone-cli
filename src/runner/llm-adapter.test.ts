@@ -6,6 +6,7 @@ import {
   AnthropicClaudeAdapter,
   CopilotAdapter,
   GoogleGeminiAdapter,
+  type LLMMessage,
   LocalEmbeddingAdapter,
   OpenAIAdapter,
   OpenAIChatGPTAdapter,
@@ -404,8 +405,12 @@ describe('OpenAIChatGPTAdapter', () => {
     );
 
     const adapter = new OpenAIChatGPTAdapter();
-    // Use any to allow testing ID stripping logic
-    const response = await adapter.chat([{ role: 'user', content: 'hi', id: 'msg_1' } as any]);
+    const messageWithId: LLMMessage & { id: string } = {
+      role: 'user',
+      content: 'hi',
+      id: 'msg_1',
+    };
+    const response = await adapter.chat([messageWithId]);
 
     expect(response.message.content).toBe('hello');
     expect(response.message.reasoning?.encrypted_content).toBe('r1');

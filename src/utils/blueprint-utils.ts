@@ -32,11 +32,10 @@ export class BlueprintUtils {
 
     // biome-ignore lint/suspicious/noExplicitAny: Building dynamic sorted object
     const sortedObj: any = {};
-    Object.keys(obj)
-      .sort()
-      .forEach((key) => {
-        sortedObj[key] = BlueprintUtils.sortObject(obj[key]);
-      });
+    const sortedKeys = Object.keys(obj).sort();
+    for (const key of sortedKeys) {
+      sortedObj[key] = BlueprintUtils.sortObject(obj[key]);
+    }
     return sortedObj;
   }
 

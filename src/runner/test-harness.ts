@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { ExpressionEvaluator } from '../expression/evaluator';
+import { type ExpressionContext, ExpressionEvaluator } from '../expression/evaluator';
 import type { Step, Workflow } from '../parser/schema';
-import { ConsoleLogger } from '../utils/logger';
+import { ConsoleLogger, type Logger } from '../utils/logger';
 import type { LLMAdapter, LLMMessage, LLMResponse } from './llm-adapter';
-import { type StepResult, executeStep } from './step-executor';
+import { type StepExecutorOptions, type StepResult, executeStep } from './step-executor';
 import { WorkflowRunner } from './workflow-runner';
 
 export interface TestFixture {
@@ -82,12 +82,11 @@ export class TestHarness {
     };
   }
 
-  // biome-ignore lint/suspicious/noExplicitAny: Test mock function with dynamic context
   private async mockExecuteStep(
     step: Step,
-    context: any,
-    logger: any,
-    options: any
+    context: ExpressionContext,
+    logger: Logger,
+    options: StepExecutorOptions
   ): Promise<StepResult> {
     const mockResponse = this.mockResponses.get(step.id);
     if (mockResponse !== undefined) {

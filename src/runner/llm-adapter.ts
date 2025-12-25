@@ -42,6 +42,10 @@ export interface LLMToolCall {
   };
 }
 
+type LLMMessageWithId = LLMMessage & { id?: string };
+type ChatGPTToolCall = Omit<LLMToolCall, 'id'>;
+type ChatGPTMessage = Omit<LLMMessage, 'tool_calls'> & { tool_calls?: ChatGPTToolCall[] };
+
 export interface LLMResponse {
   message: LLMMessage;
   usage?: {
@@ -492,30 +496,20 @@ export class OpenAIChatGPTAdapter implements LLMAdapter {
     this.baseUrl = baseUrl || Bun.env.OPENAI_CHATGPT_BASE_URL || 'https://api.openai.com/v1';
   }
 
-  private filterMessages(messages: LLMMessage[]): LLMMessage[] {
+  private filterMessages(messages: LLMMessage[]): ChatGPTMessage[] {
     // Stateless mode requires stripping all IDs and filtering out item_references
-    return messages.map((m) => {
+    return messages.map((m): ChatGPTMessage => {
       // Create a shallow copy and remove id if it exists
-      // biome-ignore lint/correctness/noUnusedVariables: id is intentionally stripped
-      // biome-ignore lint/suspicious/noExplicitAny: required for stripping id from messages
-      const { id, ...rest } = m as any;
+      const { id: _id, ...rest } = m as LLMMessageWithId;
 
       if (m.tool_calls) {
+        const toolCalls = m.tool_calls.map((tc) => {
+          const { id: _toolCallId, ...tcRest } = tc;
+          return tcRest;
+        });
         return {
           ...rest,
-          tool_calls: m.tool_calls.map((tc) => {
-            // biome-ignore lint/correctness/noUnusedVariables: id is intentionally stripped
-            const { id: tcId, ...tcRest } = tc;
-            return tcRest;
-          }),
-        };
-      }
-
-      // Preserve reasoning if present (it will be stripped of id if nested)
-      if (m.reasoning) {
-        return {
-          ...rest,
-          reasoning: m.reasoning,
+          tool_calls: toolCalls,
         };
       }
 

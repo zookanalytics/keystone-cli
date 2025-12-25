@@ -146,14 +146,14 @@ describe('llm-executor', () => {
     // Mock spawn to avoid actual process creation
     const mockProcess = Object.assign(new EventEmitter(), {
       stdout: new Readable({
-        read() { },
+        read() {},
       }),
       stdin: new Writable({
         write(_chunk, _encoding, cb: (error?: Error | null) => void) {
           cb();
         },
       }),
-      kill: mock(() => { }),
+      kill: mock(() => {}),
     });
     spawnSpy = spyOn(child_process, 'spawn').mockReturnValue(
       mockProcess as unknown as child_process.ChildProcess
@@ -199,8 +199,12 @@ You are a test agent.`;
 
     // Set adapters to global mock for this test
     OpenAIAdapter.prototype.chat = mock(mockChat) as unknown as typeof OpenAIAdapter.prototype.chat;
-    CopilotAdapter.prototype.chat = mock(mockChat) as unknown as typeof CopilotAdapter.prototype.chat;
-    AnthropicAdapter.prototype.chat = mock(mockChat) as unknown as typeof AnthropicAdapter.prototype.chat;
+    CopilotAdapter.prototype.chat = mock(
+      mockChat
+    ) as unknown as typeof CopilotAdapter.prototype.chat;
+    AnthropicAdapter.prototype.chat = mock(
+      mockChat
+    ) as unknown as typeof AnthropicAdapter.prototype.chat;
   });
 
   afterEach(() => {
@@ -284,9 +288,9 @@ You are a test agent.`;
     };
 
     const logger: Logger = {
-      log: mock(() => { }),
-      error: mock(() => { }),
-      warn: mock(() => { }),
+      log: mock(() => {}),
+      error: mock(() => {}),
+      warn: mock(() => {}),
     };
 
     await executeLlmStep(
@@ -486,7 +490,7 @@ You are a test agent.`;
       spyOn(client, 'stop').mockReturnValue(undefined);
       return client;
     });
-    const consoleSpy = spyOn(console, 'error').mockImplementation(() => { });
+    const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
 
     await executeLlmStep(
       step,
@@ -743,7 +747,7 @@ You are a test agent.`;
     };
     const context: ExpressionContext = { inputs: {}, steps: {} };
     const executeStepFn = mock(async () => ({ status: 'success' as const, output: 'ok' }));
-    const consoleSpy = spyOn(console, 'error').mockImplementation(() => { });
+    const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
 
     await executeLlmStep(
       step,
