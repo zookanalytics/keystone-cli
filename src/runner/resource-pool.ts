@@ -98,7 +98,7 @@ export class ResourcePoolManager {
             poolRef.queue.splice(index, 1);
             reject(new Error('Acquisition aborted'));
           }
-        });
+        }, { once: true });
       }
     });
   }

@@ -53,6 +53,10 @@ export class TestHarness {
   }
 
   async run(): Promise<TestSnapshot> {
+    // Capture original environment for cleanup
+    const originalEnv = { ...process.env };
+    const addedKeys: string[] = [];
+
     const runner = new WorkflowRunner(this.workflow, {
       inputs: this.fixture.inputs,
       secrets: this.fixture.secrets,
@@ -62,24 +66,34 @@ export class TestHarness {
       dbPath: ':memory:',
     });
 
-    // Inject env
-    if (this.fixture.env) {
-      for (const [key, value] of Object.entries(this.fixture.env)) {
-        process.env[key] = value;
+    try {
+      // Inject env
+      if (this.fixture.env) {
+        for (const [key, value] of Object.entries(this.fixture.env)) {
+          if (!(key in originalEnv)) {
+            addedKeys.push(key);
+          }
+          process.env[key] = value;
+        }
+      }
+
+      const outputs = await runner.run();
+
+      return {
+        steps: Object.fromEntries(this.stepResults.entries()),
+        outputs,
+      };
+    } finally {
+      // Restore original environment
+      for (const key of addedKeys) {
+        delete process.env[key];
+      }
+      for (const [key, value] of Object.entries(originalEnv)) {
+        if (value !== undefined) {
+          process.env[key] = value;
+        }
       }
     }
-
-    const outputs = await runner.run();
-    const runId = runner.getRunId();
-
-    // After run, we would ideally extract all step results from the memory DB.
-    // For now, let's just return what we have in the runner's internal state
-    // if we can expose it, or we can use the snapshot we captured during mocks.
-
-    return {
-      steps: Object.fromEntries(this.stepResults.entries()),
-      outputs,
-    };
   }
 
   private async mockExecuteStep(

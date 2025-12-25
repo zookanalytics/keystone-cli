@@ -89,7 +89,7 @@ async function runCommand(
     const abortHandler = () => {
       try {
         child.kill();
-      } catch {}
+      } catch { }
     };
     if (abortSignal) {
       abortSignal.addEventListener('abort', abortHandler, { once: true });
@@ -200,6 +200,10 @@ export async function executeEngineStep(
   const args = (step.args || []).map((arg) => ExpressionEvaluator.evaluateString(arg, context));
   const cwd = ExpressionEvaluator.evaluateString(step.cwd, context);
 
+  // Security note: spawn() is used with stdio: ['pipe', 'pipe', 'pipe'], NOT shell: true
+  // This means args are passed directly to the process without shell interpretation.
+  // Combined with the allowlist and version check, this is secure against injection.
+
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(step.env || {})) {
     env[key] = ExpressionEvaluator.evaluateString(value, context);
@@ -284,7 +288,7 @@ export async function executeEngineStep(
     const abortHandler = () => {
       try {
         child.kill();
-      } catch {}
+      } catch { }
     };
     if (abortSignal) {
       abortSignal.addEventListener('abort', abortHandler, { once: true });

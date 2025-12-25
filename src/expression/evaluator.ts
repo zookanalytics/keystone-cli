@@ -286,6 +286,16 @@ export class ExpressionEvaluator {
       case 'Identifier': {
         const name = (node as jsep.Identifier).name;
 
+        // Security: Block dangerous global identifiers that could enable code execution
+        const FORBIDDEN_IDENTIFIERS = new Set([
+          'eval', 'Function', 'AsyncFunction', 'GeneratorFunction',
+          'globalThis', 'global', 'self', 'window', 'top', 'parent', 'frames',
+          'Reflect', 'Proxy', 'require', 'import', 'module', 'exports',
+        ]);
+        if (FORBIDDEN_IDENTIFIERS.has(name)) {
+          throw new Error(`Access to "${name}" is forbidden for security reasons`);
+        }
+
         // Safe global functions and values
         const safeGlobals: Record<string, unknown> = {
           Boolean: Boolean,
