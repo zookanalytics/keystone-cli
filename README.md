@@ -86,7 +86,11 @@ Alternatively, you can use the built-in authentication management:
 ```bash
 keystone auth login openai
 keystone auth login anthropic
+keystone auth login anthropic-claude
+keystone auth login openai-chatgpt
 ```
+Use `anthropic-claude` for Claude Pro/Max subscriptions (OAuth) instead of an API key.
+Use `openai-chatgpt` for ChatGPT Plus/Pro subscriptions (OAuth) instead of an API key.
 
 ### 3. Run a Workflow
 ```bash
@@ -136,10 +140,18 @@ providers:
     base_url: https://api.openai.com/v1
     api_key_env: OPENAI_API_KEY
     default_model: gpt-4o
+  openai-chatgpt:
+    type: openai-chatgpt
+    base_url: https://api.openai.com/v1
+    default_model: gpt-5-codex
   anthropic:
     type: anthropic
     base_url: https://api.anthropic.com/v1
     api_key_env: ANTHROPIC_API_KEY
+    default_model: claude-3-5-sonnet-20240620
+  anthropic-claude:
+    type: anthropic-claude
+    base_url: https://api.anthropic.com/v1
     default_model: claude-3-5-sonnet-20240620
   groq:
     type: openai
@@ -148,7 +160,9 @@ providers:
     default_model: llama-3.3-70b-versatile
 
 model_mappings:
+  "gpt-5*": openai-chatgpt
   "gpt-*": openai
+  "claude-4*": anthropic-claude
   "claude-*": anthropic
   "o1-*": openai
   "llama-*": groq
@@ -227,6 +241,26 @@ providers:
 ```
 
 Authentication tokens for Copilot are managed automatically after the initial login. 
+
+### OpenAI ChatGPT Plus/Pro (OAuth)
+
+Keystone supports using your ChatGPT Plus/Pro subscription (OAuth) instead of an API key:
+
+```bash
+keystone auth login openai-chatgpt
+```
+
+Then map models to the `openai-chatgpt` provider in your config.
+
+### Anthropic Claude Pro/Max (OAuth)
+
+Keystone supports using your Claude Pro/Max subscription (OAuth) instead of an API key:
+
+```bash
+keystone auth login anthropic-claude
+```
+
+Then map models to the `anthropic-claude` provider in your config. This flow uses the Claude web auth code and refreshes tokens automatically.
 
 ### API Key Management
 

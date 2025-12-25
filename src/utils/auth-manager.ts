@@ -9,6 +9,11 @@ export interface AuthData {
   copilot_expires_at?: number;
   openai_api_key?: string;
   anthropic_api_key?: string;
+  anthropic_claude?: {
+    access_token: string;
+    refresh_token: string;
+    expires_at: number;
+  };
   mcp_tokens?: Record<
     string,
     {
@@ -35,6 +40,9 @@ const GITHUB_CLIENT_ID = '013444988716b5155f4c'; // GitHub CLI Client ID
 const TOKEN_REFRESH_BUFFER_SECONDS = 300;
 const OPENAI_CHATGPT_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
 const OPENAI_CHATGPT_REDIRECT_URI = 'http://localhost:1455/callback';
+const ANTHROPIC_OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
+const ANTHROPIC_OAUTH_REDIRECT_URI = 'https://console.anthropic.com/oauth/code/callback';
+const ANTHROPIC_OAUTH_SCOPE = 'org:create_api_key user:profile user:inference';
 
 export class AuthManager {
   private static getAuthPath(): string {
@@ -219,6 +227,56 @@ export class AuthManager {
     return hash.toString('base64url');
   }
 
+  static createAnthropicClaudeAuth(): { url: string; verifier: string } {
+    const verifier = AuthManager.generateCodeVerifier();
+    const challenge = AuthManager.createCodeChallenge(verifier);
+
+    const authUrl =
+      `https://claude.ai/oauth/authorize?` +
+      new URLSearchParams({
+        code: 'true',
+        client_id: ANTHROPIC_OAUTH_CLIENT_ID,
+        response_type: 'code',
+        redirect_uri: ANTHROPIC_OAUTH_REDIRECT_URI,
+        scope: ANTHROPIC_OAUTH_SCOPE,
+        code_challenge: challenge,
+        code_challenge_method: 'S256',
+        state: verifier,
+      }).toString();
+
+    return { url: authUrl, verifier };
+  }
+
+  static async exchangeAnthropicClaudeCode(
+    code: string,
+    verifier: string
+  ): Promise<{ access_token: string; refresh_token: string; expires_in: number }> {
+    const [authCode, stateFromCode] = code.split('#');
+    const response = await fetch('https://console.anthropic.com/v1/oauth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        code: authCode,
+        state: stateFromCode || verifier,
+        grant_type: 'authorization_code',
+        client_id: ANTHROPIC_OAUTH_CLIENT_ID,
+        redirect_uri: ANTHROPIC_OAUTH_REDIRECT_URI,
+        code_verifier: verifier,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Failed to exchange Claude auth code: ${response.status} - ${error}`);
+    }
+
+    return (await response.json()) as {
+      access_token: string;
+      refresh_token: string;
+      expires_in: number;
+    };
+  }
+
   static async loginOpenAIChatGPT(): Promise<void> {
     const verifier = AuthManager.generateCodeVerifier();
     const challenge = AuthManager.createCodeChallenge(verifier);
@@ -364,6 +422,52 @@ export class AuthManager {
       return data.access_token;
     } catch (error) {
       console.error('Error refreshing OpenAI ChatGPT token:', error);
+      return undefined;
+    }
+  }
+
+  static async getAnthropicClaudeToken(): Promise<string | undefined> {
+    const auth = AuthManager.load();
+    if (!auth.anthropic_claude) return undefined;
+
+    const { access_token, refresh_token, expires_at } = auth.anthropic_claude;
+
+    if (expires_at > Date.now() / 1000 + TOKEN_REFRESH_BUFFER_SECONDS) {
+      return access_token;
+    }
+
+    try {
+      const response = await fetch('https://console.anthropic.com/v1/oauth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          grant_type: 'refresh_token',
+          refresh_token,
+          client_id: ANTHROPIC_OAUTH_CLIENT_ID,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to refresh token: ${response.statusText}`);
+      }
+
+      const data = (await response.json()) as {
+        access_token: string;
+        refresh_token: string;
+        expires_in: number;
+      };
+
+      AuthManager.save({
+        anthropic_claude: {
+          access_token: data.access_token,
+          refresh_token: data.refresh_token,
+          expires_at: Math.floor(Date.now() / 1000) + data.expires_in,
+        },
+      });
+
+      return data.access_token;
+    } catch (error) {
+      console.error('Error refreshing Anthropic Claude token:', error);
       return undefined;
     }
   }

@@ -5,6 +5,12 @@ import { processOpenAIStream } from './stream-utils';
 
 // Maximum response size to prevent memory exhaustion (1MB)
 const MAX_RESPONSE_SIZE = 1024 * 1024;
+const ANTHROPIC_OAUTH_BETAS = [
+  'oauth-2025-04-20',
+  'claude-code-20250219',
+  'interleaved-thinking-2025-05-14',
+  'fine-grained-tool-streaming-2025-05-14',
+].join(',');
 
 export interface LLMMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -154,14 +160,35 @@ export class OpenAIAdapter implements LLMAdapter {
 export class AnthropicAdapter implements LLMAdapter {
   private apiKey: string;
   private baseUrl: string;
+  private authMode: 'api-key' | 'oauth';
 
-  constructor(apiKey?: string, baseUrl?: string) {
+  constructor(apiKey?: string, baseUrl?: string, authMode: 'api-key' | 'oauth' = 'api-key') {
     this.apiKey = apiKey || Bun.env.ANTHROPIC_API_KEY || '';
     this.baseUrl = baseUrl || Bun.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com/v1';
+    this.authMode = authMode;
 
-    if (!this.apiKey && this.baseUrl === 'https://api.anthropic.com/v1') {
+    if (this.authMode === 'api-key' && !this.apiKey && this.baseUrl === 'https://api.anthropic.com/v1') {
       console.warn('Warning: ANTHROPIC_API_KEY is not set.');
     }
+  }
+
+  private async getAuthHeaders(): Promise<Record<string, string>> {
+    if (this.authMode === 'oauth') {
+      const token = await AuthManager.getAnthropicClaudeToken();
+      if (!token) {
+        throw new Error(
+          'Anthropic Claude authentication not found. Please run "keystone auth login anthropic-claude" first.'
+        );
+      }
+      return {
+        Authorization: `Bearer ${token}`,
+        'anthropic-beta': ANTHROPIC_OAUTH_BETAS,
+      };
+    }
+
+    return {
+      'x-api-key': this.apiKey,
+    };
   }
 
   async chat(
@@ -256,11 +283,12 @@ export class AnthropicAdapter implements LLMAdapter {
       }))
       : undefined;
 
+    const authHeaders = await this.getAuthHeaders();
     const response = await fetch(`${this.baseUrl}/messages`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': this.apiKey,
+        ...authHeaders,
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
@@ -411,6 +439,12 @@ export class AnthropicAdapter implements LLMAdapter {
         total_tokens: data.usage.input_tokens + data.usage.output_tokens,
       },
     };
+  }
+}
+
+export class AnthropicClaudeAdapter extends AnthropicAdapter {
+  constructor(baseUrl?: string) {
+    super(undefined, baseUrl, 'oauth');
   }
 }
 
@@ -656,6 +690,8 @@ export function getAdapter(model: string): { adapter: LLMAdapter; resolvedModel:
     adapter = new CopilotAdapter(providerConfig.base_url);
   } else if (providerConfig.type === 'openai-chatgpt') {
     adapter = new OpenAIChatGPTAdapter(providerConfig.base_url);
+  } else if (providerConfig.type === 'anthropic-claude') {
+    adapter = new AnthropicClaudeAdapter(providerConfig.base_url);
   } else {
     const apiKey = providerConfig.api_key_env ? Bun.env[providerConfig.api_key_env] : undefined;
 

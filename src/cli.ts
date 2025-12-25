@@ -1354,21 +1354,69 @@ auth
         console.error('✗ No token provided.');
         process.exit(1);
       }
-    } else if (providerName === 'openai' || providerName === 'anthropic' || providerName === 'openai-chatgpt') {
-      if (providerName === 'openai-chatgpt') {
+    } else if (providerName === 'openai-chatgpt') {
+      try {
+        await AuthManager.loginOpenAIChatGPT();
+        console.log('\n✓ Successfully logged in to OpenAI ChatGPT.');
+        return;
+      } catch (error) {
+        console.error(
+          '\n✗ Failed to login with OpenAI ChatGPT:',
+          error instanceof Error ? error.message : error
+        );
+        process.exit(1);
+      }
+    } else if (providerName === 'anthropic-claude') {
+      try {
+        const { url, verifier } = AuthManager.createAnthropicClaudeAuth();
+
+        console.log('\nTo login with Anthropic Claude (Pro/Max):');
+        console.log('1. Visit the following URL in your browser:');
+        console.log(`   ${url}\n`);
+        console.log('2. Copy the authorization code and paste it below:\n');
+
         try {
-          await AuthManager.loginOpenAIChatGPT();
-          console.log('\n✓ Successfully logged in to OpenAI ChatGPT.');
-          return;
-        } catch (error) {
-          console.error(
-            '\n✗ Failed to login with OpenAI ChatGPT:',
-            error instanceof Error ? error.message : error
-          );
+          const { platform } = process;
+          const command = platform === 'win32' ? 'start' : platform === 'darwin' ? 'open' : 'xdg-open';
+          const { spawn } = require('node:child_process');
+          spawn(command, [url]);
+        } catch (e) {
+          // Ignore if we can't open the browser automatically
+        }
+
+        let code = options.token;
+        if (!code) {
+          const prompt = 'Authorization Code: ';
+          process.stdout.write(prompt);
+          for await (const line of console) {
+            code = line.trim();
+            break;
+          }
+        }
+
+        if (!code) {
+          console.error('✗ No authorization code provided.');
           process.exit(1);
         }
-      }
 
+        const data = await AuthManager.exchangeAnthropicClaudeCode(code, verifier);
+        AuthManager.save({
+          anthropic_claude: {
+            access_token: data.access_token,
+            refresh_token: data.refresh_token,
+            expires_at: Math.floor(Date.now() / 1000) + data.expires_in,
+          },
+        });
+        console.log('\n✓ Successfully logged in to Anthropic Claude.');
+        return;
+      } catch (error) {
+        console.error(
+          '\n✗ Failed to login with Anthropic Claude:',
+          error instanceof Error ? error.message : error
+        );
+        process.exit(1);
+      }
+    } else if (providerName === 'openai' || providerName === 'anthropic') {
       let key = options.token; // Use --token if provided as the API key
 
       if (!key) {
@@ -1443,17 +1491,33 @@ auth
       }
     }
 
-    if (!providerName || providerName === 'anthropic') {
+    if (!providerName || providerName === 'anthropic' || providerName === 'anthropic-claude') {
       if (auth.anthropic_api_key) {
         console.log('  ✓ Anthropic API key configured');
-      } else if (providerName) {
+      }
+      if (auth.anthropic_claude) {
+        console.log('  ✓ Anthropic Claude subscription (OAuth) authenticated');
+        if (auth.anthropic_claude.expires_at) {
+          const expires = new Date(auth.anthropic_claude.expires_at * 1000);
+          console.log(`    Session expires: ${expires.toLocaleString()}`);
+        }
+      }
+
+      if (providerName && !auth.anthropic_api_key && !auth.anthropic_claude) {
         console.log(
-          `  ⊘ Anthropic API key not configured. Run "keystone auth login anthropic" to authenticate.`
+          `  ⊘ Anthropic authentication not configured. Run "keystone auth login anthropic" or "keystone auth login anthropic-claude" to authenticate.`
         );
       }
     }
 
-    if (!auth.github_token && !auth.openai_api_key && !auth.anthropic_api_key && !providerName) {
+    if (
+      !auth.github_token &&
+      !auth.openai_api_key &&
+      !auth.openai_chatgpt &&
+      !auth.anthropic_api_key &&
+      !auth.anthropic_claude &&
+      !providerName
+    ) {
       console.log('  ⊘ No providers configured. Run "keystone auth login" to authenticate.');
     }
   });
@@ -1483,9 +1547,14 @@ auth
       console.log(
         `✓ Successfully cleared ${providerName === 'openai' ? 'OpenAI API key and ' : ''}ChatGPT session.`
       );
-    } else if (providerName === 'anthropic') {
-      AuthManager.save({ anthropic_api_key: undefined });
-      console.log('✓ Successfully cleared Anthropic API key.');
+    } else if (providerName === 'anthropic' || providerName === 'anthropic-claude') {
+      AuthManager.save({
+        anthropic_api_key: providerName === 'anthropic' ? undefined : auth.anthropic_api_key,
+        anthropic_claude: undefined,
+      });
+      console.log(
+        `✓ Successfully cleared ${providerName === 'anthropic' ? 'Anthropic API key and ' : ''}Claude session.`
+      );
     } else {
       console.error(`✗ Unknown provider: ${providerName}`);
       process.exit(1);

@@ -3,6 +3,7 @@ import { AuthManager } from '../utils/auth-manager';
 import { ConfigLoader } from '../utils/config-loader';
 import {
   AnthropicAdapter,
+  AnthropicClaudeAdapter,
   CopilotAdapter,
   LocalEmbeddingAdapter,
   OpenAIAdapter,
@@ -258,6 +259,52 @@ describe('AnthropicAdapter', () => {
   });
 });
 
+describe('AnthropicClaudeAdapter', () => {
+  const originalFetch = global.fetch;
+
+  beforeEach(() => {
+    // @ts-ignore
+    global.fetch = mock();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  it('should call Anthropic API with OAuth bearer and beta headers', async () => {
+    const mockResponse = {
+      content: [{ type: 'text', text: 'hello from claude' }],
+      usage: { input_tokens: 1, output_tokens: 1 },
+    };
+
+    const authSpy = spyOn(AuthManager, 'getAnthropicClaudeToken').mockResolvedValue('claude-token');
+
+    // @ts-ignore
+    global.fetch.mockResolvedValue(
+      new Response(JSON.stringify(mockResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+
+    const adapter = new AnthropicClaudeAdapter();
+    await adapter.chat([{ role: 'user', content: 'hi' }]);
+
+    // @ts-ignore
+    const fetchMock = global.fetch as MockFetch;
+    // @ts-ignore
+    // biome-ignore lint/suspicious/noExplicitAny: mock fetch init
+    const [url, init] = fetchMock.mock.calls[0] as [string, any];
+
+    expect(url).toBe('https://api.anthropic.com/v1/messages');
+    expect(init.headers.Authorization).toBe('Bearer claude-token');
+    expect(init.headers['anthropic-beta']).toContain('oauth-2025-04-20');
+    expect(init.headers['x-api-key']).toBeUndefined();
+
+    authSpy.mockRestore();
+  });
+});
+
 describe('CopilotAdapter', () => {
   const originalFetch = global.fetch;
 
@@ -407,8 +454,10 @@ describe('getAdapter', () => {
         anthropic: { type: 'anthropic', api_key_env: 'ANTHROPIC_API_KEY' },
         copilot: { type: 'copilot' },
         'chatgpt-provider': { type: 'openai-chatgpt' },
+        'claude-subscription': { type: 'anthropic-claude' },
       },
       model_mappings: {
+        'claude-4*': 'claude-subscription',
         'claude-*': 'anthropic',
         'gpt-5*': 'chatgpt-provider',
         'gpt-*': 'openai',
@@ -440,6 +489,12 @@ describe('getAdapter', () => {
     const { adapter, resolvedModel } = getAdapter('claude-3');
     expect(adapter).toBeInstanceOf(AnthropicAdapter);
     expect(resolvedModel).toBe('claude-3');
+  });
+
+  it('should return AnthropicClaudeAdapter for claude subscription models', () => {
+    const { adapter, resolvedModel } = getAdapter('claude-4-sonnet');
+    expect(adapter).toBeInstanceOf(AnthropicClaudeAdapter);
+    expect(resolvedModel).toBe('claude-4-sonnet');
   });
 
   it('should return CopilotAdapter for copilot models', () => {
