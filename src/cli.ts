@@ -773,10 +773,23 @@ program
   .option('--project <path>', 'Project directory (default: .)', '.')
   .action(async (options) => {
     const { spawnSync } = await import('node:child_process');
-    const { resolve, join } = await import('node:path');
-    const { existsSync } = await import('node:fs');
+    const { createRequire } = await import('node:module');
+    const { resolve, join, dirname } = await import('node:path');
+    const {
+      copyFileSync,
+      existsSync,
+      lstatSync,
+      mkdirSync,
+      readdirSync,
+      readFileSync,
+      readlinkSync,
+      rmSync,
+      symlinkSync,
+    } = await import('node:fs');
 
     const projectDir = resolve(options.project);
+    const outputPath = resolve(options.outfile);
+    const outputDir = dirname(outputPath);
     const keystoneDir = join(projectDir, '.keystone');
 
     if (!existsSync(keystoneDir)) {
@@ -790,7 +803,151 @@ program
     // Find the CLI source path
     const cliSource = resolve(import.meta.dir, 'cli.ts');
 
-    const buildArgs = ['build', cliSource, '--compile', '--outfile', options.outfile];
+    const osName = process.platform === 'win32' ? 'windows' : process.platform;
+    const externalPackages: string[] = [];
+
+    const buildArgs = ['build', cliSource, '--compile', '--outfile', outputPath];
+    for (const pkg of externalPackages) {
+      buildArgs.push('--external', pkg);
+    }
+
+    const copyOnnxRuntimeLibs = (outfile: string): { copied: number; checked: boolean } => {
+      const runtimeDir = join(
+        projectDir,
+        'node_modules',
+        'onnxruntime-node',
+        'bin',
+        'napi-v3',
+        process.platform,
+        process.arch
+      );
+      if (!existsSync(runtimeDir)) return { copied: 0, checked: false };
+
+      const entries = readdirSync(runtimeDir, { withFileTypes: true });
+      const libPattern =
+        process.platform === 'win32' ? /^onnxruntime.*\.dll$/i : /^libonnxruntime/i;
+      let copied = 0;
+
+      for (const entry of entries) {
+        if (!entry.isFile() || !libPattern.test(entry.name)) continue;
+        copyFileSync(join(runtimeDir, entry.name), join(dirname(outfile), entry.name));
+        copied += 1;
+      }
+
+      return { copied, checked: true };
+    };
+
+    const copyDir = (source: string, destination: string): void => {
+      const stats = lstatSync(source);
+      if (stats.isSymbolicLink()) {
+        const linkTarget = readlinkSync(source);
+        mkdirSync(dirname(destination), { recursive: true });
+        symlinkSync(linkTarget, destination);
+        return;
+      }
+      if (stats.isDirectory()) {
+        mkdirSync(destination, { recursive: true });
+        for (const entry of readdirSync(source, { withFileTypes: true })) {
+          copyDir(join(source, entry.name), join(destination, entry.name));
+        }
+        return;
+      }
+      if (stats.isFile()) {
+        mkdirSync(dirname(destination), { recursive: true });
+        copyFileSync(source, destination);
+      }
+    };
+
+    const copyRuntimeDependencies = (outfile: string): { copied: number; missing: string[] } => {
+      const runtimeDir = join(dirname(outfile), 'keystone-runtime');
+      const runtimeNodeModules = join(runtimeDir, 'node_modules');
+      rmSync(runtimeDir, { recursive: true, force: true });
+      mkdirSync(runtimeNodeModules, { recursive: true });
+
+      const roots = [
+        '@xenova/transformers',
+        'onnxruntime-node',
+        'onnxruntime-common',
+        'sharp',
+        '@huggingface/jinja',
+        'sqlite-vec',
+        `sqlite-vec-${osName}-${process.arch}`,
+      ];
+
+      const require = createRequire(import.meta.url);
+      const resolvePackageDir = (pkg: string): string | null => {
+        try {
+          const pkgJson = require.resolve(`${pkg}/package.json`, { paths: [projectDir] });
+          return dirname(pkgJson);
+        } catch {
+          return null;
+        }
+      };
+
+      const queue = [...roots];
+      const seen = new Set<string>();
+      const missing: string[] = [];
+      let copied = 0;
+
+      while (queue.length) {
+        const pkg = queue.shift();
+        if (!pkg || seen.has(pkg)) continue;
+        seen.add(pkg);
+
+        const pkgDir = resolvePackageDir(pkg);
+        if (!pkgDir) {
+          missing.push(pkg);
+          continue;
+        }
+
+        const destDir = join(runtimeNodeModules, ...pkg.split('/'));
+        copyDir(pkgDir, destDir);
+        copied += 1;
+
+        try {
+          const pkgJsonPath = join(pkgDir, 'package.json');
+          const pkgJson = JSON.parse(readFileSync(pkgJsonPath, 'utf8')) as {
+            dependencies?: Record<string, string>;
+            optionalDependencies?: Record<string, string>;
+          };
+          for (const dep of Object.keys(pkgJson.dependencies || {})) {
+            if (!seen.has(dep)) {
+              queue.push(dep);
+            }
+          }
+          for (const dep of Object.keys(pkgJson.optionalDependencies || {})) {
+            if (seen.has(dep)) continue;
+            if (resolvePackageDir(dep)) {
+              queue.push(dep);
+            }
+          }
+        } catch {
+          // Ignore dependency parsing errors.
+        }
+      }
+
+      return { copied, missing };
+    };
+
+    const copySqliteVecLib = (outfile: string): { copied: number; checked: boolean } => {
+      const osName = process.platform === 'win32' ? 'windows' : process.platform;
+      const extension =
+        process.platform === 'win32' ? 'dll' : process.platform === 'darwin' ? 'dylib' : 'so';
+      const sqliteVecDir = join(projectDir, 'node_modules', `sqlite-vec-${osName}-${process.arch}`);
+      if (!existsSync(sqliteVecDir)) return { copied: 0, checked: false };
+
+      const entries = readdirSync(sqliteVecDir, { withFileTypes: true });
+      const targetName = `vec0.${extension}`;
+      let copied = 0;
+
+      for (const entry of entries) {
+        if (!entry.isFile() || entry.name !== targetName) continue;
+        copyFileSync(join(sqliteVecDir, entry.name), join(dirname(outfile), entry.name));
+        copied += 1;
+      }
+
+      return { copied, checked: true };
+    };
 
     console.log(`🚀 Running: ASSETS_DIR=${keystoneDir} bun ${buildArgs.join(' ')}`);
 
@@ -803,6 +960,34 @@ program
     });
 
     if (result.status === 0) {
+      const { copied, checked } = copyOnnxRuntimeLibs(outputPath);
+      if (copied > 0) {
+        console.log(`📦 Copied ${copied} ONNX Runtime library file(s) next to ${outputPath}`);
+      } else if (checked) {
+        console.log(
+          'ℹ️  ONNX Runtime library not found; local embeddings may require external setup.'
+        );
+      }
+      const runtimeDeps = copyRuntimeDependencies(outputPath);
+      if (runtimeDeps.copied > 0) {
+        console.log(
+          `📦 Copied ${runtimeDeps.copied} runtime package(s) to ${join(
+            outputDir,
+            'keystone-runtime'
+          )}`
+        );
+      }
+      if (runtimeDeps.missing.length > 0) {
+        console.log(`ℹ️  Missing runtime packages: ${runtimeDeps.missing.join(', ')}`);
+      }
+      const sqliteVecStatus = copySqliteVecLib(outputPath);
+      if (sqliteVecStatus.copied > 0) {
+        console.log(
+          `📦 Copied ${sqliteVecStatus.copied} sqlite-vec extension file(s) next to ${outputPath}`
+        );
+      } else if (sqliteVecStatus.checked) {
+        console.log('ℹ️  sqlite-vec extension not found; memory steps may fail.');
+      }
       console.log(`\n✨ Successfully compiled to ${options.outfile}`);
       console.log(`   You can now run ./${options.outfile} anywhere!`);
     } else {

@@ -1,7 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import * as sqliteVec from 'sqlite-vec';
 import './sqlite-setup.ts';
 
@@ -10,6 +10,54 @@ export interface MemoryEntry {
   text: string;
   metadata: Record<string, unknown>;
   distance?: number;
+}
+
+const SQLITE_VEC_EXTENSION =
+  process.platform === 'win32' ? 'dll' : process.platform === 'darwin' ? 'dylib' : 'so';
+const SQLITE_VEC_FILENAME = `vec0.${SQLITE_VEC_EXTENSION}`;
+
+function getRuntimeDir(): string {
+  return process.env.KEYSTONE_RUNTIME_DIR || join(dirname(process.execPath), 'keystone-runtime');
+}
+
+function resolveSqliteVecPath(): string {
+  const overridePath = process.env.KEYSTONE_SQLITE_VEC_PATH;
+  if (overridePath && existsSync(overridePath)) {
+    return overridePath;
+  }
+
+  try {
+    const loadablePath = sqliteVec.getLoadablePath();
+    if (existsSync(loadablePath)) {
+      return loadablePath;
+    }
+  } catch {
+    // Fall through to additional lookup paths.
+  }
+
+  const osName = process.platform === 'win32' ? 'windows' : process.platform;
+  const runtimeDir = getRuntimeDir();
+  const candidatePaths = [
+    join(runtimeDir, 'node_modules', `sqlite-vec-${osName}-${process.arch}`, SQLITE_VEC_FILENAME),
+    join(
+      process.cwd(),
+      'node_modules',
+      `sqlite-vec-${osName}-${process.arch}`,
+      SQLITE_VEC_FILENAME
+    ),
+    join(dirname(process.execPath), SQLITE_VEC_FILENAME),
+    join(dirname(process.execPath), 'lib', SQLITE_VEC_FILENAME),
+  ];
+
+  for (const candidate of candidatePaths) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  throw new Error(
+    `Loadable extension for sqlite-vec not found. Set KEYSTONE_SQLITE_VEC_PATH or install sqlite-vec-${osName}-${process.arch}.`
+  );
 }
 
 export class MemoryDb {
@@ -31,7 +79,7 @@ export class MemoryDb {
       this.db = new Database(dbPath, { create: true });
 
       // Load sqlite-vec extension
-      const extensionPath = sqliteVec.getLoadablePath();
+      const extensionPath = resolveSqliteVecPath();
       this.db.loadExtension(extensionPath);
 
       this.initSchema();

@@ -1,5 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { pipeline } from '@xenova/transformers';
+import { copyFileSync, existsSync, readdirSync } from 'node:fs';
+import { Module } from 'node:module';
+import { homedir } from 'node:os';
+import { basename, dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { AuthManager, COPILOT_HEADERS } from '../utils/auth-manager';
 import { ConfigLoader } from '../utils/config-loader';
 import { ConsoleLogger } from '../utils/logger';
@@ -22,6 +26,286 @@ const GEMINI_HEADERS = {
     '{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}',
 };
 const defaultLogger = new ConsoleLogger();
+type TransformersPipeline = (...args: unknown[]) => Promise<unknown>;
+let cachedPipeline: TransformersPipeline | null = null;
+let runtimeResolverRegistered = false;
+let nativeFallbacksRegistered = false;
+
+const ONNX_RUNTIME_LIB_PATTERN =
+  process.platform === 'win32' ? /^onnxruntime.*\.dll$/i : /^libonnxruntime/i;
+
+function hasOnnxRuntimeLibrary(dir: string): boolean {
+  try {
+    return readdirSync(dir, { withFileTypes: true }).some(
+      (entry) => entry.isFile() && ONNX_RUNTIME_LIB_PATTERN.test(entry.name)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function collectOnnxRuntimeLibraryDirs(): string[] {
+  const candidates = new Set<string>();
+
+  if (process.env.KEYSTONE_ONNX_RUNTIME_LIB_DIR) {
+    candidates.add(process.env.KEYSTONE_ONNX_RUNTIME_LIB_DIR);
+  }
+
+  const runtimeDir = getRuntimeDir();
+  const runtimeOnnxDir = join(
+    runtimeDir,
+    'node_modules',
+    'onnxruntime-node',
+    'bin',
+    'napi-v3',
+    process.platform,
+    process.arch
+  );
+  if (existsSync(runtimeOnnxDir)) {
+    candidates.add(runtimeOnnxDir);
+  }
+
+  const nodeModulesDir = join(
+    process.cwd(),
+    'node_modules',
+    'onnxruntime-node',
+    'bin',
+    'napi-v3',
+    process.platform,
+    process.arch
+  );
+  if (existsSync(nodeModulesDir)) {
+    candidates.add(nodeModulesDir);
+  }
+
+  const execDir = dirname(process.execPath);
+  candidates.add(execDir);
+  candidates.add(join(execDir, 'lib'));
+
+  return Array.from(candidates).filter(hasOnnxRuntimeLibrary);
+}
+
+function findOnnxRuntimeLibraryPath(dirs: string[]): string | null {
+  for (const dir of dirs) {
+    try {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.isFile() && ONNX_RUNTIME_LIB_PATTERN.test(entry.name)) {
+          return join(dir, entry.name);
+        }
+      }
+    } catch {
+      // Ignore unreadable directories.
+    }
+  }
+  return null;
+}
+
+function ensureOnnxRuntimeLibraryPath(): void {
+  const libDirs = collectOnnxRuntimeLibraryDirs();
+  if (!libDirs.length) return;
+
+  const runtimePath = findOnnxRuntimeLibraryPath(libDirs);
+  if (runtimePath) {
+    const tempDirs = process.platform === 'darwin' ? ['/private/tmp', '/tmp'] : ['/tmp'];
+    for (const tempDir of tempDirs) {
+      try {
+        const target = join(tempDir, basename(runtimePath));
+        if (!existsSync(target)) {
+          copyFileSync(runtimePath, target);
+        }
+      } catch {
+        // Best-effort copy for runtimes that extract native modules into temp.
+      }
+    }
+  }
+
+  const envKey =
+    process.platform === 'darwin'
+      ? 'DYLD_LIBRARY_PATH'
+      : process.platform === 'win32'
+        ? 'PATH'
+        : 'LD_LIBRARY_PATH';
+  const delimiter = process.platform === 'win32' ? ';' : ':';
+  const existing = (process.env[envKey] || '').split(delimiter).filter(Boolean);
+  const merged: string[] = [];
+  const seen = new Set<string>();
+
+  for (const dir of [...libDirs, ...existing]) {
+    if (seen.has(dir)) continue;
+    seen.add(dir);
+    merged.push(dir);
+  }
+
+  process.env[envKey] = merged.join(delimiter);
+  if (runtimePath && typeof Bun !== 'undefined' && typeof Bun.dlopen === 'function') {
+    try {
+      Bun.dlopen(runtimePath, {});
+    } catch {
+      // Best-effort preloading for compiled binaries.
+    }
+  }
+}
+
+function resolveNativeModuleFallback(request: string, parentFilename: string): string | null {
+  const normalizedRequest = request.replace(/\\/g, '/');
+  const fileName = normalizedRequest.split('/').pop();
+  if (!fileName) return null;
+
+  if (fileName.startsWith('sharp-') || /[\\/]sharp[\\/]/.test(parentFilename)) {
+    const candidate = join(getRuntimeDir(), 'node_modules', 'sharp', 'build', 'Release', fileName);
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  if (
+    fileName === 'onnxruntime_binding.node' ||
+    /[\\/]onnxruntime-node[\\/]/.test(parentFilename)
+  ) {
+    const candidate = join(
+      getRuntimeDir(),
+      'node_modules',
+      'onnxruntime-node',
+      'bin',
+      'napi-v3',
+      process.platform,
+      process.arch,
+      'onnxruntime_binding.node'
+    );
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+function ensureNativeModuleFallbacks(): void {
+  if (nativeFallbacksRegistered) return;
+  nativeFallbacksRegistered = true;
+
+  const moduleAny = Module as unknown as {
+    _resolveFilename: (
+      request: string,
+      parent?: { filename?: string },
+      isMain?: boolean,
+      options?: unknown
+    ) => string;
+  };
+  const originalResolve = moduleAny._resolveFilename;
+  if (typeof originalResolve !== 'function') return;
+
+  moduleAny._resolveFilename = function resolveFilename(request, parent, isMain, options) {
+    if (typeof request === 'string' && request.endsWith('.node')) {
+      try {
+        return originalResolve.call(this, request, parent, isMain, options);
+      } catch (error) {
+        const parentFilename = parent && typeof parent.filename === 'string' ? parent.filename : '';
+        const fallback = resolveNativeModuleFallback(request, parentFilename);
+        if (fallback) {
+          return fallback;
+        }
+        throw error;
+      }
+    }
+    return originalResolve.call(this, request, parent, isMain, options);
+  };
+}
+
+function resolveTransformersCacheDir(): string | null {
+  if (process.env.TRANSFORMERS_CACHE) {
+    return process.env.TRANSFORMERS_CACHE;
+  }
+  if (process.env.XDG_CACHE_HOME) {
+    return join(process.env.XDG_CACHE_HOME, 'keystone', 'transformers');
+  }
+  const home = process.env.HOME || homedir();
+  if (home) {
+    return join(home, '.cache', 'keystone', 'transformers');
+  }
+  return null;
+}
+
+async function getTransformersPipeline(): Promise<TransformersPipeline> {
+  if (!cachedPipeline) {
+    ensureNativeModuleFallbacks();
+    ensureRuntimeResolver();
+    const resolved = resolveTransformersPath();
+    const module = resolved
+      ? await import(pathToFileURL(resolved).href)
+      : await import('@xenova/transformers');
+    if (module.env?.cacheDir?.includes('/$bunfs')) {
+      const cacheDir = resolveTransformersCacheDir();
+      if (cacheDir) {
+        module.env.cacheDir = cacheDir;
+      }
+    }
+    cachedPipeline = module.pipeline;
+  }
+  return cachedPipeline;
+}
+
+function resolveTransformersPath(): string | null {
+  try {
+    if (
+      process.env.KEYSTONE_TRANSFORMERS_PATH &&
+      existsSync(process.env.KEYSTONE_TRANSFORMERS_PATH)
+    ) {
+      return process.env.KEYSTONE_TRANSFORMERS_PATH;
+    }
+  } catch {
+    // Ignore resolve failures and fall back to bundled module.
+  }
+  return null;
+}
+
+function getRuntimeDir(): string {
+  return process.env.KEYSTONE_RUNTIME_DIR || join(dirname(process.execPath), 'keystone-runtime');
+}
+
+function resolveRuntimePackageEntry(pkg: string, entry: string): string | null {
+  const runtimePath = join(getRuntimeDir(), 'node_modules', ...pkg.split('/'), entry);
+  if (existsSync(runtimePath)) {
+    return runtimePath;
+  }
+  const cwdPath = join(process.cwd(), 'node_modules', ...pkg.split('/'), entry);
+  if (existsSync(cwdPath)) {
+    return cwdPath;
+  }
+  return null;
+}
+
+function ensureRuntimeResolver(): void {
+  if (runtimeResolverRegistered) return;
+  if (typeof Bun === 'undefined' || typeof Bun.plugin !== 'function') {
+    return;
+  }
+
+  const entryMap: Record<string, string> = {
+    '@huggingface/jinja': 'dist/index.js',
+    sharp: 'lib/index.js',
+    'onnxruntime-node': 'dist/index.js',
+    'onnxruntime-common': 'dist/ort-common.node.js',
+  };
+
+  Bun.plugin({
+    name: 'keystone-runtime-resolver',
+    setup(builder) {
+      builder.onResolve(
+        { filter: /^(sharp|onnxruntime-node|onnxruntime-common|@huggingface\/jinja)$/ },
+        (args) => {
+          const entry = entryMap[args.path];
+          if (!entry) return null;
+          const resolved = resolveRuntimePackageEntry(args.path, entry);
+          if (!resolved) return null;
+          return { path: resolved };
+        }
+      );
+    },
+  });
+
+  runtimeResolverRegistered = true;
+}
 
 export interface LLMMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -1054,7 +1338,16 @@ export class LocalEmbeddingAdapter implements LLMAdapter {
   async embed(text: string, model = 'Xenova/all-MiniLM-L6-v2'): Promise<number[]> {
     const modelToUse = model === 'local' ? 'Xenova/all-MiniLM-L6-v2' : model;
     if (!LocalEmbeddingAdapter.extractor) {
-      LocalEmbeddingAdapter.extractor = await pipeline('feature-extraction', modelToUse);
+      try {
+        ensureOnnxRuntimeLibraryPath();
+        const pipeline = await getTransformersPipeline();
+        LocalEmbeddingAdapter.extractor = await pipeline('feature-extraction', modelToUse);
+      } catch (error) {
+        const details = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `Failed to initialize local embeddings. If you are running a compiled binary, ensure the keystone-runtime directory is next to the executable (or set KEYSTONE_RUNTIME_DIR), and that the ONNX Runtime shared library is available (set KEYSTONE_ONNX_RUNTIME_LIB_DIR or place it next to the executable). Original error: ${details}`
+        );
+      }
     }
     const output = await LocalEmbeddingAdapter.extractor(text, {
       pooling: 'mean',

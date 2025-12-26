@@ -912,6 +912,15 @@ In these examples, the agent will have access to all tools provided by the MCP s
 
 ---
 
+### Compile
+`keystone compile -o ./keystone-app` emits the executable plus a `keystone-runtime/` directory next to it.
+Ship both together if you use memory/embeddings (the runtime folder includes native deps like ONNX Runtime,
+sqlite-vec, and sharp). The compile step also copies native shared libraries (for example `libonnxruntime.*`
+and `vec0.*`) next to the binary. You can move the runtime folder and set `KEYSTONE_RUNTIME_DIR` to point
+to it. If you move the ONNX Runtime library elsewhere, set `KEYSTONE_ONNX_RUNTIME_LIB_DIR` to that directory.
+If you do not use memory/embeddings, the binary alone is sufficient. If you see cache warnings from local
+embeddings in a compiled run, set `TRANSFORMERS_CACHE` to a writable directory.
+
 Input keys passed via `-i key=val` must be alphanumeric/underscore and cannot be `__proto__`, `constructor`, or `prototype`.
 
 ### Dry Run
@@ -959,11 +968,18 @@ graph TD
     SE --> File[File Operations]
     SE --> HTTP[HTTP Requests]
     SE --> Human[Human Input]
+    SE --> Engine[Engine Executor]
+    SE --> Script[Script Step]
+    SE --> Sleep[Sleep Step]
+    SE --> Memory[Memory operations]
+    SE --> Workflow[Sub-workflows]
     LLM --> Adapters[LLM Adapters]
     Adapters --> OpenAI
     Adapters --> Anthropic
+    Adapters --> Gemini
     Adapters --> Copilot
     Adapters --> ChatGPT
+    Adapters --> Local
     LLM --> MCPClient[MCP Client]
     WR --> Eval[Expression Evaluator]
     WR --> Pool[Resource Pool Manager]
@@ -971,12 +987,16 @@ graph TD
 
 ## 📂 Project Structure
 
+- `src/cli.ts`: CLI entry point.
 - `src/db/`: SQLite persistence layer.
 - `src/runner/`: The core execution engine, handles parallelization and retries.
 - `src/parser/`: Zod-powered validation for workflows and agents.
 - `src/expression/`: `${{ }}` expression evaluator.
+- `src/templates/`: Bundled workflow and agent templates.
 - `src/ui/`: Ink-powered TUI dashboard.
 - `src/utils/`: Shared utilities (auth, redaction, config loading).
+- `src/types/`: Core type definitions.
+- `src/e2e-tests/`: End-to-end test suite.
 - `.keystone/workflows/`: Your YAML workflow definitions.
 
 ---
