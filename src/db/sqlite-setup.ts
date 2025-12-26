@@ -1,3 +1,5 @@
+import { Database } from 'bun:sqlite';
+import { existsSync } from 'node:fs';
 import { ConsoleLogger, type Logger } from '../utils/logger.ts';
 
 export function setupSqlite(logger: Logger = new ConsoleLogger()) {
@@ -5,9 +7,6 @@ export function setupSqlite(logger: Logger = new ConsoleLogger()) {
   // We need to try to load a custom one (e.g. from Homebrew) if on macOS
   if (process.platform === 'darwin') {
     try {
-      const { Database } = require('bun:sqlite');
-      const { existsSync } = require('node:fs');
-
       // Common Homebrew paths for SQLite
       const paths = [
         '/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib',

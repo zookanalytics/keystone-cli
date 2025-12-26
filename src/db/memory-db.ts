@@ -1,4 +1,4 @@
-import type { Database } from 'bun:sqlite';
+import { Database } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -24,7 +24,6 @@ export class MemoryDb {
       cached.refCount++;
       this.db = cached.db;
     } else {
-      const { Database } = require('bun:sqlite');
       const dir = dirname(dbPath);
       if (!existsSync(dir)) {
         mkdirSync(dir, { recursive: true });
