@@ -46,13 +46,46 @@ describe('SafeSandbox', () => {
       info: (_msg: string) => {},
     };
 
-    await SafeSandbox.execute('console.log("hello"); console.warn("warning");', {}, {
-      useProcessIsolation: false,
-      logger,
-    });
+    await SafeSandbox.execute(
+      'console.log("hello"); console.warn("warning");',
+      {},
+      {
+        useProcessIsolation: false,
+        logger,
+      }
+    );
 
     expect(logs).toContain('hello');
     expect(logs).toContain('WARN: warning');
+  });
+
+  it('should handle all logger console methods', async () => {
+    const logs: string[] = [];
+    const logger = {
+      log: (msg: string) => logs.push(msg),
+      error: (_msg: string) => {},
+      warn: (_msg: string) => {},
+      info: (_msg: string) => {},
+      debug: (_msg: string) => {},
+    };
+
+    await SafeSandbox.execute(
+      'console.error("e"); console.info("i"); console.debug("d");',
+      {},
+      {
+        useProcessIsolation: false,
+        logger,
+      }
+    );
+
+    expect(logs).toContain('ERROR: e');
+    expect(logs).toContain('INFO: i');
+    expect(logs).toContain('DEBUG: d');
+  });
+
+  it('should not crash if logger is missing', async () => {
+    // Should not throw
+    await SafeSandbox.execute('console.log("no-op")', {}, { useProcessIsolation: false });
   });
 
   it('should show warning only once when using vm mode', async () => {

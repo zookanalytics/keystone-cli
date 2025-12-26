@@ -84,11 +84,11 @@ export class MCPManager {
 
       let client: MCPClient;
       try {
-          if (config.type === 'remote') {
-            if (!config.url) throw new Error('Remote MCP server missing URL');
+        if (config.type === 'remote') {
+          if (!config.url) throw new Error('Remote MCP server missing URL');
 
-            // SSRF Protection: Validate URL before connecting
-            await validateRemoteUrl(config.url);
+          // SSRF Protection: Validate URL before connecting
+          await validateRemoteUrl(config.url);
 
           const headers = { ...(config.headers || {}) };
 

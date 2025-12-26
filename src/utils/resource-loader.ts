@@ -8,10 +8,6 @@ const EMBEDDED_ASSETS = (() => {
   try {
     return bundleAssets();
   } catch (e) {
-    console.warn(
-      'ResourceLoader: bundleAssets() failed to load embedded assets. Falling back to local filesystem.',
-      e instanceof Error ? e.message : String(e)
-    );
     return {};
   }
 })();

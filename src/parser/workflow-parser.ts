@@ -69,7 +69,7 @@ export class WorkflowParser {
       record.auto_heal = record.autoHeal;
     }
     if ('autoHeal' in record) {
-      delete record.autoHeal;
+      record.autoHeal = undefined;
     }
 
     for (const child of Object.values(record)) {

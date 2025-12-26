@@ -412,6 +412,7 @@ Keystone supports several specialized step types:
   - `handoff`: Optional engine tool definition that lets the LLM delegate work to an allowlisted external CLI with structured inputs.
 - `request`: Make HTTP requests (GET, POST, etc.).
   - `allowInsecure`: Boolean (default `false`). If `true`, skips SSRF protections and allows non-HTTPS/local URLs.
+  - Cross-origin redirects are blocked for non-GET/HEAD requests unless `allowInsecure: true`; on cross-origin redirects, non-essential headers are stripped.
 - `file`: Read, write, or append to files.
   - `allowOutsideCwd`: Boolean (default `false`). Set `true` to allow reading/writing files outside of the current working directory.
 - `human`: Pause execution for manual confirmation or text input.
@@ -475,7 +476,7 @@ All steps support common features:
 - `transform`: Post-process output using expressions.
 - `learn`: Auto-index for few-shot.
 - `reflexion`: Self-correction loop.
-- `auto_heal`: LLM-powered automatic error recovery.
+- `auto_heal`: LLM-powered automatic error recovery (alias: `autoHeal`).
 - `inputSchema` / `outputSchema`: JSON Schema validation.
 - `outputRetries`: Max retries for output validation failures.
 - `repairStrategy`: Strategy for output repair (`reask`, `repair`, `hybrid`).
@@ -908,6 +909,8 @@ In these examples, the agent will have access to all tools provided by the MCP s
 
 ---
 
+Input keys passed via `-i key=val` must be alphanumeric/underscore and cannot be `__proto__`, `constructor`, or `prototype`.
+
 ### Dry Run
 `keystone run --dry-run` prints shell commands without executing them and skips non-shell steps (including human prompts). Outputs from skipped steps are empty, so conditional branches may differ from a real run.
 
@@ -933,6 +936,9 @@ Expressions `${{ }}` are evaluated using a safe AST parser (`jsep`) which:
 
 ### Script Sandboxing
 Script steps run in a separate subprocess by default. This reduces risk but is **not a security boundary** for malicious code. Script steps are disabled by default; set `allowInsecure: true` to run them.
+
+### HTTP Requests
+Request steps enforce SSRF protections and require HTTPS by default. Cross-origin redirects are blocked for non-GET/HEAD requests unless `allowInsecure: true`, and non-essential headers are stripped on cross-origin redirects.
 
 ---
 

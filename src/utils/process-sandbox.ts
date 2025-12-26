@@ -200,7 +200,7 @@ globalThis.console = __keystone_console;
             'ProcessSandbox: memoryLimit is not supported on Windows; running without a limit.'
           );
         } else {
-          const limitKb = Math.max(1, Math.floor(options.memoryLimit as number / 1024));
+          const limitKb = Math.max(1, Math.floor((options.memoryLimit as number) / 1024));
           const escapedPath = scriptPath.replace(/'/g, "'\\''");
           command = 'sh';
           args = ['-c', `ulimit -v ${limitKb}; exec bun run '${escapedPath}'`];
@@ -236,7 +236,7 @@ globalThis.console = __keystone_console;
           if (line.startsWith('__SANDBOX_LOG__:')) {
             options.logger?.log(line.slice(16));
           } else if (line) {
-            stdout += line + '\n';
+            stdout += `${line}\n`;
           }
         }
       });

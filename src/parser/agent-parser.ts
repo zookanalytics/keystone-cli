@@ -1,8 +1,8 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import yaml from 'js-yaml';
-import { type Agent, AgentSchema } from './schema';
 import { ResourceLoader } from '../utils/resource-loader';
+import { type Agent, AgentSchema } from './schema';
 
 export function parseAgent(filePath: string): Agent {
   const content = ResourceLoader.readFile(filePath);

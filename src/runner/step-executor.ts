@@ -601,7 +601,7 @@ async function readResponseTextWithLimit(
       text += decoder.decode();
       try {
         await reader.cancel();
-      } catch { }
+      } catch {}
       return { text, truncated: true };
     }
 
@@ -654,7 +654,7 @@ async function executeRequestStep(
 
     // Evaluate body
     let body: string | undefined;
-  if (step.body !== undefined) {
+    if (step.body !== undefined) {
       const evaluatedBody = ExpressionEvaluator.evaluateObject(step.body, context);
 
       const contentType = Object.entries(headers).find(
@@ -799,13 +799,15 @@ async function executeRequestStep(
       status: response.ok ? 'success' : 'failed',
       error: response.ok
         ? undefined
-        : `HTTP ${response.status}: ${response.statusText}${responseText
-          ? `\nResponse Body: ${responseText.substring(0, 500)}${responseText.length > 500 ? '...' : ''}${truncated ? ' [truncated]' : ''
-          }`
-          : truncated
-            ? '\nResponse Body: [truncated]'
-            : ''
-        }`,
+        : `HTTP ${response.status}: ${response.statusText}${
+            responseText
+              ? `\nResponse Body: ${responseText.substring(0, 500)}${responseText.length > 500 ? '...' : ''}${
+                  truncated ? ' [truncated]' : ''
+                }`
+              : truncated
+                ? '\nResponse Body: [truncated]'
+                : ''
+          }`,
     };
   } finally {
     clearTimeout(timeoutId);
@@ -839,10 +841,10 @@ async function executeHumanStep(
       output:
         step.inputType === 'confirm'
           ? answer === true ||
-          (typeof answer === 'string' &&
-            (answer.toLowerCase() === 'true' ||
-              answer.toLowerCase() === 'yes' ||
-              answer.toLowerCase() === 'y'))
+            (typeof answer === 'string' &&
+              (answer.toLowerCase() === 'true' ||
+                answer.toLowerCase() === 'yes' ||
+                answer.toLowerCase() === 'y'))
           : answer,
       status: 'success',
     };
@@ -976,7 +978,7 @@ async function executeScriptStep(
     if (!step.allowInsecure) {
       throw new Error(
         'Script execution is disabled by default because Bun uses an insecure VM sandbox. ' +
-        "Set 'allowInsecure: true' on the script step to run it anyway."
+          "Set 'allowInsecure: true' on the script step to run it anyway."
       );
     }
 
@@ -1050,7 +1052,7 @@ async function executeMemoryStep(
       const embedding = await adapter.embed(text, resolvedModel);
       const metadata = step.metadata
         ? // biome-ignore lint/suspicious/noExplicitAny: metadata typing
-        (ExpressionEvaluator.evaluateObject(step.metadata, context) as Record<string, any>)
+          (ExpressionEvaluator.evaluateObject(step.metadata, context) as Record<string, any>)
         : {};
 
       const id = await memoryDb.store(text, embedding, metadata);
