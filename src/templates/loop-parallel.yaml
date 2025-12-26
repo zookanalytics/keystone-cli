@@ -3,7 +3,7 @@ description: "Test the foreach race condition fix and .every() support"
 
 outputs:
   all_success: ${{ steps.process_items.items.every(s => s.status == 'success') }}
-  item_count: ${{ steps.process_items.outputs.length }}
+  item_count: ${{ steps.process_items.output.length }}
   first_output: ${{ steps.process_items.items[0].output }}
 
 steps:

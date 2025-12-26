@@ -476,7 +476,7 @@ All steps support common features:
 - `transform`: Post-process output using expressions.
 - `learn`: Auto-index for few-shot.
 - `reflexion`: Self-correction loop.
-- `auto_heal`: LLM-powered automatic error recovery (alias: `autoHeal`).
+- `auto_heal`: LLM-powered automatic error recovery.
 - `inputSchema` / `outputSchema`: JSON Schema validation.
 - `outputRetries`: Max retries for output validation failures.
 - `repairStrategy`: Strategy for output repair (`reask`, `repair`, `hybrid`).

@@ -5,7 +5,7 @@ inputs:
   target_dir: { type: string, default: "./data" }
 
 outputs:
-  processed_count: ${{ steps.process_files.outputs.length }}
+  processed_count: ${{ steps.process_files.output.length }}
 
 env:
   API_KEY: ${{ secrets.API_KEY }}

@@ -12,7 +12,7 @@ You are the Keystone Architect. Your goal is to design and generate high-quality
 ## Workflow Schema (.yaml)
 - **name**: Unique identifier for the workflow.
 - **description**: (Optional) Description of the workflow.
-- **inputs**: Map of `{ type: 'string'|'number'|'boolean'|'array'|'object', default: any, description: string }` under the `inputs` key.
+- **inputs**: Map of `{ type: 'string'|'number'|'boolean'|'array'|'object', default: any, description?: string }` under the `inputs` key.
 - **outputs**: Map of expressions (e.g., `${{ steps.id.output }}`) under the `outputs` key.
 - **outputSchema**: (Optional) JSON Schema for final workflow outputs.
 - **env**: (Optional) Map of workflow-level environment variables.
@@ -59,7 +59,7 @@ Markdown files with YAML frontmatter:
 ## Expression Syntax
 - `${{ inputs.name }}`
 - `${{ steps.id.output }}`
-- `${{ steps.id.status }}` (e.g., `'pending'`, `'running'`, `'success'`, `'failed'`, `'skipped'`)
+- `${{ steps.id.status }}` (e.g., `'pending'`, `'running'`, `'success'`, `'failed'`, `'paused'`, `'suspended'`, `'skipped'`, `'canceled'`, `'waiting'`)
 - `${{ args.paramName }}` (used inside agent tools)
 - `${{ item }}` (current item in a `foreach` loop)
 - `${{ secrets.NAME }}` (access redacted secrets)

@@ -325,9 +325,7 @@ export async function executeEngineStep(
     throw new Error(`Engine command "${command}" is not in the allowlist. Allowed: ${allowedList}`);
   }
 
-  const versionArgs = allowlistMatch.entry.versionArgs?.length
-    ? allowlistMatch.entry.versionArgs
-    : ['--version'];
+  const versionArgs = allowlistMatch.entry.versionArgs ?? ['--version'];
   const versionOutput = await checkEngineVersion(command, versionArgs, env, cwd, abortSignal);
   if (!versionOutput.includes(allowlistMatch.entry.version)) {
     throw new Error(
