@@ -19,6 +19,12 @@ interface QueuedRequest {
   timestamp: number;
 }
 
+/** Default maximum queue size to prevent unbounded memory growth */
+const DEFAULT_MAX_QUEUE_SIZE = 1000;
+
+/** Default resource pool limit */
+const DEFAULT_POOL_LIMIT = 10;
+
 export class ResourcePoolManager {
   private pools = new Map<
     string,
@@ -31,12 +37,14 @@ export class ResourcePoolManager {
     }
   >();
   private globalLimit: number;
+  private maxQueueSize: number;
 
   constructor(
     private logger: Logger,
-    options: { defaultLimit?: number; pools?: Record<string, number> } = {}
+    options: { defaultLimit?: number; maxQueueSize?: number; pools?: Record<string, number> } = {}
   ) {
-    this.globalLimit = options.defaultLimit || 10;
+    this.globalLimit = options.defaultLimit || DEFAULT_POOL_LIMIT;
+    this.maxQueueSize = options.maxQueueSize || DEFAULT_MAX_QUEUE_SIZE;
     if (options.pools) {
       for (const [name, limit] of Object.entries(options.pools)) {
         this.pools.set(name, { limit, active: 0, queue: [], totalAcquired: 0, totalWaitTimeMs: 0 });
@@ -47,10 +55,15 @@ export class ResourcePoolManager {
   /**
    * Acquire a resource from a pool.
    * If the pool doesn't exist, it uses the global limit.
+   * 
+   * @param poolName - Name of the pool to acquire from
+   * @param options.priority - Higher priority requests are processed first (default: 0)
+   * @param options.signal - AbortSignal for cancellation
+   * @param options.timeout - Maximum time to wait for a slot (ms), rejects with timeout error if exceeded
    */
   async acquire(
     poolName: string,
-    options: { priority?: number; signal?: AbortSignal } = {}
+    options: { priority?: number; signal?: AbortSignal; timeout?: number } = {}
   ): Promise<ReleaseFunction> {
     let pool = this.pools.get(poolName);
     if (!pool) {
@@ -69,6 +82,14 @@ export class ResourcePoolManager {
       pool.active++;
       pool.totalAcquired++;
       return this.createReleaseFn(poolName);
+    }
+
+    // Check queue size limit
+    if (pool.queue.length >= this.maxQueueSize) {
+      throw new Error(
+        `Resource pool "${poolName}" queue is full (${this.maxQueueSize}). ` +
+        `Consider increasing concurrency limits or reducing parallel work.`
+      );
     }
 
     // Queue the request
@@ -90,9 +111,26 @@ export class ResourcePoolManager {
         return a.timestamp - b.timestamp;
       });
 
+      // Handle timeout
+      let timeoutId: Timer | undefined;
+      if (options.timeout && options.timeout > 0) {
+        timeoutId = setTimeout(() => {
+          const index = poolRef.queue.indexOf(request);
+          if (index !== -1) {
+            poolRef.queue.splice(index, 1);
+            reject(new Error(`Resource pool "${poolName}" acquire timeout after ${options.timeout}ms`));
+          }
+        }, options.timeout);
+      }
+
       // Handle abort signal
+      const cleanup = () => {
+        if (timeoutId) clearTimeout(timeoutId);
+      };
+
       if (options.signal) {
         const onAbort = () => {
+          cleanup();
           const index = poolRef.queue.indexOf(request);
           if (index !== -1) {
             poolRef.queue.splice(index, 1);
@@ -106,11 +144,26 @@ export class ResourcePoolManager {
         const originalReject = reject;
 
         request.resolve = (release) => {
+          cleanup();
           options.signal?.removeEventListener('abort', onAbort);
           originalResolve(release);
         };
         request.reject = (err) => {
+          cleanup();
           options.signal?.removeEventListener('abort', onAbort);
+          originalReject(err);
+        };
+      } else {
+        // Still need to wrap for timeout cleanup
+        const originalResolve = resolve;
+        const originalReject = reject;
+
+        request.resolve = (release) => {
+          cleanup();
+          originalResolve(release);
+        };
+        request.reject = (err) => {
+          cleanup();
           originalReject(err);
         };
       }

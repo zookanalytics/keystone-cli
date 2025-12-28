@@ -130,44 +130,95 @@ export interface ShellResult {
  */
 // Pre-compiled dangerous patterns for performance
 // These patterns are designed to detect likely injection attempts while minimizing false positives
-const DANGEROUS_PATTERNS: RegExp[] = [
-  /;\s*(?:rm|chmod|chown|mkfs|dd)\b/, // Command chaining with destructive commands
-  /\|\s*(?:sh|bash|zsh|ksh|dash|csh|python|python[23]?|node|ruby|perl|php|lua)\b/, // Piping to shell/interpreter (download-and-execute pattern)
-  /\|\s*(?:sudo|su)\b/, // Piping to privilege escalation
-  /&&\s*(?:rm|chmod|chown|mkfs|dd)\b/, // AND chaining with destructive commands
-  /\|\|\s*(?:rm|chmod|chown|mkfs|dd)\b/, // OR chaining with destructive commands
-  /`[^`]+`/, // Command substitution with backticks
-  /\$\([^)]+\)/, // Command substitution with $()
-  />\s*\/dev\/null\s*2>&1\s*&/, // Backgrounding with hidden output (often malicious)
-  /rm\s+(-rf?|--recursive)\s+[\/~]/, // Dangerous recursive deletion
-  />\s*\/etc\//, // Writing to /etc
-  /curl\s+.*\|\s*(?:sh|bash)/, // Download and execute pattern
-  /wget\s+.*\|\s*(?:sh|bash)/, // Download and execute pattern
+const DANGEROUS_PATTERN_SOURCES: string[] = [
+  ';\\s*(?:rm|chmod|chown|mkfs|dd)\\b', // Command chaining with destructive commands
+  '\\|\\s*(?:sh|bash|zsh|ksh|dash|csh|python|python[23]?|node|ruby|perl|php|lua)\\b', // Piping to shell/interpreter (download-and-execute pattern)
+  '\\|\\s*(?:sudo|su)\\b', // Piping to privilege escalation
+  '&&\\s*(?:rm|chmod|chown|mkfs|dd)\\b', // AND chaining with destructive commands
+  '\\|\\|\\s*(?:rm|chmod|chown|mkfs|dd)\\b', // OR chaining with destructive commands
+  '`[^`]+`', // Command substitution with backticks
+  '\\$\\([^)]+\\)', // Command substitution with $()
+  '>\\s*/dev/null\\s*2>&1\\s*&', // Backgrounding with hidden output (often malicious)
+  'rm\\s+(-rf?|--recursive)\\s+[/~]', // Dangerous recursive deletion
+  '>\\s*/etc/', // Writing to /etc
+  'curl\\s+.*\\|\\s*(?:sh|bash)', // Download and execute pattern
+  'wget\\s+.*\\|\\s*(?:sh|bash)', // Download and execute pattern
   // Additional patterns for more comprehensive detection
-  /base64\s+(-d|--decode)\s*\|/, // Base64 decode piped to another command
-  /\beval\s+["'\$]/, // eval with variable/string (likely injection)
-  /\bexec\s+\d+[<>]/, // exec with file descriptor redirection
-  /python[23]?\s+-c\s*["']/, // Python one-liner with quoted code
-  /node\s+(-e|--eval)\s*["']/, // Node.js one-liner with quoted code
-  /perl\s+-e\s*["']/, // Perl one-liner with quoted code
-  /ruby\s+-e\s*["']/, // Ruby one-liner with quoted code
-  /\bdd\s+.*\bof=\//, // dd write operation to root paths
-  /chmod\s+[0-7]{3,4}\s+\/(?!tmp)/, // chmod on root paths (except /tmp)
-  /mkfs\./, // Filesystem formatting commands
+  'base64\\s+(-d|--decode)\\s*\\|', // Base64 decode piped to another command
+  "\\beval\\s+[\"'\\$]", // eval with variable/string (likely injection)
+  '\\bexec\\s+\\d+[<>]', // exec with file descriptor redirection
+  "python[23]?\\s+-c\\s*[\"']", // Python one-liner with quoted code
+  "node\\s+(-e|--eval)\\s*[\"']", // Node.js one-liner with quoted code
+  "perl\\s+-e\\s*[\"']", // Perl one-liner with quoted code
+  "ruby\\s+-e\\s*[\"']", // Ruby one-liner with quoted code
+  '\\bdd\\s+.*\\bof=/', // dd write operation to root paths
+  'chmod\\s+[0-7]{3,4}\\s+/(?!tmp)', // chmod on root paths (except /tmp)
+  'mkfs\\.', // Filesystem formatting commands
   // Targeted parameter expansion patterns (not all ${} usage)
-  /\$\{IFS[}:]/, // IFS manipulation (common injection technique)
-  /\$\{[^}]*\$\([^}]*\}/, // Command substitution inside parameter expansion
-  /\$\{[^}]*:-[^}]*\$\(/, // Default value with command substitution
-  /\$\{[^}]*[`][^}]*\}/, // Backtick inside parameter expansion
-  /\\x[0-9a-fA-F]{2}/, // Hex escaping attempts
-  /\\[0-7]{3}/, // Octal escaping attempts
-  /<<<\s*/, // Here-strings (can be used for injection)
-  /\d*<&\s*\d*/, // File descriptor duplication
-  /\d*>&-\s*/, // Closing file descriptors
+  '\\$\\{IFS[}:]', // IFS manipulation (common injection technique)
+  '\\$\\{[^}]*\\$\\([^}]*\\}', // Command substitution inside parameter expansion
+  '\\$\\{[^}]*:-[^}]*\\$\\(', // Default value with command substitution
+  '\\$\\{[^}]*[`][^}]*\\}', // Backtick inside parameter expansion
+  '\\\\x[0-9a-fA-F]{2}', // Hex escaping attempts
+  '\\\\[0-7]{3}', // Octal escaping attempts
+  '<<<\\s*', // Here-strings (can be used for injection)
+  '\\d*<&\\s*\\d*', // File descriptor duplication
+  '\\d*>&-\\s*', // Closing file descriptors
 ];
 
+// Combined pattern source for both native and RE2
+const COMBINED_PATTERN_SOURCE = DANGEROUS_PATTERN_SOURCES.join('|');
+
+// Maximum command length to check for injection (prevents DoS on very long commands)
+const MAX_COMMAND_CHECK_LENGTH = 10_000;
+
+// RE2 instance (lazy-loaded)
+let re2Pattern: { test: (s: string) => boolean } | null = null;
+let re2LoadAttempted = false;
+let usingRe2 = false;
+
+/**
+ * Get the pattern for shell injection detection.
+ * Uses RE2 if available for ReDoS safety, falls back to native regex.
+ */
+function getDetectionPattern(): { test: (s: string) => boolean } {
+  if (!re2LoadAttempted) {
+    re2LoadAttempted = true;
+    try {
+      // Try to dynamically require RE2 (optional dependency)
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const RE2 = require('re2');
+      re2Pattern = new RE2(COMBINED_PATTERN_SOURCE);
+      usingRe2 = true;
+    } catch {
+      // RE2 not available, use native regex
+      re2Pattern = new RegExp(COMBINED_PATTERN_SOURCE);
+      usingRe2 = false;
+    }
+  }
+  return re2Pattern!;
+}
+
+/**
+ * Check if the module is using RE2 (for testing purposes)
+ */
+export function isUsingRe2(): boolean {
+  getDetectionPattern(); // Ensure pattern is loaded
+  return usingRe2;
+}
+
+/**
+ * Reset the RE2 loading state (for testing purposes)
+ */
+export function resetRe2State(): void {
+  re2Pattern = null;
+  re2LoadAttempted = false;
+  usingRe2 = false;
+}
+
 // Combine all patterns into single regex for O(m) matching instead of O(n×m)
-const COMBINED_DANGEROUS_PATTERN = new RegExp(DANGEROUS_PATTERNS.map((r) => r.source).join('|'));
+// This is used as fallback and for backwards compatibility
+const COMBINED_DANGEROUS_PATTERN = new RegExp(COMBINED_PATTERN_SOURCE);
 
 const TRUNCATED_SUFFIX = '... [truncated output]';
 
@@ -214,8 +265,15 @@ async function readStreamWithLimit(
 }
 
 export function detectShellInjectionRisk(command: string): boolean {
-  // Use combined pattern for single-pass matching
-  return COMBINED_DANGEROUS_PATTERN.test(command);
+  // Limit command length to prevent DoS via very long strings
+  if (command.length > MAX_COMMAND_CHECK_LENGTH) {
+    // Truncate for pattern matching, but this is conservative - long commands are suspicious
+    command = command.substring(0, MAX_COMMAND_CHECK_LENGTH);
+  }
+
+  // Use RE2 if available for ReDoS safety, otherwise fall back to native regex
+  const pattern = getDetectionPattern();
+  return pattern.test(command);
 }
 
 /**

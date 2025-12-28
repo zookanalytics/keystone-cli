@@ -356,9 +356,13 @@ export class WorkflowDb {
   /**
    * Retry wrapper for SQLite operations that may encounter SQLITE_BUSY errors
    * during high concurrency scenarios (e.g., foreach loops)
+   * 
+   * Uses exponential backoff with jitter to reduce contention.
+   * Default maxRetries is 20 to handle high-contention scenarios.
    */
-  private async withRetry<T>(operation: () => T, maxRetries = 10): Promise<T> {
+  private async withRetry<T>(operation: () => T, maxRetries = 20): Promise<T> {
     let lastError: Error | undefined;
+    const WARN_THRESHOLD = 5;
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
@@ -367,8 +371,17 @@ export class WorkflowDb {
         // Check if this is a SQLITE_BUSY error
         if (this.isSQLiteBusyError(error)) {
           lastError = error instanceof Error ? error : new Error(String(error));
-          // Exponential backoff with jitter: 20ms base
-          const delayMs = 20 * 1.5 ** attempt + Math.random() * 20;
+
+          // Log warning after threshold to help diagnose contention issues
+          if (attempt === WARN_THRESHOLD) {
+            console.warn(
+              `[WorkflowDb] SQLite busy after ${WARN_THRESHOLD} retries. ` +
+              `High contention detected - consider reducing concurrency.`
+            );
+          }
+
+          // Exponential backoff with jitter: 20ms base, max ~1s
+          const delayMs = Math.min(1000, 20 * 1.5 ** attempt + Math.random() * 20);
           await Bun.sleep(delayMs);
           continue;
         }

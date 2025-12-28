@@ -96,10 +96,37 @@ export class ExpressionEvaluator {
   private static readonly MAX_ARROW_DEPTH = 3;
   private static strictMode = false;
   private static jsepCache = new Map<string, ASTNode>();
-  private static readonly MAX_CACHE_SIZE = 1000;
+  private static maxCacheSize = 1000;
 
+  /**
+   * Set strict mode for template validation
+   */
   static setStrictMode(strict: boolean): void {
     ExpressionEvaluator.strictMode = strict;
+  }
+
+  /**
+   * Set the maximum cache size for parsed expressions.
+   * Default is 1000, which is suitable for most workflows.
+   * Increase for workflows with many unique expressions.
+   * 
+   * @param size Maximum number of parsed expressions to cache
+   */
+  static setCacheSize(size: number): void {
+    if (size < 0) throw new Error('Cache size must be non-negative');
+    ExpressionEvaluator.maxCacheSize = size;
+    // Prune cache if it's now too large
+    while (ExpressionEvaluator.jsepCache.size > size) {
+      const firstKey = ExpressionEvaluator.jsepCache.keys().next().value;
+      if (firstKey !== undefined) ExpressionEvaluator.jsepCache.delete(firstKey);
+    }
+  }
+
+  /**
+   * Clear the expression cache. Useful for testing or memory management.
+   */
+  static clearCache(): void {
+    ExpressionEvaluator.jsepCache.clear();
   }
 
   private static validateTemplate(template: string): void {
@@ -284,10 +311,33 @@ export class ExpressionEvaluator {
    * Evaluate a string and ensure the result is a string.
    * Objects and arrays are stringified to JSON.
    * null and undefined return an empty string.
+   * 
+   * @throws TypeError if template is an object with a custom toString() method
    */
   static evaluateString(template: unknown, context: ExpressionContext): string {
     if (typeof template !== 'string') {
       if (template === null || template === undefined) return '';
+
+      // Security: Reject objects with custom toString() to prevent code execution
+      // during string conversion. Only allow primitives.
+      if (typeof template === 'object') {
+        // Check if this is an object with a custom toString (not Object.prototype.toString)
+        const proto = Object.getPrototypeOf(template);
+        if (proto !== null && proto !== Object.prototype && proto !== Array.prototype) {
+          // Has custom prototype - could have malicious toString
+          if (typeof (template as { toString?: unknown }).toString === 'function' &&
+            (template as { toString: () => string }).toString !== Object.prototype.toString) {
+            throw new TypeError(
+              'Security: Cannot evaluate object with custom toString() method. ' +
+              'Pass a string template instead.'
+            );
+          }
+        }
+        // Safe to serialize as JSON
+        return JSON.stringify(template, null, 2);
+      }
+
+      // Primitives are safe to convert
       return String(template);
     }
     const result = ExpressionEvaluator.evaluate(template, context);
@@ -313,7 +363,7 @@ export class ExpressionEvaluator {
       if (!ast) {
         ast = jsep(expr);
         // Manage cache size
-        if (ExpressionEvaluator.jsepCache.size >= ExpressionEvaluator.MAX_CACHE_SIZE) {
+        if (ExpressionEvaluator.jsepCache.size >= ExpressionEvaluator.maxCacheSize) {
           const firstKey = ExpressionEvaluator.jsepCache.keys().next().value;
           if (firstKey !== undefined) ExpressionEvaluator.jsepCache.delete(firstKey);
         }

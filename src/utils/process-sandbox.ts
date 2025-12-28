@@ -7,11 +7,17 @@
 
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FILE_MODES, TIMEOUTS } from './constants.ts';
 import type { Logger } from './logger.ts';
+
+/** Prefix for sandbox temp directories - used for cleanup detection */
+const SANDBOX_TEMP_PREFIX = 'keystone-sandbox-';
+
+/** Max age for orphaned temp directories before cleanup (1 hour) */
+const ORPHAN_TEMP_MAX_AGE_MS = 60 * 60 * 1000;
 
 export interface ProcessSandboxOptions {
   /** Timeout in milliseconds (default: TIMEOUTS.DEFAULT_SCRIPT_TIMEOUT_MS) */
@@ -367,5 +373,51 @@ globalThis.console = __keystone_console;
         });
       });
     });
+  }
+
+  /**
+   * Clean up orphaned temp directories from previous sandbox executions.
+   * Should be called on startup to remove directories left behind by
+   * SIGKILL or process crashes.
+   * 
+   * @param logger Optional logger for cleanup messages
+   * @returns Number of directories cleaned up
+   */
+  static async cleanupOrphanedTempDirs(logger?: Logger): Promise<number> {
+    let cleaned = 0;
+    const tempBase = tmpdir();
+    const now = Date.now();
+
+    try {
+      const entries = await readdir(tempBase, { withFileTypes: true });
+
+      for (const entry of entries) {
+        if (!entry.isDirectory() || !entry.name.startsWith(SANDBOX_TEMP_PREFIX)) {
+          continue;
+        }
+
+        const dirPath = join(tempBase, entry.name);
+        try {
+          const stats = await stat(dirPath);
+          const age = now - stats.mtimeMs;
+
+          if (age > ORPHAN_TEMP_MAX_AGE_MS) {
+            await rm(dirPath, { recursive: true, force: true });
+            cleaned++;
+            logger?.debug?.(`Cleaned up orphaned sandbox temp dir: ${entry.name}`);
+          }
+        } catch {
+          // Ignore errors for individual directories (may already be deleted)
+        }
+      }
+
+      if (cleaned > 0) {
+        logger?.log(`Cleaned up ${cleaned} orphaned sandbox temp director${cleaned === 1 ? 'y' : 'ies'}`);
+      }
+    } catch {
+      // Ignore errors reading temp directory
+    }
+
+    return cleaned;
   }
 }

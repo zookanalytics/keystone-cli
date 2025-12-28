@@ -20,19 +20,16 @@ import { executeHumanStep, executeSleepStep } from './executors/human-executor.t
 import { executeScriptStep } from './executors/script-executor.ts';
 import { executeMemoryStep } from './executors/memory-executor.ts';
 import { executeJoinStep } from './executors/join-executor.ts';
-export {
-  type StepResult,
-  type StepExecutorOptions,
-  WorkflowSuspendedError,
-  WorkflowWaitingError
-} from './executors/types.ts';
-
 import {
   type StepResult,
   type StepExecutorOptions,
   WorkflowSuspendedError,
   WorkflowWaitingError,
 } from './executors/types.ts';
+
+// Re-export for external consumers
+export type { StepResult, StepExecutorOptions };
+export { WorkflowSuspendedError, WorkflowWaitingError };
 
 /**
  * Main dispatcher for workflow steps
