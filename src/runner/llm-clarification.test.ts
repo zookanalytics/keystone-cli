@@ -36,6 +36,7 @@ describe('LLM Clarification', () => {
       mcp_servers: {},
       engines: { allowlist: {}, denylist: [] },
       concurrency: { default: 10, pools: { llm: 2, shell: 5, http: 10, engine: 2 } },
+      expression: { strict: false },
     } as unknown as Config);
   });
 

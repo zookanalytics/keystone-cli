@@ -21,6 +21,7 @@ import scaffoldPlanWorkflow from './templates/scaffold-plan.yaml' with { type: '
 
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { WorkflowDb, type WorkflowRun } from './db/workflow-db.ts';
+import type { Workflow } from './parser/schema.ts';
 import type { TestDefinition } from './parser/test-schema.ts';
 import { WorkflowParser } from './parser/workflow-parser.ts';
 import { WorkflowSuspendedError, WorkflowWaitingError } from './runner/step-executor.ts';
@@ -113,6 +114,116 @@ const parseInputs = (pairs?: string[]): Record<string, unknown> => {
   return inputs;
 };
 
+const validateWorkflows = async (
+  pathArg: string | undefined,
+  options: { strict?: boolean; explain?: boolean }
+): Promise<void> => {
+  const path = pathArg || '.keystone/workflows/';
+
+  try {
+    let files: string[] = [];
+    if (existsSync(path) && (path.endsWith('.yaml') || path.endsWith('.yml'))) {
+      files = [path];
+    } else if (existsSync(path)) {
+      const glob = new Bun.Glob('**/*.{yaml,yml}');
+      for await (const file of glob.scan(path)) {
+        files.push(join(path, file));
+      }
+    } else {
+      try {
+        const resolved = WorkflowRegistry.resolvePath(path);
+        files = [resolved];
+      } catch {
+        console.error(`✗ Path not found: ${path}`);
+        process.exit(1);
+      }
+    }
+
+    if (files.length === 0) {
+      console.log('⊘ No workflow files found to validate.');
+      return;
+    }
+
+    console.log(`🔍 Validating ${files.length} workflow(s)...\n`);
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const file of files) {
+      try {
+        const workflow = WorkflowParser.loadWorkflow(file);
+        if (options.strict) {
+          const source = readFileSync(file, 'utf-8');
+          WorkflowParser.validateStrict(workflow, source);
+        }
+        console.log(`  ✓ ${file.padEnd(40)} ${workflow.name} (${workflow.steps.length} steps)`);
+        successCount++;
+      } catch (error) {
+        if (options.explain) {
+          const { formatYamlError, renderError } = await import('./utils/error-renderer.ts');
+          try {
+            const source = readFileSync(file, 'utf-8');
+            const formatted = formatYamlError(error as Error, source, file);
+            console.error(renderError({ message: formatted.summary, source, filePath: file }));
+          } catch {
+            console.error(
+              renderError({
+                message: error instanceof Error ? error.message : String(error),
+                filePath: file,
+              })
+            );
+          }
+        } else {
+          console.error(
+            `  ✗ ${file.padEnd(40)} ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
+        failCount++;
+      }
+    }
+
+    console.log(`\nSummary: ${successCount} passed, ${failCount} failed.`);
+    if (failCount > 0) {
+      process.exit(1);
+    }
+  } catch (error) {
+    console.error('✗ Validation failed:', error instanceof Error ? error.message : error);
+    process.exit(1);
+  }
+};
+
+const collectDownstreamSteps = (workflow: Workflow, fromStepId: string): string[] => {
+  const stepIds = new Set(workflow.steps.map((step) => step.id));
+  if (!stepIds.has(fromStepId)) {
+    throw new Error(`Step not found in workflow: ${fromStepId}`);
+  }
+
+  const dependents = new Map<string, Set<string>>();
+  for (const step of workflow.steps) {
+    for (const dep of step.needs) {
+      if (!dependents.has(dep)) {
+        dependents.set(dep, new Set());
+      }
+      dependents.get(dep)?.add(step.id);
+    }
+  }
+
+  const queue = [fromStepId];
+  const result = new Set<string>([fromStepId]);
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) continue;
+    for (const next of dependents.get(current) || []) {
+      if (!result.has(next)) {
+        result.add(next);
+        queue.push(next);
+      }
+    }
+  }
+
+  return Array.from(result);
+};
+
 // ===== keystone init =====
 program
   .command('init')
@@ -174,6 +285,9 @@ model_mappings:
 
 storage:
   retention_days: 30
+
+expression:
+  strict: false
 `;
       writeFileSync(configPath, defaultConfig);
       console.log(`✓ Created ${configPath}`);
@@ -278,81 +392,18 @@ program
   .option('--strict', 'Enable strict validation (schemas, enums)')
   .option('--explain', 'Show detailed error context with suggestions')
   .action(async (pathArg, options) => {
-    const path = pathArg || '.keystone/workflows/';
+    await validateWorkflows(pathArg, options);
+  });
 
-    try {
-      let files: string[] = [];
-      if (existsSync(path) && (path.endsWith('.yaml') || path.endsWith('.yml'))) {
-        files = [path];
-      } else if (existsSync(path)) {
-        const glob = new Bun.Glob('**/*.{yaml,yml}');
-        for await (const file of glob.scan(path)) {
-          files.push(join(path, file));
-        }
-      } else {
-        try {
-          const resolved = WorkflowRegistry.resolvePath(path);
-          files = [resolved];
-        } catch {
-          console.error(`✗ Path not found: ${path}`);
-          process.exit(1);
-        }
-      }
-
-      if (files.length === 0) {
-        console.log('⊘ No workflow files found to validate.');
-        return;
-      }
-
-      console.log(`🔍 Validating ${files.length} workflow(s)...\n`);
-
-      let successCount = 0;
-      let failCount = 0;
-
-      for (const file of files) {
-        try {
-          const workflow = WorkflowParser.loadWorkflow(file);
-          if (options.strict) {
-            const source = readFileSync(file, 'utf-8');
-            WorkflowParser.validateStrict(workflow, source);
-          }
-          console.log(`  ✓ ${file.padEnd(40)} ${workflow.name} (${workflow.steps.length} steps)`);
-          successCount++;
-        } catch (error) {
-          if (options.explain) {
-            const { readFileSync } = await import('node:fs');
-            const { formatYamlError, renderError, formatError } = await import(
-              './utils/error-renderer.ts'
-            );
-            try {
-              const source = readFileSync(file, 'utf-8');
-              const formatted = formatYamlError(error as Error, source, file);
-              console.error(renderError({ message: formatted.summary, source, filePath: file }));
-            } catch {
-              console.error(
-                renderError({
-                  message: error instanceof Error ? error.message : String(error),
-                  filePath: file,
-                })
-              );
-            }
-          } else {
-            console.error(
-              `  ✗ ${file.padEnd(40)} ${error instanceof Error ? error.message : String(error)}`
-            );
-          }
-          failCount++;
-        }
-      }
-
-      console.log(`\nSummary: ${successCount} passed, ${failCount} failed.`);
-      if (failCount > 0) {
-        process.exit(1);
-      }
-    } catch (error) {
-      console.error('✗ Validation failed:', error instanceof Error ? error.message : error);
-      process.exit(1);
-    }
+// ===== keystone lint =====
+program
+  .command('lint')
+  .description('Lint workflow files (alias of validate)')
+  .argument('[path]', 'Workflow file or directory to lint (default: .keystone/workflows/)')
+  .option('--strict', 'Enable strict validation (schemas, enums)')
+  .option('--explain', 'Show detailed error context with suggestions')
+  .action(async (pathArg, options) => {
+    await validateWorkflows(pathArg, options);
   });
 
 // ===== keystone graph =====
@@ -681,6 +732,86 @@ program
     } catch (error) {
       console.error('✗ Failed to resume workflow:', error instanceof Error ? error.message : error);
       process.exit(1);
+    }
+  });
+
+// ===== keystone rerun =====
+program
+  .command('rerun')
+  .description('Rerun a workflow from a specific step (invalidates downstream steps)')
+  .argument('<workflow>', 'Workflow name or path to workflow file')
+  .requiredOption('--from <step_id>', 'Step ID to rerun (downstream steps will be invalidated)')
+  .option('-r, --run <run_id>', 'Run ID to rerun (defaults to last run of the workflow)')
+  .option('-i, --input <key=value...>', 'Input values for rerun')
+  .action(async (workflowPathArg, options) => {
+    let db: WorkflowDb | undefined;
+    try {
+      const resolvedPath = WorkflowRegistry.resolvePath(workflowPathArg);
+      const workflow = WorkflowParser.loadWorkflow(resolvedPath);
+      const inputs = parseInputs(options.input);
+
+      db = new WorkflowDb();
+      const runId =
+        options.run ||
+        (await db.getLastRun(workflow.name))?.id ||
+        ((): never => {
+          throw new Error(`No runs found for workflow "${workflow.name}"`);
+        })();
+
+      const run = await db.getRun(runId);
+      if (!run) {
+        throw new Error(`Run not found: ${runId}`);
+      }
+
+      if (run.workflow_name !== workflow.name) {
+        console.warn(
+          `⚠️  Run ${runId} is for workflow "${run.workflow_name}", but you provided "${workflow.name}".`
+        );
+      }
+
+      if (run.status === 'running') {
+        console.warn(
+          '⚠️  Rerunning a run marked as running. Ensure no other instances are active.'
+        );
+      }
+
+      const stepIds = collectDownstreamSteps(workflow, options.from);
+      const clearedSteps = await db.clearStepExecutions(runId, stepIds);
+      const clearedIdempotency = await db.clearIdempotencyRecordsForSteps(runId, stepIds);
+      const clearedTimers = await db.clearTimersForSteps(runId, stepIds);
+      const clearedCompensations = await db.clearCompensationsForSteps(runId, stepIds);
+
+      await db.updateRunStatus(runId, 'paused');
+      db.close();
+      db = undefined;
+
+      console.log(
+        `Cleared ${clearedSteps} step execution(s), ${clearedIdempotency} idempotency record(s), ${clearedTimers} timer(s), ${clearedCompensations} compensation(s).`
+      );
+      console.log(`Resuming run ${runId} from step ${options.from}...\n`);
+
+      const { WorkflowRunner } = await import('./runner/workflow-runner.ts');
+      const logger = new ConsoleLogger();
+      const runner = new WorkflowRunner(workflow, {
+        resumeRunId: runId,
+        resumeInputs: inputs,
+        workflowDir: dirname(resolvedPath),
+        logger,
+        allowSuccessResume: true,
+      });
+
+      const outputs = await runner.run();
+
+      if (Object.keys(outputs).length > 0) {
+        console.log('Outputs:');
+        console.log(JSON.stringify(runner.redact(outputs), null, 2));
+      }
+      process.exit(0);
+    } catch (error) {
+      console.error('✗ Failed to rerun workflow:', error instanceof Error ? error.message : error);
+      process.exit(1);
+    } finally {
+      db?.close();
     }
   });
 
@@ -1881,9 +2012,11 @@ _keystone() {
       commands=(
         'init:Initialize a new Keystone project'
         'validate:Validate workflow files'
+        'lint:Lint workflow files'
         'graph:Visualize a workflow as a Mermaid.js graph'
         'run:Execute a workflow'
         'resume:Resume a paused or failed workflow run'
+        'rerun:Rerun a workflow from a specific step'
         'workflows:List available workflows'
         'history:List recent workflow runs'
         'logs:Show logs for a workflow run'
@@ -1909,10 +2042,16 @@ _keystone() {
         validate)
           _arguments ':path:_files'
           ;;
+        lint)
+          _arguments ':path:_files'
+          ;;
         resume)
           _arguments \\
             '(-i --input)'{-i,--input}'[Input values]:key=value' \\
             ':run_id:__keystone_runs'
+          ;;
+        rerun)
+          _arguments ':workflow:__keystone_workflows'
           ;;
         logs)
           _arguments ':run_id:__keystone_runs'
@@ -1949,10 +2088,10 @@ __keystone_runs() {
   COMPREPLY=()
   cur="\${COMP_WORDS[COMP_CWORD]}"
   prev="\${COMP_WORDS[COMP_CWORD - 1]}"
-  opts="init validate graph run resume workflows history logs prune ui mcp config auth completion"
+  opts="init validate lint graph run resume rerun workflows history logs prune ui mcp config auth completion"
 
   case "\${prev}" in
-    run|graph)
+    run|graph|rerun)
       local workflows=$(keystone _list-workflows 2>/dev/null)
       COMPREPLY=( $(compgen -W "\${workflows}" -- \${cur}) )
       return 0

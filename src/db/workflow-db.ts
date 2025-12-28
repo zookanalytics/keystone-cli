@@ -426,6 +426,18 @@ export class WorkflowDb {
     });
   }
 
+  async clearStepExecutions(runId: string, stepIds: string[]): Promise<number> {
+    if (stepIds.length === 0) return 0;
+    return this.withRetry(() => {
+      const placeholders = stepIds.map(() => '?').join(', ');
+      const stmt = this.db.prepare(
+        `DELETE FROM step_executions WHERE run_id = ? AND step_id IN (${placeholders})`
+      );
+      const result = stmt.run(runId, ...stepIds);
+      return result.changes;
+    });
+  }
+
   async getSuccessfulRuns(workflowName: string, limit = 3): Promise<WorkflowRun[]> {
     return await this.withRetry(() => {
       const stmt = this.db.prepare(`
@@ -594,6 +606,18 @@ export class WorkflowDb {
     });
   }
 
+  async clearIdempotencyRecordsForSteps(runId: string, stepIds: string[]): Promise<number> {
+    if (stepIds.length === 0) return 0;
+    return await this.withRetry(() => {
+      const placeholders = stepIds.map(() => '?').join(', ');
+      const stmt = this.db.prepare(
+        `DELETE FROM idempotency_records WHERE run_id = ? AND step_id IN (${placeholders})`
+      );
+      const result = stmt.run(runId, ...stepIds);
+      return result.changes;
+    });
+  }
+
   /**
    * List idempotency records, optionally filtered by run ID
    */
@@ -748,6 +772,18 @@ export class WorkflowDb {
     });
   }
 
+  async clearTimersForSteps(runId: string, stepIds: string[]): Promise<number> {
+    if (stepIds.length === 0) return 0;
+    return await this.withRetry(() => {
+      const placeholders = stepIds.map(() => '?').join(', ');
+      const stmt = this.db.prepare(
+        `DELETE FROM durable_timers WHERE run_id = ? AND step_id IN (${placeholders})`
+      );
+      const result = stmt.run(runId, ...stepIds);
+      return result.changes;
+    });
+  }
+
   // ===== Compensations =====
 
   async registerCompensation(
@@ -809,6 +845,18 @@ export class WorkflowDb {
         ORDER BY created_at DESC, rowid DESC
       `);
       return stmt.all(runId) as CompensationRecord[];
+    });
+  }
+
+  async clearCompensationsForSteps(runId: string, stepIds: string[]): Promise<number> {
+    if (stepIds.length === 0) return 0;
+    return this.withRetry(() => {
+      const placeholders = stepIds.map(() => '?').join(', ');
+      const stmt = this.db.prepare(
+        `DELETE FROM compensations WHERE run_id = ? AND step_id IN (${placeholders})`
+      );
+      const result = stmt.run(runId, ...stepIds);
+      return result.changes;
     });
   }
 

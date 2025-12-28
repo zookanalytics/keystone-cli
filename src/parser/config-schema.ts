@@ -100,6 +100,11 @@ export const ConfigSchema = z.object({
       }),
     })
     .default({}),
+  expression: z
+    .object({
+      strict: z.boolean().default(false),
+    })
+    .default({}),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

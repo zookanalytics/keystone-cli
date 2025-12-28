@@ -67,6 +67,7 @@ describe('MCPManager', () => {
       storage: { retention_days: 30, redact_secrets_at_rest: true },
       engines: { allowlist: {}, denylist: [] },
       concurrency: { default: 10, pools: { llm: 2, shell: 5, http: 10, engine: 2 } },
+      expression: { strict: false },
     } as unknown as Config);
 
     const manager = new MCPManager();
@@ -90,6 +91,7 @@ describe('MCPManager', () => {
       storage: { retention_days: 30, redact_secrets_at_rest: true },
       engines: { allowlist: {}, denylist: [] },
       concurrency: { default: 10, pools: { llm: 2, shell: 5, http: 10, engine: 2 } },
+      expression: { strict: false },
     } as unknown as Config);
 
     const { client: mockClient, initialize, stop } = createMockClient();
@@ -143,6 +145,7 @@ describe('MCPManager', () => {
       storage: { retention_days: 30, redact_secrets_at_rest: true },
       engines: { allowlist: {}, denylist: [] },
       concurrency: { default: 10, pools: { llm: 2, shell: 5, http: 10, engine: 2 } },
+      expression: { strict: false },
     } as unknown as Config);
 
     // Mock initialize to take some time
@@ -187,6 +190,7 @@ describe('MCPManager', () => {
       storage: { retention_days: 30, redact_secrets_at_rest: true },
       engines: { allowlist: {}, denylist: [] },
       concurrency: { default: 10, pools: { llm: 2, shell: 5, http: 10, engine: 2 } },
+      expression: { strict: false },
     } as unknown as Config);
 
     const { client: mockClient } = createMockClient(async () => {

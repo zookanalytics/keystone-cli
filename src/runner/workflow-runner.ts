@@ -2219,6 +2219,9 @@ Please provide a corrected response that exactly matches the required schema.`;
    * Execute the workflow
    */
   async run(): Promise<Record<string, unknown>> {
+    const expressionStrict = ConfigLoader.load().expression?.strict ?? false;
+    ExpressionEvaluator.setStrictMode(expressionStrict);
+
     // Handle resume state restoration
     if (this.resumeRunId && !this.restored) {
       await this.restoreState();

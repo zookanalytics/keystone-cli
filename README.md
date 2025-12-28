@@ -228,6 +228,9 @@ engines:
 storage:
   retention_days: 30
   redact_secrets_at_rest: true
+
+expression:
+  strict: false
 ```
 
 `storage.retention_days` sets the default window used by `keystone maintenance` / `keystone prune`. `storage.redact_secrets_at_rest` controls whether secret inputs and known secrets are redacted before storing run data (default `true`).
@@ -398,6 +401,12 @@ Inputs support `values` for enums and `secret: true` for sensitive values (redac
 
 Standard JavaScript-like expressions are supported: `${{ steps.build.status == 'success' ? '🚀' : '❌' }}`.
 
+Strict expression mode can be enabled in `.keystone/config.yaml` to fail fast on malformed `${{ }}`:
+```yaml
+expression:
+  strict: true
+```
+
 ---
 
 ## 🏗️ Step Types
@@ -471,7 +480,7 @@ All steps support common features:
 - `needs`: Array of step IDs this step depends on.
 - `if`: Conditional expression.
 - `retry`: `{ count, backoff: 'linear'|'exponential', baseDelay }`.
-- `timeout`: Maximum execution time in milliseconds.
+- `timeout`: Maximum execution time in milliseconds (best-effort; supported steps receive an abort signal).
 - `foreach`: Iterate over an array in parallel.
 - `concurrency`: Limit parallel items for `foreach` (must be a positive integer).
 - `pool`: Assign step to a resource pool.
@@ -883,7 +892,9 @@ In these examples, the agent will have access to all tools provided by the MCP s
 | `init` | Initialize a new Keystone project |
 | `run <workflow>` | Execute a workflow (use `-i key=val`, `--resume` to auto-resume, `--dry-run`, `--debug`, `--no-dedup`, `--explain`) |
 | `resume <run_id>` | Resume a failed/paused/crashed workflow by ID (use `-i key=val` to answer human steps) |
+| `rerun <workflow>` | Rerun a workflow from a specific step (use `--from <step_id>` and optional `--run <run_id>`) |
 | `validate [path]` | Check workflow files for errors |
+| `lint [path]` | Alias for `validate` |
 | `workflows` | List available workflows |
 | `history` | Show recent workflow runs |
 | `logs <run_id>` | View logs, outputs, and errors for a specific run (`-v` for full output) |

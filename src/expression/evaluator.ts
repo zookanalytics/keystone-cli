@@ -90,6 +90,48 @@ export class ExpressionEvaluator {
   private static readonly MAX_TOTAL_NODES = 10000;
   // Maximum arrow function nesting depth
   private static readonly MAX_ARROW_DEPTH = 3;
+  private static strictMode = false;
+
+  static setStrictMode(strict: boolean): void {
+    ExpressionEvaluator.strictMode = strict;
+  }
+
+  private static validateTemplate(template: string): void {
+    let i = 0;
+    while (i < template.length) {
+      if (template.substring(i, i + 3) === '${{') {
+        let depth = 0;
+        let j = i + 3;
+        let closed = false;
+
+        while (j < template.length) {
+          if (template.substring(j, j + 2) === '}}' && depth === 0) {
+            closed = true;
+            i = j + 2;
+            break;
+          }
+
+          if (template[j] === '{') {
+            depth++;
+          } else if (template[j] === '}') {
+            if (depth > 0) depth--;
+          }
+          j++;
+        }
+
+        if (!closed) {
+          throw new Error(`Unclosed expression starting at index ${i}`);
+        }
+        continue;
+      }
+
+      if (template.substring(i, i + 2) === '}}') {
+        throw new Error(`Unexpected "}}" at index ${i}`);
+      }
+
+      i++;
+    }
+  }
 
   /**
    * Helper to scan string for matches of ${{ ... }} handling nested braces manually
@@ -141,6 +183,13 @@ export class ExpressionEvaluator {
    * Strict equality (===) is preserved for '==='.
    */
   static evaluate(template: string, context: ExpressionContext): unknown {
+    if (
+      ExpressionEvaluator.strictMode &&
+      (template.includes('${{') || template.includes('}}'))
+    ) {
+      ExpressionEvaluator.validateTemplate(template);
+    }
+
     const hasExpr = ExpressionEvaluator.hasExpression(template);
 
     // Prevent excessive length

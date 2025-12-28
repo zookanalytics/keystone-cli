@@ -8,7 +8,13 @@ interface Run {
   workflow_name: string;
   status: string;
   started_at: string;
+  completed_at?: string | null;
   total_tokens?: number;
+  duration_ms?: number;
+  exec_total?: number;
+  exec_failed?: number;
+  exec_retries?: number;
+  exec_soft_failures?: number;
 }
 
 const logger = new ConsoleLogger();
@@ -31,6 +37,10 @@ const Dashboard = () => {
       const runsWithUsage = await Promise.all(
         recentRuns.map(async (run) => {
           let total_tokens = 0;
+          let exec_total = 0;
+          let exec_failed = 0;
+          let exec_retries = 0;
+          let exec_soft_failures = 0;
           try {
             // Get steps to aggregate tokens if not in outputs (future-proofing)
             const steps = await db.getStepsByRun(run.id);
@@ -45,10 +55,29 @@ const Dashboard = () => {
               }
               return sum;
             }, 0);
+            exec_total = steps.length;
+            exec_failed = steps.filter((step) => step.status === 'failed').length;
+            exec_retries = steps.reduce((sum, step) => sum + (step.retry_count || 0), 0);
+            exec_soft_failures = steps.filter(
+              (step) => step.status === 'success' && step.error
+            ).length;
           } catch (e) {
             // Ignore read error
           }
-          return { ...run, total_tokens };
+          const startedMs = new Date(run.started_at).getTime();
+          const completedMs = run.completed_at ? new Date(run.completed_at).getTime() : Date.now();
+          const duration_ms = Number.isFinite(startedMs)
+            ? Math.max(0, completedMs - startedMs)
+            : undefined;
+          return {
+            ...run,
+            total_tokens,
+            duration_ms,
+            exec_total,
+            exec_failed,
+            exec_retries,
+            exec_soft_failures,
+          };
         })
       );
       setRuns(runsWithUsage);
@@ -94,22 +123,42 @@ const Dashboard = () => {
               ID
             </Text>
           </Box>
-          <Box width={30}>
+          <Box width={24}>
             <Text bold color="cyan">
               WORKFLOW
             </Text>
           </Box>
-          <Box width={15}>
+          <Box width={12}>
             <Text bold color="cyan">
               STATUS
             </Text>
           </Box>
-          <Box width={15}>
+          <Box width={10}>
             <Text bold color="cyan">
-              STARTED
+              START
             </Text>
           </Box>
-          <Box>
+          <Box width={8}>
+            <Text bold color="cyan">
+              DUR
+            </Text>
+          </Box>
+          <Box width={7}>
+            <Text bold color="cyan">
+              EXECS
+            </Text>
+          </Box>
+          <Box width={6}>
+            <Text bold color="cyan">
+              FAIL
+            </Text>
+          </Box>
+          <Box width={7}>
+            <Text bold color="cyan">
+              RETRY
+            </Text>
+          </Box>
+          <Box width={8}>
             <Text bold color="cyan">
               TOKENS
             </Text>
@@ -117,7 +166,7 @@ const Dashboard = () => {
         </Box>
 
         <Box marginBottom={1}>
-          <Text color="gray">{'─'.repeat(80)}</Text>
+          <Text color="gray">{'─'.repeat(92)}</Text>
         </Box>
 
         {runs.length === 0 ? (
@@ -130,18 +179,34 @@ const Dashboard = () => {
               <Box width={12}>
                 <Text color="gray">{run.id.substring(0, 8)}</Text>
               </Box>
-              <Box width={30}>
+              <Box width={24}>
                 <Text>{run.workflow_name}</Text>
               </Box>
-              <Box width={15}>
+              <Box width={12}>
                 <Text color={getStatusColor(run.status)}>
                   {getStatusIcon(run.status)} {run.status.toUpperCase()}
                 </Text>
               </Box>
-              <Box width={15}>
-                <Text color="gray">{new Date(run.started_at).toLocaleTimeString()}</Text>
+              <Box width={10}>
+                <Text color="gray">{formatClock(run.started_at)}</Text>
               </Box>
-              <Box>
+              <Box width={8}>
+                <Text color="gray">
+                  {run.duration_ms !== undefined ? formatDuration(run.duration_ms) : '--:--'}
+                </Text>
+              </Box>
+              <Box width={7}>
+                <Text color="gray">{run.exec_total ?? 0}</Text>
+              </Box>
+              <Box width={6}>
+                <Text color={getFailColor(run.exec_failed, run.exec_soft_failures)}>
+                  {formatFailCount(run.exec_failed, run.exec_soft_failures)}
+                </Text>
+              </Box>
+              <Box width={7}>
+                <Text color={run.exec_retries ? 'yellow' : 'gray'}>{run.exec_retries ?? 0}</Text>
+              </Box>
+              <Box width={8}>
                 <Text color="yellow">{run.total_tokens || 0}</Text>
               </Box>
             </Box>
@@ -201,6 +266,46 @@ const getStatusIcon = (status: string) => {
     default:
       return '🔹';
   }
+};
+
+const formatDuration = (durationMs: number): string => {
+  if (!Number.isFinite(durationMs) || durationMs < 0) return '--:--';
+  const totalSeconds = Math.floor(durationMs / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(
+      seconds
+    ).padStart(2, '0')}`;
+  }
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+};
+
+const formatClock = (iso: string): string => {
+  try {
+    return new Date(iso).toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
+  } catch {
+    return '--:--:--';
+  }
+};
+
+const formatFailCount = (failed = 0, softFailed = 0): string => {
+  if (softFailed > 0) {
+    return `${failed}+${softFailed}`;
+  }
+  return String(failed);
+};
+
+const getFailColor = (failed = 0, softFailed = 0): string => {
+  if (failed > 0) return 'red';
+  if (softFailed > 0) return 'yellow';
+  return 'gray';
 };
 
 export const startDashboard = () => {

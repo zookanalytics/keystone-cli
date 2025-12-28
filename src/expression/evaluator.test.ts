@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { ExpressionEvaluator } from './evaluator';
 
 describe('ExpressionEvaluator', () => {
@@ -20,6 +20,10 @@ describe('ExpressionEvaluator', () => {
     index: 0,
     my_val: 123,
   };
+
+  afterEach(() => {
+    ExpressionEvaluator.setStrictMode(false);
+  });
 
   test('should evaluate simple literals', () => {
     expect(ExpressionEvaluator.evaluate("${{ 'hello' }}", context)).toBe('hello');
@@ -96,6 +100,15 @@ describe('ExpressionEvaluator', () => {
   test('should handle hasExpression', () => {
     expect(ExpressionEvaluator.hasExpression('no expr')).toBe(false);
     expect(ExpressionEvaluator.hasExpression('has ${{ expr }}')).toBe(true);
+  });
+
+  test('should fail fast on malformed templates in strict mode', () => {
+    ExpressionEvaluator.setStrictMode(true);
+    expect(() => ExpressionEvaluator.evaluate('Hello ${{ inputs.name', context)).toThrow(
+      /Unclosed expression/
+    );
+    expect(() => ExpressionEvaluator.evaluate('Hello }}', context)).toThrow(/Unexpected/);
+    expect(ExpressionEvaluator.evaluate('Hello ${{ inputs.name }}', context)).toBe('Hello World');
   });
 
   test('should handle evaluateObject', () => {
