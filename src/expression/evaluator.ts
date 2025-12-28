@@ -91,6 +91,8 @@ export class ExpressionEvaluator {
   // Maximum arrow function nesting depth
   private static readonly MAX_ARROW_DEPTH = 3;
   private static strictMode = false;
+  private static jsepCache = new Map<string, ASTNode>();
+  private static readonly MAX_CACHE_SIZE = 1000;
 
   static setStrictMode(strict: boolean): void {
     ExpressionEvaluator.strictMode = strict;
@@ -299,7 +301,17 @@ export class ExpressionEvaluator {
    */
   static evaluateExpression(expr: string, context: ExpressionContext): unknown {
     try {
-      const ast = jsep(expr);
+      let ast = ExpressionEvaluator.jsepCache.get(expr);
+      if (!ast) {
+        ast = jsep(expr);
+        // Manage cache size
+        if (ExpressionEvaluator.jsepCache.size >= ExpressionEvaluator.MAX_CACHE_SIZE) {
+          const firstKey = ExpressionEvaluator.jsepCache.keys().next().value;
+          if (firstKey !== undefined) ExpressionEvaluator.jsepCache.delete(firstKey);
+        }
+        ExpressionEvaluator.jsepCache.set(expr, ast);
+      }
+
       // Track total nodes evaluated to prevent DoS
       const nodeCounter = { count: 0 };
       return ExpressionEvaluator.evaluateNode(ast, context, 0, nodeCounter);

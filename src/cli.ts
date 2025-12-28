@@ -31,6 +31,13 @@ import { LIMITS } from './utils/constants.ts';
 import { ConsoleLogger } from './utils/logger.ts';
 import { generateMermaidGraph, renderWorkflowAsAscii } from './utils/mermaid.ts';
 import { WorkflowRegistry } from './utils/workflow-registry.ts';
+import { container } from './utils/container.ts';
+import { MemoryDb } from './db/memory-db.ts';
+
+// Bootstrap DI container with default services
+container.factory('logger', () => new ConsoleLogger());
+container.factory('db', () => new WorkflowDb());
+container.factory('memoryDb', () => new MemoryDb());
 
 import pkg from '../package.json' with { type: 'json' };
 

@@ -970,30 +970,35 @@ Request steps enforce SSRF protections and require HTTPS by default. Cross-origi
 ```mermaid
 graph TD
     CLI[CLI Entry Point] --> WR[WorkflowRunner]
-    CLI --> MCP[MCP Server]
-    WR --> SE[Step Executor]
-    WR --> FE[ForeachExecutor]
-    WR --> DB[(WorkflowDb)]
-    SE --> LLM[LLM Executor]
-    SE --> Shell[Shell Executor]
-    SE --> File[File Operations]
-    SE --> HTTP[HTTP Requests]
-    SE --> Human[Human Input]
-    SE --> Engine[Engine Executor]
-    SE --> Script[Script Step]
-    SE --> Sleep[Sleep Step]
-    SE --> Memory[Memory operations]
-    SE --> Workflow[Sub-workflows]
+    CLI --> MCPServer[MCP Server]
+
+    subgraph "Core Orchestration"
+        WR --> Scheduler[WorkflowScheduler]
+        WR --> State[WorkflowState]
+        WR --> Pool[Resource Pool Manager]
+        WR --> Eval[Expression Evaluator]
+    end
+
+    WR --> EX[Step Executor]
+    WR --> FE[Foreach Executor]
+    WR --> Workflow[Sub-workflows]
+
+    State --> DB[(WorkflowDb)]
+    Scheduler --> Parser[WorkflowParser]
+
+    EX --> LLM[LLM Executor]
+    EX --> Shell[Shell Executor]
+    EX --> File[File Operations]
+    EX --> HTTP[HTTP Requests]
+    EX --> Human[Human Input]
+    EX --> Engine[Engine Executor]
+    EX --> Script[Script Step]
+    EX --> Sleep[Sleep Step]
+    EX --> Memory[Memory operations]
+
     LLM --> Adapters[LLM Adapters]
-    Adapters --> OpenAI
-    Adapters --> Anthropic
-    Adapters --> Gemini
-    Adapters --> Copilot
-    Adapters --> ChatGPT
-    Adapters --> Local
+    Adapters --> Providers[OpenAI, Anthropic, Gemini, Copilot, etc.]
     LLM --> MCPClient[MCP Client]
-    WR --> Eval[Expression Evaluator]
-    WR --> Pool[Resource Pool Manager]
 ```
 
 ## 📂 Project Structure

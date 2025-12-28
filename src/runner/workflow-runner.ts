@@ -26,8 +26,10 @@ import {
   executeStep,
 } from './step-executor.ts';
 import { withTimeout } from './timeout.ts';
-
+import { WorkflowState, type StepContext, type ForeachStepContext } from './workflow-state.ts';
+import { WorkflowScheduler } from './workflow-scheduler.ts';
 import { ConsoleLogger, type Logger } from '../utils/logger.ts';
+import { container } from '../utils/container.ts';
 
 /**
  * A logger wrapper that redacts secrets from all log messages
@@ -36,7 +38,7 @@ class RedactingLogger implements Logger {
   constructor(
     private inner: Logger,
     private redactor: Redactor
-  ) {}
+  ) { }
 
   log(msg: string): void {
     this.inner.log(this.redactor.redact(msg));
@@ -95,28 +97,11 @@ export interface RunOptions {
   resourcePoolManager?: ResourcePoolManager;
   allowInsecure?: boolean;
   artifactRoot?: string;
+  db?: WorkflowDb;
+  memoryDb?: MemoryDb;
 }
 
-export interface StepContext {
-  output?: unknown;
-  outputs?: Record<string, unknown>;
-  status: StepStatusType;
-  error?: string;
-  usage?: {
-    prompt_tokens: number;
-    completion_tokens: number;
-    total_tokens: number;
-  };
-}
-
-// Type for foreach results - wraps array to ensure JSON serialization preserves all properties
-export interface ForeachStepContext extends StepContext {
-  items: StepContext[]; // Individual iteration results
-  // output and outputs inherited from StepContext
-  // output: array of output values
-  // outputs: mapped outputs object
-  foreachItems?: unknown[]; // Persisted foreach inputs for deterministic resume
-}
+// Redacted StepContext and ForeachStepContext (moved to workflow-state.ts)
 
 /**
  * Main workflow execution engine
@@ -126,7 +111,8 @@ export class WorkflowRunner {
   private db: WorkflowDb;
   private memoryDb: MemoryDb;
   private _runId!: string;
-  private stepContexts: Map<string, StepContext | ForeachStepContext> = new Map();
+  private state!: WorkflowState;
+  private scheduler!: WorkflowScheduler;
   private inputs!: Record<string, unknown>;
   private secrets: Record<string, string>;
   private redactor: Redactor;
@@ -134,7 +120,6 @@ export class WorkflowRunner {
   private secretValues: string[] = [];
   private redactAtRest = true;
   private resumeRunId?: string;
-  private restored = false;
   private logger!: Logger;
   private mcpManager: MCPManager;
   private options: RunOptions;
@@ -148,6 +133,7 @@ export class WorkflowRunner {
   private lastFailedStep?: { id: string; error: string };
   private abortController = new AbortController();
   private resourcePool!: ResourcePoolManager;
+  private restored = false;
 
   /**
    * Get the abort signal for cancellation checks
@@ -174,7 +160,7 @@ export class WorkflowRunner {
 
     if (parentSignal.aborted) {
       controller.abort();
-      return { controller, cleanup: () => {} };
+      return { controller, cleanup: () => { } };
     }
 
     parentSignal.addEventListener('abort', onAbort, { once: true });
@@ -195,21 +181,33 @@ export class WorkflowRunner {
       );
     }
 
-    this.db = new WorkflowDb(options.dbPath);
-    this.memoryDb = new MemoryDb(options.memoryDbPath);
+    // Use injected instances or resolve from container or create new from paths
+    this.db =
+      options.db ||
+      (options.dbPath ? new WorkflowDb(options.dbPath) : container.resolveOptional<WorkflowDb>('db')) ||
+      new WorkflowDb(options.dbPath);
+
+    this.memoryDb =
+      options.memoryDb ||
+      (options.memoryDbPath
+        ? new MemoryDb(options.memoryDbPath)
+        : container.resolveOptional<MemoryDb>('memoryDb')) ||
+      new MemoryDb(options.memoryDbPath);
+
     this.secrets = this.loadSecrets();
     this.redactor = new Redactor(this.secrets, { forcedSecrets: this.secretValues });
 
     this.initLogger(options);
+    this.initRun(options);
     this.mcpManager = options.mcpManager || new MCPManager();
     this.initResourcePool(options);
-    this.initRun(options);
 
     this.setupSignalHandlers();
   }
 
   private initLogger(options: RunOptions): void {
-    const rawLogger = options.logger || new ConsoleLogger();
+    const rawLogger =
+      options.logger || container.resolveOptional<Logger>('logger') || new ConsoleLogger();
     this.rawLogger = rawLogger;
     this.logger = new RedactingLogger(rawLogger, this.redactor);
   }
@@ -249,6 +247,16 @@ export class WorkflowRunner {
       this.inputs = options.inputs || {};
       this._runId = randomUUID();
     }
+
+    this.state = new WorkflowState(
+      this._runId,
+      this.workflow,
+      this.db,
+      this.inputs,
+      this.secrets,
+      this.logger
+    );
+    this.scheduler = new WorkflowScheduler(this.workflow, this.state.getCompletedStepIds());
   }
 
   /**
@@ -274,8 +282,6 @@ export class WorkflowRunner {
       throw new Error(`Run ${this.runId} not found`);
     }
 
-    // Only allow resuming failed, paused, canceled, or running (crash recovery) runs
-    // Unless specifically allowed (e.g. for rollback/compensation)
     if (
       run.status !== WorkflowStatus.FAILED &&
       run.status !== WorkflowStatus.PAUSED &&
@@ -290,7 +296,7 @@ export class WorkflowRunner {
 
     if (run.status === WorkflowStatus.RUNNING) {
       this.logger.warn(
-        `⚠️  Resuming a run marked as 'running'. This usually means the previous process crashed or was killed forcefully. Ensure no other instances are running.`
+        `⚠️  Resuming a run marked as 'running'. This usually means the previous process crashed or was killed forcefully.`
       );
     }
 
@@ -298,212 +304,20 @@ export class WorkflowRunner {
       this.logger.log('📋 Resuming a previously canceled run. Completed steps will be skipped.');
     }
 
-    // Restore inputs from the previous run to ensure consistency
-    // Merge with any resumeInputs provided (e.g. answers to human steps)
-    try {
-      if (!run.inputs || run.inputs === 'null' || run.inputs === '') {
-        this.logger.warn(`Run ${this.runId} has no persisted inputs`);
-        // Keep existing inputs
-      } else {
-        const storedInputs = JSON.parse(run.inputs);
-        this.inputs = { ...storedInputs, ...this.inputs };
-      }
-    } catch (error) {
-      this.logger.error(
-        `CRITICAL: Failed to parse inputs from run ${this.runId}. Data may be corrupted. Using default/resume inputs. Error: ${error instanceof Error ? error.message : String(error)}`
-      );
-      // Fallback: preserve existing inputs from resume options
-    }
+    // Hydrate state from DB
+    await this.state.restore();
 
-    // Load all step executions for this run
-    const steps = await this.db.getStepsByRun(this.runId);
-
-    // Group steps by step_id to handle foreach loops (multiple executions per step_id)
-    const stepExecutionsByStepId = new Map<string, typeof steps>();
-    for (const step of steps) {
-      if (!stepExecutionsByStepId.has(step.step_id)) {
-        stepExecutionsByStepId.set(step.step_id, []);
-      }
-      stepExecutionsByStepId.get(step.step_id)?.push(step);
-    }
-
-    // Get topological order to ensure dependencies are restored before dependents
-    const executionOrder = WorkflowParser.topologicalSort(this.workflow);
-    const completedStepIds = new Set<string>();
-
-    // Reconstruct step contexts in topological order
-    for (const stepId of executionOrder) {
-      const stepExecutions = stepExecutionsByStepId.get(stepId);
-      if (!stepExecutions || stepExecutions.length === 0) continue;
-
-      const stepDef = this.workflow.steps.find((s) => s.id === stepId);
-      if (!stepDef) continue;
-
-      const isForeach = !!stepDef.foreach;
-
-      if (isForeach) {
-        // Reconstruct foreach aggregated context
-        const items: StepContext[] = [];
-        const outputs: unknown[] = [];
-        let allSuccess = true;
-
-        // Sort by iteration_index to ensure correct order
-        const sortedExecs = [...stepExecutions].sort(
-          (a, b) => (a.iteration_index ?? 0) - (b.iteration_index ?? 0)
-        );
-
-        for (const exec of sortedExecs) {
-          if (exec.iteration_index === null) continue; // Skip parent step record
-
-          if (exec.status === StepStatus.SUCCESS || exec.status === StepStatus.SKIPPED) {
-            let output: unknown = null;
-            try {
-              output = exec.output ? JSON.parse(exec.output) : null;
-            } catch (error) {
-              this.logger.warn(
-                `Failed to parse output for step ${stepId} iteration ${exec.iteration_index}: ${error}`
-              );
-              output = { error: 'Failed to parse output' };
-            }
-            items[exec.iteration_index] = {
-              output,
-              outputs:
-                typeof output === 'object' && output !== null && !Array.isArray(output)
-                  ? (output as Record<string, unknown>)
-                  : {},
-              status: exec.status as typeof StepStatus.SUCCESS | typeof StepStatus.SKIPPED,
-              error: exec.error || undefined,
-            };
-            outputs[exec.iteration_index] = output;
-          } else {
-            allSuccess = false;
-            // Still populate with placeholder if failed
-            items[exec.iteration_index] = {
-              output: null,
-              outputs: {},
-              status: exec.status as StepStatusType,
-              error: exec.error || undefined,
-            };
-          }
-        }
-
-        // Use persisted foreach items from parent step for deterministic resume
-        // This ensures the resume uses the same array as the initial run
-        let expectedCount = -1;
-        let persistedItems: unknown[] | undefined;
-        const parentExec = stepExecutions.find((e) => e.iteration_index === null);
-        if (parentExec?.output) {
-          try {
-            const parsed = JSON.parse(parentExec.output);
-            if (parsed.__foreachItems && Array.isArray(parsed.__foreachItems)) {
-              persistedItems = parsed.__foreachItems;
-              expectedCount = parsed.__foreachItems.length;
-            }
-          } catch (_e) {
-            // ignore parse errors
-          }
-        }
-
-        // Fallback to expression evaluation if persisted items not found
-        if (expectedCount === -1) {
-          try {
-            const baseContext = this.buildContext();
-            const foreachExpr = stepDef.foreach;
-            if (foreachExpr) {
-              const foreachItems = ExpressionEvaluator.evaluate(foreachExpr, baseContext);
-              if (Array.isArray(foreachItems)) {
-                expectedCount = foreachItems.length;
-              }
-            }
-          } catch (e) {
-            // If we can't evaluate yet (dependencies not met?), we can't be sure it's complete
-            allSuccess = false;
-          }
-        }
-
-        // Check if we have all items (no gaps)
-        const hasAllItems =
-          expectedCount !== -1 &&
-          items.length === expectedCount &&
-          !Array.from({ length: expectedCount }).some((_, i) => !items[i]);
-
-        // Determine overall status based on iterations
-        let status: StepContext['status'] = StepStatus.SUCCESS;
-        if (allSuccess && hasAllItems) {
-          status = StepStatus.SUCCESS;
-        } else if (items.some((item) => item?.status === StepStatus.SUSPENDED)) {
-          status = StepStatus.SUSPENDED;
-        } else {
-          status = StepStatus.FAILED;
-        }
-
-        // Always restore what we have to allow partial expression evaluation
-        const mappedOutputs = ForeachExecutor.aggregateOutputs(outputs);
-        this.stepContexts.set(stepId, {
-          output: outputs,
-          outputs: mappedOutputs,
-          status,
-          items,
-          foreachItems: persistedItems,
-        } as ForeachStepContext);
-
-        // Only mark as fully completed if all iterations completed successfully AND we have all items
-        if (status === StepStatus.SUCCESS) {
-          completedStepIds.add(stepId);
-        }
-      } else {
-        // Single execution step
-        const exec = stepExecutions[0];
-        if (
-          exec.status === StepStatus.SUCCESS ||
-          exec.status === StepStatus.SKIPPED ||
-          exec.status === StepStatus.SUSPENDED ||
-          exec.status === StepStatus.WAITING
-        ) {
-          let output: unknown = null;
-          try {
-            output = exec.output ? JSON.parse(exec.output) : null;
-          } catch (error) {
-            this.logger.warn(`Failed to parse output for step ${stepId}: ${error}`);
-            output = { error: 'Failed to parse output' };
-          }
-
-          // If step is WAITING, check if timer has elapsed
-          let effectiveStatus = exec.status as StepContext['status'];
-          if (exec.status === StepStatus.WAITING) {
-            const timer = await this.db.getTimerByStep(this.runId, stepId);
-            const timerId = timer?.id;
-            const wakeAt = timer?.wake_at;
-            if (timerId && wakeAt && new Date(wakeAt) <= new Date()) {
-              // Timer elapsed!
-              await this.db.completeTimer(timerId);
-              await this.db.completeStep(exec.id, StepStatus.SUCCESS, output);
-              effectiveStatus = StepStatus.SUCCESS;
-            }
-          }
-          let effectiveError = exec.error || undefined;
-          if (exec.status === StepStatus.WAITING && effectiveStatus === StepStatus.SUCCESS) {
-            effectiveError = undefined;
-          }
-
-          this.stepContexts.set(stepId, {
-            output,
-            outputs:
-              typeof output === 'object' && output !== null && !Array.isArray(output)
-                ? (output as Record<string, unknown>)
-                : {},
-            status: effectiveStatus,
-            error: effectiveError,
-          });
-          if (effectiveStatus !== StepStatus.SUSPENDED && effectiveStatus !== StepStatus.WAITING) {
-            completedStepIds.add(stepId);
-          }
-        }
+    // Re-initialize scheduler with completed steps from restored state
+    const completedSteps = new Set<string>();
+    for (const [stepId, ctx] of this.state.entries()) {
+      if (ctx.status === StepStatus.SUCCESS || ctx.status === StepStatus.SKIPPED) {
+        completedSteps.add(stepId);
       }
     }
+    this.scheduler = new WorkflowScheduler(this.workflow, completedSteps);
 
     this.restored = true;
-    this.logger.log(`✓ Restored state: ${completedStepIds.size} step(s) already completed`);
+    this.logger.log(`✓ Restored state: ${completedSteps.size} step(s) hydrated`);
   }
 
   /**
@@ -786,9 +600,9 @@ export class WorkflowRunner {
           content:
             (step as import('../parser/schema.ts').FileStep).content !== undefined
               ? ExpressionEvaluator.evaluateString(
-                  (step as import('../parser/schema.ts').FileStep).content as string,
-                  context
-                )
+                (step as import('../parser/schema.ts').FileStep).content as string,
+                context
+              )
               : undefined,
           op: step.op,
           allowOutsideCwd: step.allowOutsideCwd,
@@ -870,9 +684,9 @@ export class WorkflowRunner {
           input:
             (step as import('../parser/schema.ts').EngineStep).input !== undefined
               ? ExpressionEvaluator.evaluateObject(
-                  (step as import('../parser/schema.ts').EngineStep).input,
-                  context
-                )
+                (step as import('../parser/schema.ts').EngineStep).input,
+                context
+              )
               : undefined,
           env,
           cwd: ExpressionEvaluator.evaluateString(
@@ -1030,7 +844,7 @@ export class WorkflowRunner {
       }
     > = {};
 
-    for (const [stepId, ctx] of this.stepContexts.entries()) {
+    for (const [stepId, ctx] of this.state.entries()) {
       // For foreach results, include items array for iteration access
       if ('items' in ctx && ctx.items) {
         stepsContext[stepId] = {
@@ -1060,7 +874,7 @@ export class WorkflowRunner {
       env: {},
       output: item
         ? undefined
-        : this.stepContexts.get(this.workflow.steps.find((s) => !s.foreach)?.id || '')?.output,
+        : this.state.get(this.workflow.steps.find((s) => !s.foreach)?.id || '')?.output,
       last_failed_step: this.lastFailedStep,
     };
 
@@ -1320,11 +1134,11 @@ export class WorkflowRunner {
     const idempotencyContextForRetry =
       idempotencyClaimed && scopedIdempotencyKey
         ? {
-            rawKey: idempotencyKey || scopedIdempotencyKey,
-            scopedKey: scopedIdempotencyKey,
-            ttlSeconds: idempotencyTtlSeconds,
-            claimed: true,
-          }
+          rawKey: idempotencyKey || scopedIdempotencyKey,
+          scopedKey: scopedIdempotencyKey,
+          ttlSeconds: idempotencyTtlSeconds,
+          claimed: true,
+        }
         : undefined;
 
     let stepToExecute = step;
@@ -1373,9 +1187,9 @@ export class WorkflowRunner {
         try {
           const outputForValidation =
             stepToExecute.type === 'engine' &&
-            result.output &&
-            typeof result.output === 'object' &&
-            'summary' in result.output
+              result.output &&
+              typeof result.output === 'object' &&
+              'summary' in result.output
               ? (result.output as { summary?: unknown }).summary
               : result.output;
           this.validateSchema(
@@ -1585,7 +1399,7 @@ export class WorkflowRunner {
         persistedError,
         result.usage
       );
-      if (step.type === 'human') {
+      if (result.status === StepStatus.SUCCESS) {
         const existingTimer = await this.db.getTimerByStep(this.runId, step.id);
         if (existingTimer) {
           await this.db.completeTimer(existingTimer.id);
@@ -2073,7 +1887,7 @@ Please provide a corrected response that exactly matches the required schema.`;
       const stepExecId = randomUUID();
       await this.db.createStep(stepExecId, this.runId, step.id);
       await this.db.completeStep(stepExecId, 'skipped', null);
-      this.stepContexts.set(step.id, { status: 'skipped' });
+      this.state.set(step.id, { status: 'skipped' });
       return;
     }
 
@@ -2082,7 +1896,7 @@ Please provide a corrected response that exactly matches the required schema.`;
       const stepExecId = randomUUID();
       await this.db.createStep(stepExecId, this.runId, step.id);
       await this.db.completeStep(stepExecId, StepStatus.SKIPPED, null);
-      this.stepContexts.set(step.id, { status: StepStatus.SKIPPED });
+      this.state.set(step.id, { status: StepStatus.SKIPPED });
       return;
     }
 
@@ -2096,10 +1910,10 @@ Please provide a corrected response that exactly matches the required schema.`;
         this.resourcePool
       );
 
-      const existingContext = this.stepContexts.get(step.id) as ForeachStepContext;
+      const existingContext = this.state.get(step.id) as ForeachStepContext;
       const result = await executor.execute(step, baseContext, this.runId, existingContext);
 
-      this.stepContexts.set(step.id, result);
+      this.state.set(step.id, result);
     } else {
       // Single execution
       const stepExecId = randomUUID();
@@ -2108,7 +1922,7 @@ Please provide a corrected response that exactly matches the required schema.`;
       const result = await this.executeStepInternal(step, baseContext, stepExecId);
 
       // Update global state
-      this.stepContexts.set(step.id, result);
+      this.state.set(step.id, result);
 
       if (result.status === 'suspended') {
         const inputType = step.type === 'human' ? step.inputType : 'text';
@@ -2227,13 +2041,13 @@ Please provide a corrected response that exactly matches the required schema.`;
       await this.restoreState();
     }
 
-    const isResume = !!this.resumeRunId || this.stepContexts.size > 0;
+    const isResume = !!this.resumeRunId || this.state.size > 0;
 
     this.logger.log(`\n🏛️  ${isResume ? 'Resuming' : 'Running'} workflow: ${this.workflow.name}`);
     this.logger.log(`Run ID: ${this.runId}`);
     this.logger.log(
       '\n⚠️  Security Warning: Only run workflows from trusted sources.\n' +
-        '   Workflows can execute arbitrary shell commands and access your environment.\n'
+      '   Workflows can execute arbitrary shell commands and access your environment.\n'
     );
 
     this.redactAtRest = ConfigLoader.load().storage?.redact_secrets_at_rest ?? true;
@@ -2248,23 +2062,10 @@ Please provide a corrected response that exactly matches the required schema.`;
     await this.db.updateRunStatus(this.runId, 'running');
 
     try {
-      // Get execution order using topological sort
-      const executionOrder = WorkflowParser.topologicalSort(this.workflow);
-      const stepMap = new Map(this.workflow.steps.map((s) => [s.id, s]));
+      // Use scheduler's execution order
+      const executionOrder = this.scheduler.getExecutionOrder();
 
-      // Initialize completedSteps with already completed steps (for resume)
-      // Only include steps that were successful or skipped, so failed steps are retried
-      const completedSteps = new Set<string>();
-      for (const [id, ctx] of this.stepContexts.entries()) {
-        if (ctx.status === 'success' || ctx.status === 'skipped') {
-          completedSteps.add(id);
-        }
-      }
-
-      // Filter out already completed steps from execution order
-      const remainingSteps = executionOrder.filter((stepId) => !completedSteps.has(stepId));
-
-      if (isResume && remainingSteps.length === 0) {
+      if (isResume && this.scheduler.isComplete()) {
         this.logger.log('All steps already completed. Nothing to resume.\n');
         // Evaluate outputs from completed state
         const outputs = this.evaluateOutputs();
@@ -2273,17 +2074,20 @@ Please provide a corrected response that exactly matches the required schema.`;
         return outputs;
       }
 
-      if (isResume && completedSteps.size > 0) {
-        this.logger.log(`Skipping ${completedSteps.size} already completed step(s)\n`);
+      const pendingCount = this.scheduler.getPendingCount();
+      const totalSteps = executionOrder.length;
+      const completedCount = totalSteps - pendingCount;
+
+      if (isResume && completedCount > 0) {
+        this.logger.log(`Skipping ${completedCount} already completed step(s)\n`);
       }
 
       this.logger.log(`Execution order: ${executionOrder.join(' → ')}\n`);
 
-      const totalSteps = executionOrder.length;
       const stepIndices = new Map(executionOrder.map((id, index) => [id, index + 1]));
 
       // Evaluate global concurrency limit
-      let globalConcurrencyLimit = remainingSteps.length;
+      let globalConcurrencyLimit = pendingCount || 10;
       if (this.workflow.concurrency !== undefined) {
         const baseContext = this.buildContext();
         if (typeof this.workflow.concurrency === 'string') {
@@ -2306,11 +2110,10 @@ Please provide a corrected response that exactly matches the required schema.`;
       }
 
       // Execute steps in parallel where possible (respecting dependencies and global concurrency)
-      const pendingSteps = new Set(remainingSteps);
       const runningPromises = new Map<string, Promise<void>>();
 
       try {
-        while (pendingSteps.size > 0 || runningPromises.size > 0) {
+        while (!this.scheduler.isComplete() || runningPromises.size > 0) {
           // Check for cancellation - drain in-flight steps but don't start new ones
           if (this.isCanceled) {
             if (runningPromises.size > 0) {
@@ -2322,73 +2125,61 @@ Please provide a corrected response that exactly matches the required schema.`;
             throw new Error('Workflow canceled by user');
           }
 
-          // 1. Find runnable steps (all dependencies met)
-          for (const stepId of pendingSteps) {
+          // 1. Find runnable steps from scheduler
+          const runnableSteps = this.scheduler.getRunnableSteps(
+            runningPromises.size,
+            globalConcurrencyLimit
+          );
+
+          for (const step of runnableSteps) {
             // Don't schedule new steps if canceled
             if (this.isCanceled) break;
 
-            const step = stepMap.get(stepId);
-            if (!step) {
-              throw new Error(`Step ${stepId} not found in workflow`);
-            }
+            const stepId = step.id;
+            this.scheduler.startStep(stepId);
 
-            let dependenciesMet = false;
-            if (step.type === 'join') {
-              dependenciesMet = this.isJoinConditionMet(
-                step as import('../parser/schema.ts').JoinStep,
-                completedSteps
-              );
-            } else {
-              dependenciesMet = step.needs.every((dep: string) => completedSteps.has(dep));
-            }
+            // Determine pool for this step
+            const poolName = step.pool || step.type;
 
-            if (dependenciesMet && runningPromises.size < globalConcurrencyLimit) {
-              pendingSteps.delete(stepId);
+            // Start execution
+            const stepIndex = stepIndices.get(stepId);
 
-              // Determine pool for this step
-              const poolName = step.pool || step.type;
+            const promise = (async () => {
+              let release: (() => void) | undefined;
+              try {
+                this.logger.debug?.(
+                  `[${stepIndex}/${totalSteps}] ⏳ Waiting for pool: ${poolName}`
+                );
+                release = await this.resourcePool.acquire(poolName, { signal: this.abortSignal });
 
-              // Start execution
-              const stepIndex = stepIndices.get(stepId);
+                this.logger.log(
+                  `[${stepIndex}/${totalSteps}] ▶ Executing step: ${step.id} (${step.type})`
+                );
 
-              const promise = (async () => {
-                let release: (() => void) | undefined;
-                try {
-                  this.logger.debug?.(
-                    `[${stepIndex}/${totalSteps}] ⏳ Waiting for pool: ${poolName}`
-                  );
-                  release = await this.resourcePool.acquire(poolName, { signal: this.abortSignal });
-
-                  this.logger.log(
-                    `[${stepIndex}/${totalSteps}] ▶ Executing step: ${step.id} (${step.type})`
-                  );
-
-                  await this.executeStepWithForeach(step);
-                  completedSteps.add(stepId);
-                  this.logger.log(`[${stepIndex}/${totalSteps}] ✓ Step ${step.id} completed\n`);
-                } finally {
-                  if (typeof release === 'function') {
-                    release();
-                  }
-                  runningPromises.delete(stepId);
+                await this.executeStepWithForeach(step);
+                this.scheduler.markStepComplete(stepId);
+                this.logger.log(`[${stepIndex}/${totalSteps}] ✓ Step ${step.id} completed\n`);
+              } finally {
+                if (typeof release === 'function') {
+                  release();
                 }
-              })();
+                runningPromises.delete(stepId);
+              }
+            })();
 
-              runningPromises.set(stepId, promise);
-            }
+            runningPromises.set(stepId, promise);
           }
 
           // 2. Detect deadlock (only if not canceled)
-          if (!this.isCanceled && runningPromises.size === 0 && pendingSteps.size > 0) {
-            const pendingList = Array.from(pendingSteps).join(', ');
-            throw new Error(
-              `Deadlock detected in workflow execution. Pending steps: ${pendingList}`
-            );
+          if (!this.isCanceled && runningPromises.size === 0 && !this.scheduler.isComplete()) {
+            throw new Error(`Deadlock detected in workflow execution. Steps remaining but none runnable.`);
           }
 
           // 3. Wait for at least one step to finish before checking again
           if (runningPromises.size > 0) {
             await Promise.race(runningPromises.values());
+            // Yield to event loop to prevent tight loop if multiple steps finish in same tick
+            await Bun.sleep(0);
           }
         }
       } catch (error) {
@@ -2407,11 +2198,6 @@ Please provide a corrected response that exactly matches the required schema.`;
         // But we want to ensure rollback happens BEFORE final status update if possible.
         throw error;
       }
-
-      // Determine final status
-      const failedSteps = remainingSteps.filter(
-        (id) => this.stepContexts.get(id)?.status === StepStatus.FAILED
-      );
 
       // Evaluate outputs
       const outputs = this.evaluateOutputs();
@@ -2438,7 +2224,7 @@ Please provide a corrected response that exactly matches the required schema.`;
       const errorMsg = error instanceof Error ? error.message : String(error);
 
       // Find the failed step from stepContexts
-      for (const [stepId, ctx] of this.stepContexts.entries()) {
+      for (const [stepId, ctx] of this.state.entries()) {
         if (ctx.status === 'failed') {
           this.lastFailedStep = { id: stepId, error: ctx.error || errorMsg };
           break;
@@ -2489,9 +2275,9 @@ Please provide a corrected response that exactly matches the required schema.`;
           const step = stepMap.get(stepId);
           if (!step) continue;
 
-          // Dependencies can be from main steps (already in this.stepContexts) or previous finally steps
+          // Dependencies can be from main steps (already in this.state) or previous finally steps
           const dependenciesMet = step.needs.every(
-            (dep: string) => this.stepContexts.has(dep) || completedFinallySteps.has(dep)
+            (dep: string) => this.state.has(dep) || completedFinallySteps.has(dep)
           );
 
           if (dependenciesMet) {
@@ -2529,6 +2315,7 @@ Please provide a corrected response that exactly matches the required schema.`;
 
         if (runningPromises.size > 0) {
           await Promise.race(runningPromises.values());
+          await Bun.sleep(0);
         }
       }
     } catch (error) {
@@ -2570,9 +2357,9 @@ Please provide a corrected response that exactly matches the required schema.`;
           const step = stepMap.get(stepId);
           if (!step) continue;
 
-          // Dependencies can be from main steps (already in this.stepContexts) or previous errors steps
+          // Dependencies can be from main steps (already in this.state) or previous errors steps
           const dependenciesMet = step.needs.every(
-            (dep: string) => this.stepContexts.has(dep) || completedErrorsSteps.has(dep)
+            (dep: string) => this.state.has(dep) || completedErrorsSteps.has(dep)
           );
 
           if (dependenciesMet) {
@@ -2610,6 +2397,7 @@ Please provide a corrected response that exactly matches the required schema.`;
 
         if (runningPromises.size > 0) {
           await Promise.race(runningPromises.values());
+          await Bun.sleep(0);
         }
       }
     } catch (error) {

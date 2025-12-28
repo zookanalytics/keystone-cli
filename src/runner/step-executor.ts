@@ -601,7 +601,7 @@ async function readResponseTextWithLimit(
       text += decoder.decode();
       try {
         await reader.cancel();
-      } catch {}
+      } catch { }
       return { text, truncated: true };
     }
 
@@ -799,15 +799,13 @@ async function executeRequestStep(
       status: response.ok ? 'success' : 'failed',
       error: response.ok
         ? undefined
-        : `HTTP ${response.status}: ${response.statusText}${
-            responseText
-              ? `\nResponse Body: ${responseText.substring(0, 500)}${responseText.length > 500 ? '...' : ''}${
-                  truncated ? ' [truncated]' : ''
-                }`
-              : truncated
-                ? '\nResponse Body: [truncated]'
-                : ''
-          }`,
+        : `HTTP ${response.status}: ${response.statusText}${responseText
+          ? `\nResponse Body: ${responseText.substring(0, 500)}${responseText.length > 500 ? '...' : ''}${truncated ? ' [truncated]' : ''
+          }`
+          : truncated
+            ? '\nResponse Body: [truncated]'
+            : ''
+        }`,
     };
   } finally {
     clearTimeout(timeoutId);
@@ -841,10 +839,10 @@ async function executeHumanStep(
       output:
         step.inputType === 'confirm'
           ? answer === true ||
-            (typeof answer === 'string' &&
-              (answer.toLowerCase() === 'true' ||
-                answer.toLowerCase() === 'yes' ||
-                answer.toLowerCase() === 'y'))
+          (typeof answer === 'string' &&
+            (answer.toLowerCase() === 'true' ||
+              answer.toLowerCase() === 'yes' ||
+              answer.toLowerCase() === 'y'))
           : answer,
       status: 'success',
     };
@@ -922,6 +920,25 @@ async function executeSleepStep(
     throw new Error(`Invalid sleep duration: ${evaluated}`);
   }
 
+  // Check if we are resuming a durable sleep
+  if (step.id && context.steps?.[step.id]?.status === 'waiting') {
+    const existing = context.steps[step.id].output as any;
+    if (existing?.wakeAt) {
+      const wakeAt = new Date(existing.wakeAt);
+      if (Date.now() < wakeAt.getTime()) {
+        return {
+          output: existing,
+          status: 'waiting',
+        };
+      }
+      // Time has passed!
+      return {
+        output: { slept: duration, resumed: true },
+        status: 'success',
+      };
+    }
+  }
+
   // For durable sleeps, return waiting status with wake time
   // Threshold: 60s (60000ms) - only durably wait if requested AND long enough
   if (step.durable && duration >= 60000) {
@@ -978,7 +995,7 @@ async function executeScriptStep(
     if (!step.allowInsecure) {
       throw new Error(
         'Script execution is disabled by default because Bun uses an insecure VM sandbox. ' +
-          "Set 'allowInsecure: true' on the script step to run it anyway."
+        "Set 'allowInsecure: true' on the script step to run it anyway."
       );
     }
 
@@ -1052,7 +1069,7 @@ async function executeMemoryStep(
       const embedding = await adapter.embed(text, resolvedModel);
       const metadata = step.metadata
         ? // biome-ignore lint/suspicious/noExplicitAny: metadata typing
-          (ExpressionEvaluator.evaluateObject(step.metadata, context) as Record<string, any>)
+        (ExpressionEvaluator.evaluateObject(step.metadata, context) as Record<string, any>)
         : {};
 
       const id = await memoryDb.store(text, embedding, metadata);

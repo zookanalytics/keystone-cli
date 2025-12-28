@@ -2,11 +2,11 @@ import { randomUUID } from 'node:crypto';
 import type { WorkflowDb } from '../db/workflow-db.ts';
 import { type ExpressionContext, ExpressionEvaluator } from '../expression/evaluator.ts';
 import type { Step } from '../parser/schema.ts';
-import { StepStatus, WorkflowStatus } from '../types/status.ts';
+import { StepStatus, type StepStatusType, WorkflowStatus } from '../types/status.ts';
 import type { Logger } from '../utils/logger.ts';
 import type { ResourcePoolManager } from './resource-pool.ts';
 import { WorkflowSuspendedError } from './step-executor.ts';
-import type { ForeachStepContext, StepContext } from './workflow-runner.ts';
+import { type ForeachStepContext, type StepContext } from './workflow-state.ts';
 
 export type ExecuteStepCallback = (
   step: Step,
@@ -24,7 +24,7 @@ export class ForeachExecutor {
     private executeStepFn: ExecuteStepCallback,
     private abortSignal?: AbortSignal,
     private resourcePool?: ResourcePoolManager
-  ) {}
+  ) { }
 
   /**
    * Aggregate outputs from multiple iterations of a foreach step
@@ -139,6 +139,66 @@ export class ForeachExecutor {
         itemResults.length = items.length;
       }
 
+      // Pre-generate IDs and batch-create step records for all pending iterations
+      const iterationIds = new Map<number, string>();
+      const toCreate: Array<{
+        id: string;
+        runId: string;
+        stepId: string;
+        iterationIndex: number;
+      }> = [];
+
+      for (let i = 0; i < items.length; i++) {
+        // Skip if already in results (from existingContext)
+        if (
+          itemResults[i] &&
+          (itemResults[i].status === StepStatus.SUCCESS ||
+            itemResults[i].status === StepStatus.SKIPPED)
+        ) {
+          continue;
+        }
+
+        // Check DB for resume if needed
+        if (shouldCheckDb) {
+          const existingExec = await this.db.getStepByIteration(runId, step.id, i);
+          if (
+            existingExec &&
+            (existingExec.status === StepStatus.SUCCESS ||
+              existingExec.status === StepStatus.SKIPPED)
+          ) {
+            // Hydrate result from DB
+            let output: unknown = null;
+            try {
+              output = existingExec.output ? JSON.parse(existingExec.output) : null;
+            } catch (error) {
+              this.logger.warn(
+                `Failed to parse output for step ${step.id} iteration ${i}: ${error}`
+              );
+            }
+            itemResults[i] = {
+              output,
+              outputs:
+                typeof output === 'object' && output !== null && !Array.isArray(output)
+                  ? (output as Record<string, unknown>)
+                  : {},
+              status: existingExec.status as StepStatusType,
+              error: existingExec.error || undefined,
+            } as StepContext;
+            continue;
+          }
+        }
+
+        // Needs execution
+        const id = randomUUID();
+        iterationIds.set(i, id);
+        toCreate.push({ id, runId, stepId: step.id, iterationIndex: i });
+      }
+
+      // Batch create all pending iterations
+      if (toCreate.length > 0) {
+        await this.db.batchCreateSteps(toCreate);
+      }
+
       // Worker pool implementation
       let currentIndex = 0;
       let aborted = false;
@@ -161,7 +221,7 @@ export class ForeachExecutor {
 
             const item = items[i];
 
-            // Skip if already successful or skipped
+            // Skip if already successful or skipped (either from memory or just hydrated above)
             if (
               itemResults[i] &&
               (itemResults[i].status === StepStatus.SUCCESS ||
@@ -177,61 +237,10 @@ export class ForeachExecutor {
               index: i,
             };
 
-            // Check DB again for robustness (resume flows only)
-            const existingExec = shouldCheckDb
-              ? await this.db.getStepByIteration(runId, step.id, i)
-              : undefined;
-            if (
-              existingExec &&
-              (existingExec.status === StepStatus.SUCCESS ||
-                existingExec.status === StepStatus.SKIPPED)
-            ) {
-              let output: unknown = null;
-              let itemStatus = existingExec.status as
-                | typeof StepStatus.SUCCESS
-                | typeof StepStatus.SKIPPED
-                | typeof StepStatus.FAILED;
-              let itemError: string | undefined = existingExec.error || undefined;
-
-              try {
-                output = existingExec.output ? JSON.parse(existingExec.output) : null;
-              } catch (error) {
-                this.logger.warn(
-                  `Failed to parse output for step ${step.id} iteration ${i}: ${error}`
-                );
-                output = { error: 'Failed to parse output' };
-                itemStatus = StepStatus.FAILED;
-                itemError = 'Failed to parse output';
-                aborted = true; // Fail fast if we find corrupted data
-                try {
-                  await this.db.completeStep(
-                    existingExec.id,
-                    StepStatus.FAILED,
-                    output,
-                    'Failed to parse output'
-                  );
-                } catch (dbError) {
-                  this.logger.warn(
-                    `Failed to update DB for corrupted output on step ${step.id} iteration ${i}: ${dbError}`
-                  );
-                }
-              }
-              itemResults[i] = {
-                output,
-                outputs:
-                  typeof output === 'object' && output !== null && !Array.isArray(output)
-                    ? (output as Record<string, unknown>)
-                    : {},
-                status: itemStatus,
-                error: itemError,
-              } as StepContext;
-              continue;
-            }
-
             if (aborted || this.abortSignal?.aborted) break;
 
-            const stepExecId = randomUUID();
-            await this.db.createStep(stepExecId, runId, step.id, i);
+            const stepExecId = iterationIds.get(i);
+            if (!stepExecId) continue; // Should not happen
 
             // Execute and store result
             try {

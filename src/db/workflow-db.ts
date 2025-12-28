@@ -75,6 +75,40 @@ export interface CompensationRecord {
 export class WorkflowDb {
   private db: Database;
 
+  private static readonly SQLITE_BUSY = 5;
+
+  private createRunStmt!: any;
+  private updateRunStatusStmt!: any;
+  private getRunStmt!: any;
+  private listRunsStmt!: any;
+  private pruneRunsStmt!: any;
+  private createStepStmt!: any;
+  private startStepStmt!: any;
+  private completeStepStmt!: any;
+  private incrementRetryStmt!: any;
+  private getStepByIterationStmt!: any;
+  private getMainStepStmt!: any;
+  private getStepsByRunStmt!: any;
+  private getSuccessfulRunsStmt!: any;
+  private getLastRunStmt!: any;
+  private getIdempotencyRecordStmt!: any;
+  private clearExpiredIdempotencyRecordStmt!: any;
+  private insertIdempotencyRecordIfAbsentStmt!: any;
+  private markIdempotencyRecordRunningStmt!: any;
+  private storeIdempotencyRecordStmt!: any;
+  private pruneIdempotencyRecordsStmt!: any;
+  private clearIdempotencyRecordsStmt!: any;
+  private listIdempotencyRecordsStmt!: any;
+  private clearAllIdempotencyRecordsStmt!: any;
+  private createTimerStmt!: any;
+  private getTimerStmt!: any;
+  private getTimerByStepStmt!: any;
+  private completeTimerStmt!: any;
+  private registerCompensationStmt!: any;
+  private updateCompensationStatusStmt!: any;
+  private getPendingCompensationsStmt!: any;
+  private getAllCompensationsStmt!: any;
+
   constructor(public readonly dbPath = PathResolver.resolveDbPath()) {
     const dir = dirname(dbPath);
     if (!existsSync(dir)) {
@@ -85,6 +119,173 @@ export class WorkflowDb {
     this.db.exec('PRAGMA foreign_keys = ON;'); // Enable foreign key enforcement
     this.db.exec('PRAGMA busy_timeout = 5000;'); // Retry busy signals for up to 5s
     this.initSchema();
+    this.initStatements();
+  }
+
+  private initStatements(): void {
+    this.createRunStmt = this.db.prepare(`
+      INSERT INTO workflow_runs (id, workflow_name, status, inputs, started_at)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    this.updateRunStatusStmt = this.db.prepare(`
+      UPDATE workflow_runs
+      SET status = ?, outputs = ?, error = ?, completed_at = ?
+      WHERE id = ?
+    `);
+    this.getRunStmt = this.db.prepare('SELECT * FROM workflow_runs WHERE id = ?');
+    this.listRunsStmt = this.db.prepare(`
+      SELECT * FROM workflow_runs
+      ORDER BY started_at DESC
+      LIMIT ?
+    `);
+    this.pruneRunsStmt = this.db.prepare('DELETE FROM workflow_runs WHERE started_at < ?');
+    this.createStepStmt = this.db.prepare(`
+      INSERT INTO step_executions (id, run_id, step_id, iteration_index, status, retry_count)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    this.startStepStmt = this.db.prepare(`
+      UPDATE step_executions
+      SET status = ?, started_at = ?
+      WHERE id = ?
+    `);
+    this.completeStepStmt = this.db.prepare(`
+      UPDATE step_executions
+      SET status = ?, output = ?, error = ?, completed_at = ?, usage = ?
+      WHERE id = ?
+    `);
+    this.incrementRetryStmt = this.db.prepare(`
+      UPDATE step_executions
+      SET retry_count = retry_count + 1
+      WHERE id = ?
+    `);
+    this.getStepByIterationStmt = this.db.prepare(`
+      SELECT * FROM step_executions
+      WHERE run_id = ? AND step_id = ? AND iteration_index = ?
+      ORDER BY started_at DESC
+      LIMIT 1
+    `);
+    this.getMainStepStmt = this.db.prepare(`
+      SELECT * FROM step_executions
+      WHERE run_id = ? AND step_id = ? AND iteration_index IS NULL
+      ORDER BY started_at DESC
+      LIMIT 1
+    `);
+    this.getStepsByRunStmt = this.db.prepare(`
+      SELECT * FROM step_executions
+      WHERE run_id = ?
+      ORDER BY started_at ASC, iteration_index ASC, rowid ASC
+      LIMIT ? OFFSET ?
+    `);
+    this.getSuccessfulRunsStmt = this.db.prepare(`
+      SELECT * FROM workflow_runs
+      WHERE workflow_name = ? AND status = 'success'
+      ORDER BY started_at DESC
+      LIMIT ?
+    `);
+    this.getLastRunStmt = this.db.prepare(`
+      SELECT * FROM workflow_runs
+      WHERE workflow_name = ?
+      ORDER BY started_at DESC
+      LIMIT 1
+    `);
+    this.getIdempotencyRecordStmt = this.db.prepare(`
+      SELECT * FROM idempotency_records
+      WHERE idempotency_key = ?
+      AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
+    `);
+    this.clearExpiredIdempotencyRecordStmt = this.db.prepare(`
+      DELETE FROM idempotency_records
+      WHERE idempotency_key = ?
+      AND expires_at IS NOT NULL
+      AND datetime(expires_at) < datetime('now')
+    `);
+    this.insertIdempotencyRecordIfAbsentStmt = this.db.prepare(`
+      INSERT OR IGNORE INTO idempotency_records
+      (idempotency_key, run_id, step_id, status, output, error, created_at, expires_at)
+      VALUES (?, ?, ?, ?, NULL, NULL, datetime('now'), ?)
+    `);
+    this.markIdempotencyRecordRunningStmt = this.db.prepare(`
+      UPDATE idempotency_records
+      SET status = ?, run_id = ?, step_id = ?, output = NULL, error = NULL, created_at = datetime('now'), expires_at = ?
+      WHERE idempotency_key = ?
+      AND status NOT IN (?, ?)
+    `);
+    this.storeIdempotencyRecordStmt = this.db.prepare(`
+      INSERT OR REPLACE INTO idempotency_records
+      (idempotency_key, run_id, step_id, status, output, error, created_at, expires_at)
+      VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?)
+    `);
+    this.pruneIdempotencyRecordsStmt = this.db.prepare(`
+      DELETE FROM idempotency_records
+      WHERE expires_at IS NOT NULL AND datetime(expires_at) < datetime('now')
+    `);
+    this.clearIdempotencyRecordsStmt = this.db.prepare('DELETE FROM idempotency_records WHERE run_id = ?');
+    this.listIdempotencyRecordsStmt = this.db.prepare(`
+      SELECT * FROM idempotency_records
+      ORDER BY created_at DESC
+      LIMIT 100
+    `);
+    this.clearAllIdempotencyRecordsStmt = this.db.prepare('DELETE FROM idempotency_records');
+    this.createTimerStmt = this.db.prepare(`
+      INSERT INTO durable_timers (id, run_id, step_id, timer_type, wake_at, created_at)
+      VALUES (?, ?, ?, ?, ?, datetime('now'))
+    `);
+    this.getTimerStmt = this.db.prepare('SELECT * FROM durable_timers WHERE id = ?');
+    this.getTimerByStepStmt = this.db.prepare(`
+      SELECT * FROM durable_timers
+      WHERE run_id = ? AND step_id = ? AND completed_at IS NULL
+      ORDER BY created_at DESC
+      LIMIT 1
+    `);
+    this.completeTimerStmt = this.db.prepare(`
+      UPDATE durable_timers
+      SET completed_at = datetime('now')
+      WHERE id = ?
+    `);
+    this.registerCompensationStmt = this.db.prepare(`
+      INSERT INTO compensations (id, run_id, step_id, compensation_step_id, definition, status, created_at)
+      VALUES (?, ?, ?, ?, ?, 'pending', datetime('now'))
+    `);
+    this.updateCompensationStatusStmt = this.db.prepare(`
+      UPDATE compensations
+      SET status = ?, output = ?, error = ?, completed_at = ?
+      WHERE id = ?
+    `);
+    this.getPendingCompensationsStmt = this.db.prepare(`
+      SELECT * FROM compensations
+      WHERE run_id = ? AND status = 'pending'
+      ORDER BY created_at DESC, rowid DESC
+    `);
+    this.getAllCompensationsStmt = this.db.prepare(`
+      SELECT * FROM compensations
+      WHERE run_id = ?
+      ORDER BY created_at DESC, rowid DESC
+    `);
+  }
+
+  /**
+   * Execute multiple operations in a single transaction.
+   * Since bun:sqlite transactions are synchronous, this blocks the event loop
+   * and should be used with care for fast-running operations.
+   */
+  public withTransaction<T>(operation: (db: Database) => T): T {
+    return this.db.transaction(operation)(this.db);
+  }
+
+  /**
+   * Batch create multiple step executions in a single transaction.
+   */
+  public async batchCreateSteps(
+    steps: Array<{ id: string; runId: string; stepId: string; iterationIndex: number | null }>
+  ): Promise<void> {
+    if (steps.length === 0) return;
+    await this.withRetry(() => {
+      this.db.transaction(() => {
+        for (const s of steps) {
+          this.createStepStmt.run(s.id, s.runId, s.stepId, s.iterationIndex, 'pending', 0);
+        }
+      })();
+    });
   }
 
   /**
@@ -95,7 +296,7 @@ export class WorkflowDb {
       const err = error as { code?: string | number; message?: string };
       return (
         err.code === 'SQLITE_BUSY' ||
-        err.code === 5 ||
+        err.code === WorkflowDb.SQLITE_BUSY ||
         (typeof err.message === 'string' &&
           (err.message.includes('SQLITE_BUSY') || err.message.includes('database is locked')))
       );
@@ -232,11 +433,13 @@ export class WorkflowDb {
     inputs: Record<string, unknown>
   ): Promise<void> {
     await this.withRetry(() => {
-      const stmt = this.db.prepare(`
-        INSERT INTO workflow_runs (id, workflow_name, status, inputs, started_at)
-        VALUES (?, ?, ?, ?, ?)
-      `);
-      stmt.run(id, workflowName, 'pending', JSON.stringify(inputs), new Date().toISOString());
+      this.createRunStmt.run(
+        id,
+        workflowName,
+        'pending',
+        JSON.stringify(inputs),
+        new Date().toISOString()
+      );
     });
   }
 
@@ -247,14 +450,15 @@ export class WorkflowDb {
     error?: string
   ): Promise<void> {
     await this.withRetry(() => {
-      const stmt = this.db.prepare(`
-        UPDATE workflow_runs
-        SET status = ?, outputs = ?, error = ?, completed_at = ?
-        WHERE id = ?
-      `);
       const completedAt =
         status === 'success' || status === 'failed' ? new Date().toISOString() : null;
-      stmt.run(status, outputs ? JSON.stringify(outputs) : null, error || null, completedAt, id);
+      this.updateRunStatusStmt.run(
+        status,
+        outputs ? JSON.stringify(outputs) : null,
+        error || null,
+        completedAt,
+        id
+      );
     });
   }
 
@@ -269,8 +473,7 @@ export class WorkflowDb {
    */
   async getRun(id: string): Promise<WorkflowRun | null> {
     return this.withRetry(() => {
-      const stmt = this.db.prepare('SELECT * FROM workflow_runs WHERE id = ?');
-      return stmt.get(id) as WorkflowRun | null;
+      return this.getRunStmt.get(id) as WorkflowRun | null;
     });
   }
 
@@ -280,12 +483,7 @@ export class WorkflowDb {
    */
   async listRuns(limit = 50): Promise<WorkflowRun[]> {
     return this.withRetry(() => {
-      const stmt = this.db.prepare(`
-        SELECT * FROM workflow_runs
-        ORDER BY started_at DESC
-        LIMIT ?
-      `);
-      return stmt.all(limit) as WorkflowRun[];
+      return this.listRunsStmt.all(limit) as WorkflowRun[];
     });
   }
 
@@ -299,8 +497,7 @@ export class WorkflowDb {
       cutoffDate.setDate(cutoffDate.getDate() - days);
       const cutoffIso = cutoffDate.toISOString();
 
-      const stmt = this.db.prepare('DELETE FROM workflow_runs WHERE started_at < ?');
-      const result = stmt.run(cutoffIso);
+      const result = this.pruneRunsStmt.run(cutoffIso);
 
       return result.changes;
     });
@@ -321,22 +518,13 @@ export class WorkflowDb {
     iterationIndex: number | null = null
   ): Promise<void> {
     await this.withRetry(() => {
-      const stmt = this.db.prepare(`
-        INSERT INTO step_executions (id, run_id, step_id, iteration_index, status, retry_count)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `);
-      stmt.run(id, runId, stepId, iterationIndex, 'pending', 0);
+      this.createStepStmt.run(id, runId, stepId, iterationIndex, 'pending', 0);
     });
   }
 
   async startStep(id: string): Promise<void> {
     await this.withRetry(() => {
-      const stmt = this.db.prepare(`
-        UPDATE step_executions
-        SET status = ?, started_at = ?
-        WHERE id = ?
-      `);
-      stmt.run('running', new Date().toISOString(), id);
+      this.startStepStmt.run('running', new Date().toISOString(), id);
     });
   }
 
@@ -348,12 +536,7 @@ export class WorkflowDb {
     usage?: unknown
   ): Promise<void> {
     await this.withRetry(() => {
-      const stmt = this.db.prepare(`
-        UPDATE step_executions
-        SET status = ?, output = ?, error = ?, completed_at = ?, usage = ?
-        WHERE id = ?
-      `);
-      stmt.run(
+      this.completeStepStmt.run(
         status,
         output === undefined ? null : JSON.stringify(output),
         error || null,
@@ -366,12 +549,7 @@ export class WorkflowDb {
 
   async incrementRetry(id: string): Promise<void> {
     await this.withRetry(() => {
-      const stmt = this.db.prepare(`
-        UPDATE step_executions
-        SET retry_count = retry_count + 1
-        WHERE id = ?
-      `);
-      stmt.run(id);
+      this.incrementRetryStmt.run(id);
     });
   }
 
@@ -385,13 +563,7 @@ export class WorkflowDb {
     iterationIndex: number
   ): Promise<StepExecution | null> {
     return this.withRetry(() => {
-      const stmt = this.db.prepare(`
-        SELECT * FROM step_executions
-        WHERE run_id = ? AND step_id = ? AND iteration_index = ?
-        ORDER BY started_at DESC
-        LIMIT 1
-      `);
-      return stmt.get(runId, stepId, iterationIndex) as StepExecution | null;
+      return this.getStepByIterationStmt.get(runId, stepId, iterationIndex) as StepExecution | null;
     });
   }
 
@@ -400,13 +572,7 @@ export class WorkflowDb {
    */
   public async getMainStep(runId: string, stepId: string): Promise<StepExecution | null> {
     return this.withRetry(() => {
-      const stmt = this.db.prepare(`
-        SELECT * FROM step_executions
-        WHERE run_id = ? AND step_id = ? AND iteration_index IS NULL
-        ORDER BY started_at DESC
-        LIMIT 1
-      `);
-      return stmt.get(runId, stepId) as StepExecution | null;
+      return this.getMainStepStmt.get(runId, stepId) as StepExecution | null;
     });
   }
 
@@ -416,13 +582,7 @@ export class WorkflowDb {
    */
   async getStepsByRun(runId: string, limit = -1, offset = 0): Promise<StepExecution[]> {
     return this.withRetry(() => {
-      const stmt = this.db.prepare(`
-        SELECT * FROM step_executions
-        WHERE run_id = ?
-        ORDER BY started_at ASC, iteration_index ASC, rowid ASC
-        LIMIT ? OFFSET ?
-      `);
-      return stmt.all(runId, limit, offset) as StepExecution[];
+      return this.getStepsByRunStmt.all(runId, limit, offset) as StepExecution[];
     });
   }
 
@@ -440,13 +600,7 @@ export class WorkflowDb {
 
   async getSuccessfulRuns(workflowName: string, limit = 3): Promise<WorkflowRun[]> {
     return await this.withRetry(() => {
-      const stmt = this.db.prepare(`
-        SELECT * FROM workflow_runs
-        WHERE workflow_name = ? AND status = 'success'
-        ORDER BY started_at DESC
-        LIMIT ?
-      `);
-      return stmt.all(workflowName, limit) as WorkflowRun[];
+      return this.getSuccessfulRunsStmt.all(workflowName, limit) as WorkflowRun[];
     });
   }
 
@@ -455,13 +609,7 @@ export class WorkflowDb {
    */
   async getLastRun(workflowName: string): Promise<WorkflowRun | null> {
     return this.withRetry(() => {
-      const stmt = this.db.prepare(`
-        SELECT * FROM workflow_runs
-        WHERE workflow_name = ?
-        ORDER BY started_at DESC
-        LIMIT 1
-      `);
-      return stmt.get(workflowName) as WorkflowRun | null;
+      return this.getLastRunStmt.get(workflowName) as WorkflowRun | null;
     });
   }
   // ===== Idempotency Records =====
@@ -472,12 +620,7 @@ export class WorkflowDb {
    */
   async getIdempotencyRecord(key: string): Promise<IdempotencyRecord | null> {
     return this.withRetry(() => {
-      const stmt = this.db.prepare(`
-        SELECT * FROM idempotency_records
-        WHERE idempotency_key = ?
-        AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
-      `);
-      return stmt.get(key) as IdempotencyRecord | null;
+      return this.getIdempotencyRecordStmt.get(key) as IdempotencyRecord | null;
     });
   }
 
@@ -486,13 +629,7 @@ export class WorkflowDb {
    */
   async clearExpiredIdempotencyRecord(key: string): Promise<number> {
     return await this.withRetry(() => {
-      const stmt = this.db.prepare(`
-        DELETE FROM idempotency_records
-        WHERE idempotency_key = ?
-        AND expires_at IS NOT NULL
-        AND datetime(expires_at) < datetime('now')
-      `);
-      const result = stmt.run(key);
+      const result = this.clearExpiredIdempotencyRecordStmt.run(key);
       return result.changes;
     });
   }
@@ -509,12 +646,7 @@ export class WorkflowDb {
   ): Promise<boolean> {
     return await this.withRetry(() => {
       const expiresAt = this.formatExpiresAt(ttlSeconds);
-      const stmt = this.db.prepare(`
-        INSERT OR IGNORE INTO idempotency_records
-        (idempotency_key, run_id, step_id, status, output, error, created_at, expires_at)
-        VALUES (?, ?, ?, ?, NULL, NULL, datetime('now'), ?)
-      `);
-      const result = stmt.run(key, runId, stepId, status, expiresAt);
+      const result = this.insertIdempotencyRecordIfAbsentStmt.run(key, runId, stepId, status, expiresAt);
       return result.changes > 0;
     });
   }
@@ -530,13 +662,7 @@ export class WorkflowDb {
   ): Promise<boolean> {
     return await this.withRetry(() => {
       const expiresAt = this.formatExpiresAt(ttlSeconds);
-      const stmt = this.db.prepare(`
-        UPDATE idempotency_records
-        SET status = ?, run_id = ?, step_id = ?, output = NULL, error = NULL, created_at = datetime('now'), expires_at = ?
-        WHERE idempotency_key = ?
-        AND status NOT IN (?, ?)
-      `);
-      const result = stmt.run(
+      const result = this.markIdempotencyRecordRunningStmt.run(
         StepStatusConst.RUNNING,
         runId,
         stepId,
@@ -564,12 +690,7 @@ export class WorkflowDb {
   ): Promise<void> {
     await this.withRetry(() => {
       const expiresAt = this.formatExpiresAt(ttlSeconds);
-      const stmt = this.db.prepare(`
-        INSERT OR REPLACE INTO idempotency_records
-        (idempotency_key, run_id, step_id, status, output, error, created_at, expires_at)
-        VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?)
-      `);
-      stmt.run(
+      this.storeIdempotencyRecordStmt.run(
         key,
         runId,
         stepId,
@@ -586,11 +707,7 @@ export class WorkflowDb {
    */
   async pruneIdempotencyRecords(): Promise<number> {
     return await this.withRetry(() => {
-      const stmt = this.db.prepare(`
-        DELETE FROM idempotency_records
-        WHERE expires_at IS NOT NULL AND datetime(expires_at) < datetime('now')
-      `);
-      const result = stmt.run();
+      const result = this.pruneIdempotencyRecordsStmt.run();
       return result.changes;
     });
   }
@@ -600,8 +717,7 @@ export class WorkflowDb {
    */
   async clearIdempotencyRecords(runId: string): Promise<number> {
     return await this.withRetry(() => {
-      const stmt = this.db.prepare('DELETE FROM idempotency_records WHERE run_id = ?');
-      const result = stmt.run(runId);
+      const result = this.clearIdempotencyRecordsStmt.run(runId);
       return result.changes;
     });
   }
@@ -624,19 +740,17 @@ export class WorkflowDb {
   async listIdempotencyRecords(runId?: string): Promise<IdempotencyRecord[]> {
     return this.withRetry(() => {
       if (runId) {
-        const stmt = this.db.prepare(`
+        return this.db
+          .prepare(
+            `
           SELECT * FROM idempotency_records
           WHERE run_id = ?
           ORDER BY created_at DESC
-        `);
-        return stmt.all(runId) as IdempotencyRecord[];
+        `
+          )
+          .all(runId) as IdempotencyRecord[];
       }
-      const stmt = this.db.prepare(`
-        SELECT * FROM idempotency_records
-        ORDER BY created_at DESC
-        LIMIT 100
-      `);
-      return stmt.all() as IdempotencyRecord[];
+      return this.listIdempotencyRecordsStmt.all() as IdempotencyRecord[];
     });
   }
 
@@ -645,8 +759,7 @@ export class WorkflowDb {
    */
   async clearAllIdempotencyRecords(): Promise<number> {
     return await this.withRetry(() => {
-      const stmt = this.db.prepare('DELETE FROM idempotency_records');
-      const result = stmt.run();
+      const result = this.clearAllIdempotencyRecordsStmt.run();
       return result.changes;
     });
   }
@@ -664,11 +777,7 @@ export class WorkflowDb {
     wakeAt?: string
   ): Promise<void> {
     await this.withRetry(() => {
-      const stmt = this.db.prepare(`
-        INSERT INTO durable_timers (id, run_id, step_id, timer_type, wake_at, created_at)
-        VALUES (?, ?, ?, ?, ?, datetime('now'))
-      `);
-      stmt.run(id, runId, stepId, timerType, wakeAt || null);
+      this.createTimerStmt.run(id, runId, stepId, timerType, wakeAt || null);
     });
   }
 
@@ -677,8 +786,7 @@ export class WorkflowDb {
    */
   async getTimer(id: string): Promise<DurableTimer | null> {
     return this.withRetry(() => {
-      const stmt = this.db.prepare('SELECT * FROM durable_timers WHERE id = ?');
-      return stmt.get(id) as DurableTimer | null;
+      return this.getTimerStmt.get(id) as DurableTimer | null;
     });
   }
 
@@ -687,13 +795,7 @@ export class WorkflowDb {
    */
   async getTimerByStep(runId: string, stepId: string): Promise<DurableTimer | null> {
     return this.withRetry(() => {
-      const stmt = this.db.prepare(`
-        SELECT * FROM durable_timers
-        WHERE run_id = ? AND step_id = ? AND completed_at IS NULL
-        ORDER BY created_at DESC
-        LIMIT 1
-      `);
-      return stmt.get(runId, stepId) as DurableTimer | null;
+      return this.getTimerByStepStmt.get(runId, stepId) as DurableTimer | null;
     });
   }
 
@@ -724,12 +826,7 @@ export class WorkflowDb {
    */
   async completeTimer(id: string): Promise<void> {
     await this.withRetry(() => {
-      const stmt = this.db.prepare(`
-        UPDATE durable_timers
-        SET completed_at = datetime('now')
-        WHERE id = ?
-      `);
-      stmt.run(id);
+      this.completeTimerStmt.run(id);
     });
   }
 
@@ -794,11 +891,7 @@ export class WorkflowDb {
     definition: string
   ): Promise<void> {
     await this.withRetry(() => {
-      const stmt = this.db.prepare(`
-        INSERT INTO compensations (id, run_id, step_id, compensation_step_id, definition, status, created_at)
-        VALUES (?, ?, ?, ?, ?, 'pending', datetime('now'))
-      `);
-      stmt.run(id, runId, stepId, compensationStepId, definition);
+      this.registerCompensationStmt.run(id, runId, stepId, compensationStepId, definition);
     });
   }
 
@@ -809,14 +902,9 @@ export class WorkflowDb {
     error?: string
   ): Promise<void> {
     await this.withRetry(() => {
-      const stmt = this.db.prepare(`
-        UPDATE compensations
-        SET status = ?, output = ?, error = ?, completed_at = ?
-        WHERE id = ?
-      `);
       const completedAt =
         status === 'success' || status === 'failed' ? new Date().toISOString() : null;
-      stmt.run(
+      this.updateCompensationStatusStmt.run(
         status,
         output === undefined ? null : JSON.stringify(output),
         error || null,
@@ -828,23 +916,13 @@ export class WorkflowDb {
 
   async getPendingCompensations(runId: string): Promise<CompensationRecord[]> {
     return this.withRetry(() => {
-      const stmt = this.db.prepare(`
-        SELECT * FROM compensations
-        WHERE run_id = ? AND status = 'pending'
-        ORDER BY created_at DESC, rowid DESC
-      `);
-      return stmt.all(runId) as CompensationRecord[];
+      return this.getPendingCompensationsStmt.all(runId) as CompensationRecord[];
     });
   }
 
   async getAllCompensations(runId: string): Promise<CompensationRecord[]> {
     return this.withRetry(() => {
-      const stmt = this.db.prepare(`
-        SELECT * FROM compensations
-        WHERE run_id = ?
-        ORDER BY created_at DESC, rowid DESC
-      `);
-      return stmt.all(runId) as CompensationRecord[];
+      return this.getAllCompensationsStmt.all(runId) as CompensationRecord[];
     });
   }
 

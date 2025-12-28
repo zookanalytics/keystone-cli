@@ -6,9 +6,17 @@ import { WorkflowParser } from '../parser/workflow-parser';
 import { ConfigLoader } from '../utils/config-loader';
 import { WorkflowRegistry } from '../utils/workflow-registry';
 import { WorkflowRunner } from './workflow-runner';
+import { container } from '../utils/container';
+import { ConsoleLogger } from '../utils/logger';
+import { MemoryDb } from '../db/memory-db';
 
 describe('WorkflowRunner', () => {
   const dbPath = ':memory:';
+
+  // Setup DI container for tests
+  container.register('logger', new ConsoleLogger());
+  container.register('db', new WorkflowDb(dbPath));
+  container.register('memoryDb', new MemoryDb());
   const activeSpies: Array<{ mockRestore: () => void }> = [];
   const trackSpy = <T extends { mockRestore: () => void }>(spy: T): T => {
     activeSpies.push(spy);
@@ -182,8 +190,8 @@ describe('WorkflowRunner', () => {
       },
       error: (msg: string) => console.error(msg),
       warn: (msg: string) => console.warn(msg),
-      info: (msg: string) => {},
-      debug: (msg: string) => {},
+      info: (msg: string) => { },
+      debug: (msg: string) => { },
     };
 
     const finallyWorkflow: Workflow = {
@@ -319,10 +327,10 @@ describe('WorkflowRunner', () => {
           errorsBlockExecuted = true;
         }
       },
-      error: () => {},
-      warn: () => {},
-      info: () => {},
-      debug: () => {},
+      error: () => { },
+      warn: () => { },
+      info: () => { },
+      debug: () => { },
     };
 
     const errorsWorkflow: Workflow = {
@@ -378,10 +386,10 @@ describe('WorkflowRunner', () => {
           idempotencyHitCount++;
         }
       },
-      error: () => {},
-      warn: () => {},
-      info: () => {},
-      debug: () => {},
+      error: () => { },
+      warn: () => { },
+      info: () => { },
+      debug: () => { },
     };
 
     const idempotencyWorkflow: Workflow = {
@@ -588,8 +596,10 @@ describe('WorkflowRunner', () => {
       log: (msg: string) => {
         if (msg.includes('Executing step: s1')) s1Executed = true;
       },
-      error: () => {},
-      warn: () => {},
+      error: () => { },
+      warn: () => { },
+      info: () => { },
+      debug: () => { },
     };
 
     const runner2 = new WorkflowRunner(fixedWorkflow, {
@@ -718,13 +728,15 @@ describe('WorkflowRunner', () => {
   it('should continue even if finally step fails', async () => {
     let finallyFailedLogged = false;
     const runnerLogger = {
-      log: () => {},
+      log: () => { },
       error: (msg: string) => {
         if (msg.includes('Finally step fin failed')) {
           finallyFailedLogged = true;
         }
       },
-      warn: () => {},
+      warn: () => { },
+      info: () => { },
+      debug: () => { },
     };
 
     const failFinallyWorkflow: Workflow = {
@@ -746,8 +758,10 @@ describe('WorkflowRunner', () => {
           retryLogged = true;
         }
       },
-      error: () => {},
-      warn: () => {},
+      error: () => { },
+      warn: () => { },
+      info: () => { },
+      debug: () => { },
     };
 
     const retryWorkflow: Workflow = {
@@ -943,15 +957,15 @@ describe('WorkflowRunner', () => {
     // Verify warnings
     let warningLogged = false;
     const logger = {
-      log: () => {},
-      error: () => {},
+      log: () => { },
+      error: () => { },
       warn: (msg: string) => {
         if (msg.includes("Resuming a run marked as 'running'")) {
           warningLogged = true;
         }
       },
-      info: () => {},
-      debug: () => {},
+      info: () => { },
+      debug: () => { },
     };
 
     const runner = new WorkflowRunner(workflow, {
@@ -1056,9 +1070,9 @@ describe('WorkflowRunner', () => {
           loggedResume = true;
         }
       },
-      error: () => {},
-      warn: () => {},
-      info: () => {},
+      error: () => { },
+      warn: () => { },
+      info: () => { },
     };
 
     const runner = new WorkflowRunner(workflow, {

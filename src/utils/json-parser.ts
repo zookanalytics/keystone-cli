@@ -22,13 +22,25 @@ export function extractJson(text: string): unknown {
   }
 
   // 1. Try to extract from Markdown code blocks first
-  const markdownRegex = /```(?:json)?\s*([\s\S]*?)\s*```/gi;
   const blocks: string[] = [];
-  let match = markdownRegex.exec(text);
+  let currentIndex = 0;
+  while (true) {
+    const startIdx = text.indexOf('```', currentIndex);
+    if (startIdx === -1) break;
 
-  while (match !== null) {
-    blocks.push(match[1].trim());
-    match = markdownRegex.exec(text);
+    // Move past the ```
+    const contentStart = startIdx + 3;
+    // Find the next ``` after the content start
+    const endIdx = text.indexOf('```', contentStart);
+    if (endIdx === -1) break;
+
+    const rawBlock = text.substring(contentStart, endIdx);
+    // Remove language identifier (e.g., 'json') if present
+    const cleanBlock = rawBlock.replace(/^(?:json)?\s+/, '').trim();
+    if (cleanBlock) {
+      blocks.push(cleanBlock);
+    }
+    currentIndex = endIdx + 3;
   }
 
   if (blocks.length > 0) {

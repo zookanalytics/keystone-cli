@@ -19,7 +19,7 @@ describe('Durable Timers Integration', () => {
     try {
       const { rmSync } = require('node:fs');
       rmSync(dbPath);
-    } catch {}
+    } catch { }
   });
 
   const sleepWorkflow: Workflow = {
@@ -118,7 +118,7 @@ describe('Durable Timers Integration', () => {
     // Start it once to get it waiting
     try {
       await runner.run();
-    } catch {}
+    } catch { }
 
     // Now try to resume with a new runner instance
     const resumeRunner = new WorkflowRunner(sleepWorkflow, {
@@ -144,7 +144,7 @@ describe('Durable Timers Integration', () => {
     const runId = runner.runId;
     try {
       await runner.run();
-    } catch {}
+    } catch { }
 
     const timersBefore = await db.listTimers(runId);
     expect(timersBefore).toHaveLength(1);
@@ -152,7 +152,7 @@ describe('Durable Timers Integration', () => {
     const resumeRunner = new WorkflowRunner(sleepWorkflow, { dbPath, resumeRunId: runId });
     try {
       await resumeRunner.run();
-    } catch {}
+    } catch { }
 
     const timersAfter = await db.listTimers(runId);
     // After fix, it should NOT create a new timer if one is already pending
@@ -165,7 +165,7 @@ describe('Durable Timers Integration', () => {
 
     try {
       await runner.run();
-    } catch {}
+    } catch { }
 
     const timer = await db.getTimerByStep(runId, 'wait');
     expect(timer).toBeDefined();
@@ -174,10 +174,15 @@ describe('Durable Timers Integration', () => {
     }
 
     // Manually backdate the timer in the DB to simulate elapsed time
-    const pastDate = new Date(Date.now() - 1000).toISOString();
+    const pastDate = new Date(Date.now() - 10000).toISOString();
     const { Database } = require('bun:sqlite');
     const sqlite = new Database(dbPath);
     sqlite.prepare('UPDATE durable_timers SET wake_at = ? WHERE id = ?').run(pastDate, timer.id);
+
+    // Also need to update the step_executions output, as WorkflowState hydrates from there
+    const newOutput = JSON.stringify({ durable: true, wakeAt: pastDate, durationMs: 120000 });
+    sqlite.prepare('UPDATE step_executions SET output = ? WHERE run_id = ? AND step_id = ?').run(newOutput, runId, 'wait');
+
     sqlite.close();
 
     const resumeRunner = new WorkflowRunner(sleepWorkflow, {
@@ -192,7 +197,9 @@ describe('Durable Timers Integration', () => {
     expect(run?.status).toBe(WorkflowStatus.SUCCESS);
 
     const steps = await db.getStepsByRun(runId);
-    expect(steps[0].status).toBe(StepStatus.SUCCESS);
+    const waitStep = steps.find(s => s.step_id === 'wait' && s.status === StepStatus.SUCCESS);
+    expect(waitStep).toBeDefined();
+    expect(waitStep?.status).toBe(StepStatus.SUCCESS);
 
     const finalTimer = await db.getTimer(timer.id);
     expect(finalTimer?.completed_at).not.toBeNull();

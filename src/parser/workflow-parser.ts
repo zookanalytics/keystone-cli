@@ -244,7 +244,8 @@ export class WorkflowParser {
 
     // Validate all dependencies exist before sorting
     for (const step of workflow.steps) {
-      for (const dep of step.needs) {
+      const needs = step.needs || [];
+      for (const dep of needs) {
         if (!stepMap.has(dep)) {
           throw new Error(`Step "${step.id}" depends on non-existent step "${dep}"`);
         }
@@ -254,13 +255,15 @@ export class WorkflowParser {
     // Calculate in-degree
     // In-degree = number of dependencies a step has
     for (const step of workflow.steps) {
-      inDegree.set(step.id, step.needs.length);
+      const needs = step.needs || [];
+      inDegree.set(step.id, needs.length);
     }
 
     // Build reverse dependency map for O(1) lookups instead of O(n)
     const dependents = new Map<string, string[]>();
     for (const step of workflow.steps) {
-      for (const dep of step.needs) {
+      const needs = step.needs || [];
+      for (const dep of needs) {
         if (!dependents.has(dep)) dependents.set(dep, []);
         dependents.get(dep)?.push(step.id);
       }

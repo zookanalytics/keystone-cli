@@ -22,6 +22,8 @@ export interface ProcessSandboxOptions {
   cwd?: string;
   /** Logger for script output (console.log, etc) */
   logger?: Logger;
+  /** Use Bun Worker instead of subprocess (default: false) */
+  useWorker?: boolean;
 }
 
 export interface ProcessSandboxResult {
@@ -61,12 +63,14 @@ export class ProcessSandbox {
       await mkdir(tempDir, { recursive: true, mode: FILE_MODES.SECURE_DIR });
 
       // Write the runner script
-      const runnerScript = ProcessSandbox.createRunnerScript(code, context);
+      const runnerScript = ProcessSandbox.createRunnerScript(code, context, !!options.useWorker);
       const scriptPath = join(tempDir, 'script.js');
       await writeFile(scriptPath, runnerScript, 'utf-8');
 
-      // Execute in subprocess
-      const result = await ProcessSandbox.runInSubprocess(scriptPath, timeout, options);
+      // Execute in subprocess or worker
+      const result = options.useWorker
+        ? await ProcessSandbox.runInWorker(scriptPath, timeout, options)
+        : await ProcessSandbox.runInSubprocess(scriptPath, timeout, options);
 
       if (result.timedOut) {
         throw new Error(`Script execution timed out after ${timeout}ms`);
@@ -88,9 +92,13 @@ export class ProcessSandbox {
   }
 
   /**
-   * Create the runner script that will be executed in the subprocess.
+   * Create the runner script that will be executed in the subprocess or worker.
    */
-  private static createRunnerScript(code: string, context: Record<string, unknown>): string {
+  private static createRunnerScript(
+    code: string,
+    context: Record<string, unknown>,
+    isWorker: boolean
+  ): string {
     // Sanitize context by re-parsing to strip any inherited properties or prototype pollution
     const sanitizedContext = JSON.parse(JSON.stringify(context));
     const contextJson = JSON.stringify(sanitizedContext);
@@ -100,8 +108,12 @@ export class ProcessSandbox {
 // Context is sanitized through JSON parse/stringify to prevent prototype pollution
 const context = ${contextJson};
 
+// Use explicit flag passed from host
+const isWorker = ${isWorker};
+
 // Capture essential functions before deleting dangerous globals
-const __write = process.stdout.write.bind(process.stdout);
+const __write = !isWorker ? process.stdout.write.bind(process.stdout) : null;
+const __post = isWorker ? self.postMessage.bind(self) : null;
 
 // Remove dangerous globals to prevent sandbox escape
 const dangerousGlobals = [
@@ -142,19 +154,39 @@ Object.assign(globalThis, context);
 // Custom console that prefixes logs for the runner to intercept
 const __keystone_console = {
   log: (...args) => {
-    __write('__SANDBOX_LOG__:' + args.join(' ') + '\\n');
+    if (isWorker) {
+      __post({ type: 'log', message: args.join(' ') });
+    } else {
+      __write('__SANDBOX_LOG__:' + args.join(' ') + '\\n');
+    }
   },
   error: (...args) => {
-    __write('__SANDBOX_LOG__:ERROR: ' + args.join(' ') + '\\n');
+    if (isWorker) {
+      __post({ type: 'log', message: 'ERROR: ' + args.join(' ') });
+    } else {
+      __write('__SANDBOX_LOG__:ERROR: ' + args.join(' ') + '\\n');
+    }
   },
   warn: (...args) => {
-    __write('__SANDBOX_LOG__:WARN: ' + args.join(' ') + '\\n');
+    if (isWorker) {
+      __post({ type: 'log', message: 'WARN: ' + args.join(' ') });
+    } else {
+      __write('__SANDBOX_LOG__:WARN: ' + args.join(' ') + '\\n');
+    }
   },
   info: (...args) => {
-    __write('__SANDBOX_LOG__:INFO: ' + args.join(' ') + '\\n');
+    if (isWorker) {
+      __post({ type: 'log', message: 'INFO: ' + args.join(' ') });
+    } else {
+      __write('__SANDBOX_LOG__:INFO: ' + args.join(' ') + '\\n');
+    }
   },
   debug: (...args) => {
-    __write('__SANDBOX_LOG__:DEBUG: ' + args.join(' ') + '\\n');
+    if (isWorker) {
+      __post({ type: 'log', message: 'DEBUG: ' + args.join(' ') });
+    } else {
+      __write('__SANDBOX_LOG__:DEBUG: ' + args.join(' ') + '\\n');
+    }
   }
 };
 
@@ -168,12 +200,58 @@ globalThis.console = __keystone_console;
       ${code}
     })();
     
-    __write(JSON.stringify({ success: true, result: __result }) + '\\n');
+    if (isWorker) {
+      __post({ type: 'result', success: true, result: __result });
+    } else {
+      __write(JSON.stringify({ success: true, result: __result }) + '\\n');
+    }
   } catch (error) {
-    __write(JSON.stringify({ success: false, error: error.message || String(error) }) + '\\n');
+    const errorMsg = error.message || String(error);
+    if (isWorker) {
+      __post({ type: 'result', success: false, error: errorMsg });
+    } else {
+      __write(JSON.stringify({ success: false, error: errorMsg }) + '\\n');
+    }
   }
 })();
 `;
+  }
+
+  /**
+   * Run a script in a Bun Worker with timeout.
+   */
+  private static runInWorker(
+    scriptPath: string,
+    timeout: number,
+    options: ProcessSandboxOptions
+  ): Promise<ProcessSandboxResult> {
+    return new Promise((resolve) => {
+      let timedOut = false;
+      const worker = new Worker(scriptPath);
+
+      const timeoutHandle = setTimeout(() => {
+        timedOut = true;
+        worker.terminate();
+        resolve({ success: false, timedOut: true });
+      }, timeout);
+
+      worker.onmessage = (event) => {
+        const data = event.data;
+        if (data?.type === 'log') {
+          options.logger?.log(data.message);
+        } else if (data?.type === 'result') {
+          clearTimeout(timeoutHandle);
+          worker.terminate();
+          resolve(data);
+        }
+      };
+
+      worker.onerror = (error) => {
+        clearTimeout(timeoutHandle);
+        worker.terminate();
+        resolve({ success: false, error: error.message });
+      };
+    });
   }
 
   /**
