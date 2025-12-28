@@ -107,16 +107,28 @@ export class ProcessSandbox {
   ): string {
     // Check for prototype pollution attempts before serialization
     const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
-    const checkForDangerousKeys = (obj: unknown, path: string = ''): void => {
+    const checkForDangerousKeys = (obj: unknown, path: string = '', visited = new WeakSet<object>()): void => {
       if (obj === null || typeof obj !== 'object') return;
-      for (const key of Object.keys(obj as Record<string, unknown>)) {
+
+      // Prevent infinite loops with circular references
+      if (visited.has(obj)) return;
+      visited.add(obj);
+
+      // Handle arrays - check each element
+      if (Array.isArray(obj)) {
+        obj.forEach((item, idx) => checkForDangerousKeys(item, `${path}[${idx}]`, visited));
+        return;
+      }
+
+      // Use getOwnPropertyNames to catch non-enumerable properties too
+      for (const key of Object.getOwnPropertyNames(obj)) {
         if (dangerousKeys.includes(key)) {
           throw new Error(
             `Security Error: Context contains forbidden key "${key}"${path ? ` at path "${path}"` : ''}. ` +
             `This may indicate a prototype pollution attack.`
           );
         }
-        checkForDangerousKeys((obj as Record<string, unknown>)[key], path ? `${path}.${key}` : key);
+        checkForDangerousKeys((obj as Record<string, unknown>)[key], path ? `${path}.${key}` : key, visited);
       }
     };
     checkForDangerousKeys(context);

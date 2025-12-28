@@ -144,27 +144,26 @@ export class Redactor {
   /**
    * Redact all secrets from a string.
    * Returns empty string for null/undefined, converts non-strings to strings.
+   * @param text - The value to redact. Non-strings are converted to strings.
    */
-  redact(text: string): string {
+  redact(text: unknown): string {
     // Handle null/undefined explicitly
     if (text === null || text === undefined) {
       return '';
     }
 
     // Handle non-strings by converting them
-    if (typeof text !== 'string') {
-      text = String(text);
-    }
+    const strText = typeof text === 'string' ? text : String(text);
 
     if (!this.combinedPattern) {
-      return text;
+      return strText;
     }
 
-    if (!this.hasShortSecrets && text.length < 3) {
-      return text;
+    if (!this.hasShortSecrets && strText.length < 3) {
+      return strText;
     }
 
-    return text.replace(this.combinedPattern, '***REDACTED***');
+    return strText.replace(this.combinedPattern, '***REDACTED***');
   }
 
   /**

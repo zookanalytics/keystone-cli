@@ -855,8 +855,19 @@ export class WorkflowDb {
         if (!existing) {
           // No record exists - claim it
           const expiresAt = this.formatExpiresAt(ttlSeconds);
-          this.insertIdempotencyRecordIfAbsentStmt.run(key, runId, stepId, StepStatusConst.RUNNING, expiresAt);
-          return { status: 'claimed' as const };
+          const insertResult = this.insertIdempotencyRecordIfAbsentStmt.run(key, runId, stepId, StepStatusConst.RUNNING, expiresAt);
+
+          // Verify the insert actually succeeded (INSERT OR IGNORE returns changes=0 on conflict)
+          if (insertResult.changes > 0) {
+            return { status: 'claimed' as const };
+          }
+
+          // Someone else inserted between our check and insert - re-check current state
+          const conflictRecord = this.getIdempotencyRecordStmt.get(key) as IdempotencyRecord;
+          if (conflictRecord.status === StepStatusConst.SUCCESS) {
+            return { status: 'completed' as const, record: conflictRecord };
+          }
+          return { status: 'already-running' as const, record: conflictRecord };
         }
 
         if (existing.status === StepStatusConst.RUNNING) {

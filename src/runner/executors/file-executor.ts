@@ -53,15 +53,24 @@ function assertWithinCwd(targetPath: string, allowOutsideCwd?: boolean, label = 
 function normalizeDiffPath(diffPath: string): string {
     const trimmed = diffPath.trim().replace(/^([ab]\/)/, '');
 
-    // Security: Check for path traversal attempts
-    if (trimmed.includes('..') || trimmed.startsWith('/') || /^[a-zA-Z]:/.test(trimmed)) {
+    // Normalize the path first to resolve any . or .. sequences
+    const normalized = path.normalize(trimmed);
+
+    // Security: Check for path traversal attempts after normalization
+    // Also detect if normalization changed the path significantly (indicating potential attack)
+    if (
+        normalized.includes('..') ||
+        normalized.startsWith('/') ||
+        normalized.startsWith(path.sep) ||
+        /^[a-zA-Z]:/.test(normalized)
+    ) {
         throw new Error(
             `Security Error: Diff path "${trimmed}" contains path traversal or absolute path. ` +
             `Only relative paths without ".." are allowed.`
         );
     }
 
-    return trimmed;
+    return normalized;
 }
 
 function assertDiffMatchesTarget(diffPath: string | null, targetPath: string): void {
@@ -223,10 +232,13 @@ export function applySearchReplaceBlocks(content: string, blocks: SearchReplaceB
 export async function executeFileStep(
     step: FileStep,
     context: ExpressionContext,
-    _logger: Logger
+    logger: Logger
 ): Promise<StepResult> {
     const targetPath = ExpressionEvaluator.evaluateString(step.path, context);
     assertWithinCwd(targetPath, step.allowOutsideCwd);
+
+    // Log file operation for debugging (if debug method exists)
+    logger.debug?.(`File operation: ${step.op} on ${targetPath}`);
 
     switch (step.op) {
         case 'read': {

@@ -150,10 +150,13 @@ export async function executeRequestStep(
             const contentLength = response.headers.get('content-length');
             if (contentLength) {
                 const expectedSize = parseInt(contentLength, 10);
-                if (!Number.isNaN(expectedSize) && expectedSize > LIMITS.MAX_HTTP_RESPONSE_BYTES) {
-                    throw new Error(
-                        `Response too large: Content-Length ${expectedSize} bytes exceeds limit of ${LIMITS.MAX_HTTP_RESPONSE_BYTES} bytes`
-                    );
+                // Validate that Content-Length is a valid, finite, non-negative number
+                if (!Number.isNaN(expectedSize) && Number.isFinite(expectedSize) && expectedSize >= 0) {
+                    if (expectedSize > LIMITS.MAX_HTTP_RESPONSE_BYTES) {
+                        throw new Error(
+                            `Response too large: Content-Length ${expectedSize} bytes exceeds limit of ${LIMITS.MAX_HTTP_RESPONSE_BYTES} bytes`
+                        );
+                    }
                 }
             }
 

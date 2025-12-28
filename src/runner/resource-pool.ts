@@ -1,4 +1,5 @@
 import type { Logger } from '../utils/logger.ts';
+import { LIMITS } from '../utils/constants.ts';
 
 export type ReleaseFunction = () => void;
 
@@ -65,11 +66,16 @@ export class ResourcePoolManager {
     poolName: string,
     options: { priority?: number; signal?: AbortSignal; timeout?: number } = {}
   ): Promise<ReleaseFunction> {
-    // Validate timeout parameter
+    // Validate timeout parameter - must be positive, finite, and within max bounds
     if (options.timeout !== undefined) {
-      if (typeof options.timeout !== 'number' || !Number.isFinite(options.timeout) || options.timeout <= 0) {
+      if (
+        typeof options.timeout !== 'number' ||
+        !Number.isFinite(options.timeout) ||
+        options.timeout <= 0 ||
+        options.timeout > LIMITS.MAX_RESOURCE_POOL_TIMEOUT_MS
+      ) {
         throw new Error(
-          `Invalid timeout value: ${options.timeout}. Timeout must be a positive finite number.`
+          `Invalid timeout value: ${options.timeout}. Timeout must be a positive number <= ${LIMITS.MAX_RESOURCE_POOL_TIMEOUT_MS}ms.`
         );
       }
     }

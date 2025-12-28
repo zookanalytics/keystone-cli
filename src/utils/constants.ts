@@ -59,6 +59,12 @@ export const LIMITS = {
   MAX_JSON_BRACE_DEPTH: 100,
   /** Maximum string length to attempt JSON extraction from */
   MAX_JSON_PARSE_LENGTH: 1_000_000,
+  /** Maximum timeout for resource pool acquire (1 hour) */
+  MAX_RESOURCE_POOL_TIMEOUT_MS: 3600000,
+  /** Maximum shell command length to check for injection patterns */
+  MAX_SHELL_COMMAND_CHECK_LENGTH: 10_000,
+  /** Standard length for error message truncation in logs */
+  ERROR_MESSAGE_TRUNCATE_LENGTH: 500,
 } as const;
 
 /** File mode constants for secure filesystem operations */
