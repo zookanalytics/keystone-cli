@@ -8,6 +8,7 @@ import { LIMITS } from '../utils/constants';
 import { extractJson } from '../utils/json-parser';
 import { ConsoleLogger, type Logger } from '../utils/logger.ts';
 import { RedactionBuffer, Redactor } from '../utils/redactor';
+import { ContextInjector } from '../utils/context-injector';
 import { type LLMAdapter, type LLMMessage, type LLMResponse, getAdapter } from './llm-adapter';
 import { MCPClient } from './mcp-client';
 import type { MCPManager, MCPServerConfig } from './mcp-manager';
@@ -447,6 +448,14 @@ export async function executeLlmStep(
 
   const buildSystemPrompt = (agent: Agent): string => {
     let systemPrompt = ExpressionEvaluator.evaluateString(agent.systemPrompt, context);
+
+    // Inject project context if enabled
+    const projectContext = ContextInjector.getContext(workflowDir || process.cwd(), []);
+    const contextAddition = ContextInjector.generateSystemPromptAddition(projectContext);
+    if (contextAddition) {
+      systemPrompt = `${contextAddition}\n\n${systemPrompt}`;
+    }
+
     if (step.outputSchema) {
       systemPrompt += `\n\nIMPORTANT: You must output valid JSON that matches the following schema:\n${JSON.stringify(step.outputSchema, null, 2)}`;
     }
@@ -774,9 +783,9 @@ export async function executeLlmStep(
               typeof val === 'string'
                 ? val
                 : (() => {
-                    const json = safeJsonStringify(val);
-                    return typeof json === 'string' ? json : String(val);
-                  })();
+                  const json = safeJsonStringify(val);
+                  return typeof json === 'string' ? json : String(val);
+                })();
             context.env[key] = stringValue;
             context.envOverrides[key] = stringValue;
           }

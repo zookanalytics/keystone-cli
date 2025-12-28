@@ -105,6 +105,19 @@ export const ConfigSchema = z.object({
       strict: z.boolean().default(false),
     })
     .default({}),
+  features: z
+    .object({
+      context_injection: z
+        .object({
+          enabled: z.boolean().default(false),
+          search_depth: z.number().default(3),
+          sources: z
+            .array(z.enum(['readme', 'agents_md', 'cursor_rules']))
+            .default(['readme', 'agents_md', 'cursor_rules']),
+        })
+        .optional(),
+    })
+    .optional(),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

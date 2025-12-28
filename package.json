@@ -23,6 +23,8 @@
   "homepage": "https://github.com/mhingston/keystone-cli#readme",
   "files": ["src", "README.md", "LICENSE", "logo.png"],
   "dependencies": {
+    "@ast-grep/cli": "^0.40.3",
+    "@ast-grep/napi": "^0.40.3",
     "@jsep-plugin/arrow": "^1.0.6",
     "@jsep-plugin/object": "^1.2.2",
     "@types/react": "^19.0.0",

@@ -19,6 +19,7 @@ describe('Standard Tools Execution Verification', () => {
               readdirSync: () => [],
               statSync: () => ({ size: 0 }),
               readFileSync: () => '',
+              writeFileSync: () => { },
             };
           }
           if (mod === 'node:path' || mod === 'path') {
@@ -26,6 +27,32 @@ describe('Standard Tools Execution Verification', () => {
           }
           if (mod === 'glob') {
             return { globSync: () => [] };
+          }
+          if (mod === '@ast-grep/napi') {
+            return {
+              Lang: {
+                JavaScript: 'javascript',
+                TypeScript: 'typescript',
+                Tsx: 'tsx',
+                Python: 'python',
+                Rust: 'rust',
+                Go: 'go',
+                C: 'c',
+                Cpp: 'cpp',
+                Java: 'java',
+                Kotlin: 'kotlin',
+                Swift: 'swift',
+                Html: 'html',
+                Css: 'css',
+                Json: 'json',
+              },
+              parse: () => ({
+                root: () => ({
+                  findAll: () => [],
+                  replace: () => '',
+                }),
+              }),
+            };
           }
           return {};
         },

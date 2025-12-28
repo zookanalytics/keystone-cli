@@ -238,6 +238,29 @@ expression:
 
 `storage.retention_days` sets the default window used by `keystone maintenance` / `keystone prune`. `storage.redact_secrets_at_rest` controls whether secret inputs and known secrets are redacted before storing run data (default `true`).
 
+### Context Injection (Opt-in)
+
+Keystone can automatically inject project context files (`README.md`, `AGENTS.md`, `.cursor/rules`, `.claude/rules`) into LLM system prompts. This helps agents understand your project's conventions and guidelines.
+
+```yaml
+features:
+  context_injection:
+    enabled: true              # Opt-in feature (default: false)
+    search_depth: 3            # How many directories up to search (default: 3)
+    sources:                   # Which context sources to include
+      - readme                 # README.md files
+      - agents_md              # AGENTS.md files
+      - cursor_rules           # .cursor/rules or .claude/rules
+```
+
+When enabled, Keystone will:
+1. Search from the workflow directory up to the project root
+2. Find the nearest `README.md` and `AGENTS.md` files
+3. Parse rules from `.cursor/rules` or `.claude/rules` directories
+4. Prepend this context to the LLM system prompt
+
+Context is cached for 1 minute to avoid redundant file reads.
+
 ### Model & Provider Resolution
 
 Keystone resolves which provider to use for a model in the following order:
@@ -863,10 +886,13 @@ Keystone comes with a set of **Standard Tools** that can be enabled for any agen
 - `read_file`: Read the contents of a file (arguments: `path`)
 - `read_file_lines`: Read a specific range of lines from a file (arguments: `path`, `start`, `count`)
 - `write_file`: Write or overwrite a file (arguments: `path`, `content`)
+- `append_file`: Append content to a file, creating it if it doesn't exist (arguments: `path`, `content`)
 - `list_files`: List files in a directory (arguments: `path`)
 - `search_files`: Search for files by glob pattern (arguments: `pattern`, `dir`)
 - `search_content`: Search for string or regex within files (arguments: `query`, `dir`, `pattern`)
 - `run_command`: Run a shell command (arguments: `command`, `dir`). Risky commands require `allowInsecure: true` on the LLM step.
+- `ast_grep_search`: Search for structural code patterns using AST matching (arguments: `pattern`, `language`, `paths`). More precise than regex for code refactoring.
+- `ast_grep_replace`: Replace structural code patterns using AST-aware rewriting (arguments: `pattern`, `rewrite`, `language`, `paths`). Safer than regex for code refactoring.
 
 #### Standard Tool Examples
 
@@ -893,6 +919,25 @@ Agents can use these tools to interact with their environment. Here is how they 
   arguments:
     command: "ls -la"
     dir: "."
+```
+
+**AST-Grep Search (find all console.log calls):**
+```yaml
+- name: ast_grep_search
+  arguments:
+    pattern: "console.log($A)"
+    language: "typescript"
+    paths: ["src/"]
+```
+
+**AST-Grep Replace (refactor console.log to logger.info):**
+```yaml
+- name: ast_grep_replace
+  arguments:
+    pattern: "console.log($A)"
+    rewrite: "logger.info($A)"
+    language: "typescript"
+    paths: ["src/"]
 ```
 
 Tool arguments are passed to the tool's execution step via the `args` variable.
@@ -1134,7 +1179,6 @@ graph TD
 - `src/ui/`: Ink-powered TUI dashboard.
 - `src/utils/`: Shared utilities (auth, redaction, config loading).
 - `src/types/`: Core type definitions.
-- `src/e2e-tests/`: End-to-end test suite.
 - `.keystone/workflows/`: Your YAML workflow definitions.
 
 ---

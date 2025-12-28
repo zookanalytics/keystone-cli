@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { Lang, parse } from '@ast-grep/napi';
 import type { AgentTool } from '../parser/schema';
 import { LIMITS, TIMEOUTS } from '../utils/constants';
 import { detectShellInjectionRisk } from './shell-executor';
@@ -72,6 +73,25 @@ export const STANDARD_TOOLS: AgentTool[] = [
       id: 'std_write_file',
       type: 'file',
       op: 'write',
+      path: '${{ args.path }}',
+      content: '${{ args.content }}',
+    },
+  },
+  {
+    name: 'append_file',
+    description: 'Append content to the end of a file (creates if not exists)',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Path to the file to append to' },
+        content: { type: 'string', description: 'Content to append to the file' },
+      },
+      required: ['path', 'content'],
+    },
+    execution: {
+      id: 'std_append_file',
+      type: 'file',
+      op: 'append',
       path: '${{ args.path }}',
       content: '${{ args.content }}',
     },
@@ -285,6 +305,164 @@ export const STANDARD_TOOLS: AgentTool[] = [
       dir: '${{ args.dir }}',
     },
   },
+  {
+    name: 'ast_grep_search',
+    description: 'Search for structural code patterns using AST pattern matching. More precise than regex for code refactoring.',
+    parameters: {
+      type: 'object',
+      properties: {
+        pattern: { type: 'string', description: 'AST-grep pattern to search for, e.g. "console.log($A)"' },
+        language: {
+          type: 'string',
+          description: 'Programming language (javascript, typescript, python, rust, go, etc.)',
+          default: 'typescript',
+        },
+        paths: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'File paths to search in',
+        },
+      },
+      required: ['pattern', 'paths'],
+    },
+    execution: {
+      id: 'std_ast_grep_search',
+      type: 'script',
+      run: `
+        (function() {
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const { Lang, parse } = require('@ast-grep/napi');
+
+          const pattern = args.pattern;
+          const language = args.language || 'typescript';
+          const paths = args.paths || [];
+
+          const langMap = {
+            javascript: Lang.JavaScript,
+            typescript: Lang.TypeScript,
+            tsx: Lang.Tsx,
+            python: Lang.Python,
+            rust: Lang.Rust,
+            go: Lang.Go,
+            c: Lang.C,
+            cpp: Lang.Cpp,
+            java: Lang.Java,
+            kotlin: Lang.Kotlin,
+            swift: Lang.Swift,
+            html: Lang.Html,
+            css: Lang.Css,
+            json: Lang.Json,
+          };
+
+          const lang = langMap[language.toLowerCase()];
+          if (!lang) {
+            throw new Error('Unsupported language: ' + language);
+          }
+
+          const results = [];
+          for (const filePath of paths) {
+            if (!fs.existsSync(filePath)) continue;
+            const content = fs.readFileSync(filePath, 'utf8');
+            const tree = parse(lang, content);
+            const root = tree.root();
+            const matches = root.findAll(pattern);
+
+            for (const match of matches) {
+              const range = match.range();
+              results.push({
+                file: filePath,
+                line: range.start.line + 1,
+                column: range.start.column + 1,
+                content: match.text(),
+              });
+            }
+          }
+          return results;
+        })();
+      `,
+      allowInsecure: true,
+    },
+  },
+  {
+    name: 'ast_grep_replace',
+    description: 'Replace structural code patterns using AST-aware rewriting. Safer than regex for code refactoring.',
+    parameters: {
+      type: 'object',
+      properties: {
+        pattern: { type: 'string', description: 'AST-grep pattern to match, e.g. "console.log($A)"' },
+        rewrite: { type: 'string', description: 'Replacement pattern, e.g. "logger.info($A)"' },
+        language: {
+          type: 'string',
+          description: 'Programming language (javascript, typescript, python, rust, go, etc.)',
+          default: 'typescript',
+        },
+        paths: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'File paths to apply replacements to',
+        },
+      },
+      required: ['pattern', 'rewrite', 'paths'],
+    },
+    execution: {
+      id: 'std_ast_grep_replace',
+      type: 'script',
+      run: `
+        (function() {
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const { Lang, parse } = require('@ast-grep/napi');
+
+          const pattern = args.pattern;
+          const rewrite = args.rewrite;
+          const language = args.language || 'typescript';
+          const paths = args.paths || [];
+
+          const langMap = {
+            javascript: Lang.JavaScript,
+            typescript: Lang.TypeScript,
+            tsx: Lang.Tsx,
+            python: Lang.Python,
+            rust: Lang.Rust,
+            go: Lang.Go,
+            c: Lang.C,
+            cpp: Lang.Cpp,
+            java: Lang.Java,
+            kotlin: Lang.Kotlin,
+            swift: Lang.Swift,
+            html: Lang.Html,
+            css: Lang.Css,
+            json: Lang.Json,
+          };
+
+          const lang = langMap[language.toLowerCase()];
+          if (!lang) {
+            throw new Error('Unsupported language: ' + language);
+          }
+
+          const results = [];
+          for (const filePath of paths) {
+            if (!fs.existsSync(filePath)) continue;
+            const content = fs.readFileSync(filePath, 'utf8');
+            const tree = parse(lang, content);
+            const root = tree.root();
+            const edit = root.replace(pattern, rewrite);
+
+            if (edit !== content) {
+              fs.writeFileSync(filePath, edit);
+              results.push({
+                file: filePath,
+                modified: true,
+              });
+            }
+          }
+          return results;
+        })();
+      `,
+      allowInsecure: true,
+    },
+  },
 ];
 
 /**
@@ -330,13 +508,23 @@ export function validateStandardToolSecurity(
       'read_file',
       'read_file_lines',
       'write_file',
+      'append_file',
       'list_files',
       'search_files',
       'search_content',
+      'ast_grep_search',
+      'ast_grep_replace',
     ].includes(toolName)
   ) {
     const rawPath = args.path || args.dir || '.';
     assertWithinCwd(rawPath);
+
+    // For AST tools, validate all paths in the array
+    if (['ast_grep_search', 'ast_grep_replace'].includes(toolName) && Array.isArray(args.paths)) {
+      for (const p of args.paths) {
+        assertWithinCwd(p);
+      }
+    }
   }
 
   // 2. Check shell risk for run_command and guard working directory
