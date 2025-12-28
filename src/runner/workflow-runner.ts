@@ -2126,10 +2126,9 @@ Please provide a corrected response that exactly matches the required schema.`;
           }
 
           // 1. Find runnable steps from scheduler
-          const runnableSteps = this.scheduler.getRunnableSteps(
-            runningPromises.size,
-            globalConcurrencyLimit
-          );
+          const runnableSteps = this.scheduler
+            .getRunnableSteps(runningPromises.size, globalConcurrencyLimit)
+            .filter((step) => this.resourcePool.hasCapacity(step.pool || step.type));
 
           for (const step of runnableSteps) {
             // Don't schedule new steps if canceled
@@ -2172,7 +2171,13 @@ Please provide a corrected response that exactly matches the required schema.`;
 
           // 2. Detect deadlock (only if not canceled)
           if (!this.isCanceled && runningPromises.size === 0 && !this.scheduler.isComplete()) {
-            throw new Error(`Deadlock detected in workflow execution. Steps remaining but none runnable.`);
+            // Check if there are ANY steps whose dependencies are met, even if they're blocked by capacity/concurrency
+            const readySteps = this.scheduler.getRunnableSteps(0, Number.MAX_SAFE_INTEGER);
+            if (readySteps.length === 0) {
+              throw new Error(
+                `Deadlock detected in workflow execution. Steps remaining but none runnable (dependency cycles or missing inputs).`
+              );
+            }
           }
 
           // 3. Wait for at least one step to finish before checking again

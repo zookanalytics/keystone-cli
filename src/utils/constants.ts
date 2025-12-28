@@ -15,6 +15,12 @@ export const TIMEOUTS = {
   REGEX_TIMEOUT_MS: 1000,
 } as const;
 
+/** Database related constants */
+export const DB = {
+  /** SQLite busy/locked error code */
+  SQLITE_BUSY: 5,
+} as const;
+
 /** Limit values for various operations */
 export const LIMITS = {
   /** Maximum size for LLM responses to prevent memory exhaustion */
@@ -47,6 +53,10 @@ export const LIMITS = {
   MAX_RATE_LIMITER_QUEUE_SIZE: 1000,
   /** Maximum string length for CLI input values */
   MAX_INPUT_STRING_LENGTH: 100_000,
+  /** Maximum depth for balanced brace matching in JSON parser */
+  MAX_JSON_BRACE_DEPTH: 100,
+  /** Maximum string length to attempt JSON extraction from */
+  MAX_JSON_PARSE_LENGTH: 1_000_000,
 } as const;
 
 /** File mode constants for secure filesystem operations */

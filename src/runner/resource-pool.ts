@@ -161,4 +161,13 @@ export class ResourcePoolManager {
       totalWaitTimeMs: pool.totalWaitTimeMs,
     }));
   }
+
+  /**
+   * Check if a pool has capacity for another task.
+   */
+  hasCapacity(poolName: string): boolean {
+    const pool = this.pools.get(poolName);
+    if (!pool) return true; // Global limit will be checked on acquire
+    return pool.active < pool.limit;
+  }
 }

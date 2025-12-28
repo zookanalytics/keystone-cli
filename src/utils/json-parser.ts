@@ -1,3 +1,5 @@
+import { LIMITS } from './constants';
+
 /**
  * Robustly extract JSON from a string that may contain other text or Markdown blocks.
  *
@@ -19,6 +21,12 @@
 export function extractJson(text: string): unknown {
   if (!text || text.trim().length === 0) {
     throw new Error('Failed to extract valid JSON from empty input.');
+  }
+
+  if (text.length > LIMITS.MAX_JSON_PARSE_LENGTH) {
+    throw new Error(
+      `Failed to extract JSON: input too large (${text.length} bytes, limit is ${LIMITS.MAX_JSON_PARSE_LENGTH}).`
+    );
   }
 
   // 1. Try to extract from Markdown code blocks first
@@ -96,6 +104,11 @@ export function extractJson(text: string): unknown {
       if (!inString) {
         if (char === opener) {
           depth++;
+          if (depth > LIMITS.MAX_JSON_BRACE_DEPTH) {
+            throw new Error(
+              `Failed to extract JSON: structure nested too deeply (max depth ${LIMITS.MAX_JSON_BRACE_DEPTH}).`
+            );
+          }
         } else if (char === stopper) {
           depth--;
           if (depth === 0) {

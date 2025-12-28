@@ -36,4 +36,16 @@ describe('json-parser', () => {
     const text = 'Hello world, no JSON here!';
     expect(() => extractJson(text)).toThrow(/Failed to extract valid JSON/);
   });
+
+  it('should throw if nesting depth is exceeded', () => {
+    // Generate a string with 200 opening braces
+    const text = '{'.repeat(200) + '}'.repeat(200);
+    expect(() => extractJson(text)).toThrow(/structure nested too deeply/);
+  });
+
+  it('should throw if input text is too large', () => {
+    // Generate a string larger than LIMITS.MAX_JSON_PARSE_LENGTH (1,000,000)
+    const text = '{"a": "' + 'x'.repeat(1_000_001) + '"}';
+    expect(() => extractJson(text)).toThrow(/input too large/);
+  });
 });

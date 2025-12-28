@@ -9,6 +9,7 @@ import {
   type WorkflowStatusType,
 } from '../types/status';
 import { PathResolver } from '../utils/paths';
+import { DB } from '../utils/constants';
 
 export type RunStatus = WorkflowStatusType | 'pending';
 export type StepStatus = StepStatusType;
@@ -74,8 +75,6 @@ export interface CompensationRecord {
 
 export class WorkflowDb {
   private db: Database;
-
-  private static readonly SQLITE_BUSY = 5;
 
   private createRunStmt!: any;
   private updateRunStatusStmt!: any;
@@ -296,7 +295,7 @@ export class WorkflowDb {
       const err = error as { code?: string | number; message?: string };
       return (
         err.code === 'SQLITE_BUSY' ||
-        err.code === WorkflowDb.SQLITE_BUSY ||
+        err.code === DB.SQLITE_BUSY ||
         (typeof err.message === 'string' &&
           (err.message.includes('SQLITE_BUSY') || err.message.includes('database is locked')))
       );
