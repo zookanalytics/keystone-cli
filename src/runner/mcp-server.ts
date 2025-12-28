@@ -80,6 +80,20 @@ export class MCPServer {
     this.db.close();
   }
 
+  private sendNotification(method: string, params: Record<string, unknown>): void {
+    try {
+      this.output.write(
+        `${JSON.stringify({
+          jsonrpc: '2.0',
+          method,
+          params,
+        })}\n`
+      );
+    } catch (error) {
+      this.logger.error(`Error sending MCP notification: ${error}`);
+    }
+  }
+
   private async handleMessage(message: MCPMessage) {
     const { method, params, id } = message;
 
@@ -540,6 +554,18 @@ export class MCPServer {
                 // Update DB with failure
                 if (error instanceof WorkflowSuspendedError) {
                   await this.db.updateRunStatus(runId, 'paused');
+                  this.sendNotification('notifications/keystone.human_input', {
+                    run_id: runId,
+                    workflow: workflow_name,
+                    status: 'paused',
+                    message: error.message,
+                    step_id: error.stepId,
+                    input_type: error.inputType,
+                    instructions:
+                      error.inputType === 'confirm'
+                        ? 'Use answer_human_input with input="confirm" to proceed.'
+                        : 'Use answer_human_input with the required text input.',
+                  });
                 } else {
                   await this.db.updateRunStatus(
                     runId,

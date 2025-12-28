@@ -104,6 +104,12 @@ const ReflexionSchema = z.object({
   hint: z.string().optional(),
 });
 
+// ===== Matrix Strategy Schema =====
+
+const StrategySchema = z.object({
+  matrix: z.record(z.array(z.union([z.string(), z.number(), z.boolean()]))),
+});
+
 // ===== Base Step Schema =====
 
 const BaseStepSchema = z.object({
@@ -123,6 +129,8 @@ const BaseStepSchema = z.object({
   // Accept both number and string (for expressions or YAML number-as-string)
   concurrency: z.union([z.number().int().positive(), z.string()]).optional(),
   pool: z.string().optional(), // Resource pool to use for this step
+  breakpoint: z.boolean().optional(),
+  strategy: StrategySchema.optional(),
   transform: z.string().optional(),
   learn: z.boolean().optional(),
   inputSchema: z.any().optional(),
@@ -321,6 +329,15 @@ const MemoryStepSchema = BaseStepSchema.extend({
   limit: z.number().int().positive().optional().default(5),
 });
 
+const ArtifactStepSchema = BaseStepSchema.extend({
+  type: z.literal('artifact'),
+  op: z.enum(['upload', 'download']),
+  name: z.string(),
+  paths: z.array(z.string()).optional(),
+  path: z.string().optional(),
+  allowOutsideCwd: z.boolean().optional(),
+});
+
 // ===== Discriminated Union for Steps =====
 
 // biome-ignore lint/suspicious/noExplicitAny: Recursive Zod type
@@ -338,6 +355,7 @@ export const StepSchema: z.ZodType<any> = z.lazy(() =>
     MemoryStepSchema,
     JoinStepSchema,
     BlueprintStepSchema,
+    ArtifactStepSchema,
   ])
 );
 
@@ -398,6 +416,7 @@ export type MemoryStep = z.infer<typeof MemoryStepSchema>;
 export type EngineStep = z.infer<typeof EngineStepSchema>;
 export type JoinStep = z.infer<typeof JoinStepSchema>;
 export type BlueprintStep = z.infer<typeof BlueprintStepSchema>;
+export type ArtifactStep = z.infer<typeof ArtifactStepSchema>;
 export type Blueprint = z.infer<typeof BlueprintSchema>;
 export type Workflow = z.infer<typeof WorkflowSchema>;
 export type AgentTool = z.infer<typeof AgentToolSchema>;

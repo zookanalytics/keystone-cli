@@ -314,6 +314,60 @@ describe('MCPServer', () => {
     expect(result.hint).toContain('get_run_status');
   });
 
+  it('should notify when async workflow pauses for human input', async () => {
+    const { PassThrough } = await import('node:stream');
+    const outputStream = new PassThrough();
+    const received: Array<{ method?: string; params?: Record<string, unknown> }> = [];
+
+    outputStream.on('data', (chunk) => {
+      const lines = chunk.toString().trim().split('\n').filter(Boolean);
+      for (const line of lines) {
+        try {
+          received.push(JSON.parse(line));
+        } catch {
+          // ignore non-JSON noise
+        }
+      }
+    });
+
+    trackSpy(spyOn(WorkflowRegistry, 'resolvePath')).mockReturnValue('test.yaml');
+    // @ts-ignore
+    trackSpy(spyOn(WorkflowParser, 'loadWorkflow')).mockReturnValue({
+      name: 'test-wf',
+      steps: [],
+    });
+
+    const suspendedError = new WorkflowSuspendedError('Input needed', 'step1', 'confirm');
+    const runner = {
+      run: mock(() => Promise.reject(suspendedError)),
+      getRunId: mock(() => 'run123'),
+    } as unknown as WorkflowRunner;
+
+    const testServer = new MCPServer(db, process.stdin, outputStream, new ConsoleLogger(), () =>
+      runner
+    );
+
+    await handleMessage(
+      {
+        jsonrpc: '2.0',
+        id: 16,
+        method: 'tools/call',
+        params: {
+          name: 'start_workflow',
+          arguments: { workflow_name: 'test-wf', inputs: {} },
+        },
+      },
+      testServer
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const notice = received.find((msg) => msg.method === 'notifications/keystone.human_input');
+    expect(notice?.params?.run_id).toBe('run123');
+    expect(notice?.params?.step_id).toBe('step1');
+    expect(notice?.params?.input_type).toBe('confirm');
+  });
+
   it('should call get_run_status tool for running workflow', async () => {
     const runId = 'status-test-run';
     await db.createRun(runId, 'test-wf', { foo: 'bar' });

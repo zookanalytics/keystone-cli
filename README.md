@@ -427,6 +427,10 @@ Keystone supports several specialized step types:
   - Cross-origin redirects are blocked for non-GET/HEAD requests unless `allowInsecure: true`; on cross-origin redirects, non-essential headers are stripped.
 - `file`: Read, write, or append to files.
   - `allowOutsideCwd`: Boolean (default `false`). Set `true` to allow reading/writing files outside of the current working directory.
+- `artifact`: Upload or download files as named artifacts.
+  - `op: upload`: Requires `name` and `paths` (glob patterns).
+  - `op: download`: Requires `name` and `path` (destination directory).
+  - `allowOutsideCwd`: Boolean (default `false`). Set `true` to allow paths outside of the current working directory.
 - `human`: Pause execution for manual confirmation or text input.
   - `inputType: confirm`: Simple Enter-to-continue prompt.
   - `inputType: text`: Prompt for a string input, available via `${{ steps.id.output }}`.
@@ -483,7 +487,9 @@ All steps support common features:
 - `timeout`: Maximum execution time in milliseconds (best-effort; supported steps receive an abort signal).
 - `foreach`: Iterate over an array in parallel.
 - `concurrency`: Limit parallel items for `foreach` (must be a positive integer).
+- `strategy.matrix`: Generate a Cartesian product for `item` (syntactic sugar for `foreach`).
 - `pool`: Assign step to a resource pool.
+- `breakpoint`: Pause before executing the step when running with `--debug`.
 - `compensate`: Step to run if the workflow rolls back.
 - `transform`: Post-process output using expressions.
 - `learn`: Auto-index for few-shot.
@@ -586,6 +592,17 @@ When a step fails, the specified agent is invoked with the error details. The ag
   run: echo "Processing ${{ item }}"
 ```
 
+#### Example: Matrix Strategy
+```yaml
+- id: test_matrix
+  type: shell
+  strategy:
+    matrix:
+      node: [18, 20, 22]
+      os: [ubuntu, macos]
+  run: echo "node=${{ item.node }} os=${{ item.os }}"
+```
+
 #### Example: Script Step
 ```yaml
 - id: calculate
@@ -645,6 +662,51 @@ Enable fail-forward steps that continue workflow execution even when they fail. 
 ```
 
 The step's `status` will be `'success'` even when it fails internally, but the `error` field will contain the failure details.
+
+### Breakpoints
+
+Pause before executing a step when running with `--debug`. In non-TTY environments, the workflow is paused until resumed in a TTY.
+
+```yaml
+- id: inspect_context
+  type: shell
+  breakpoint: true
+  run: echo "Inspecting before execution"
+```
+
+### Artifacts
+
+Upload and download files between steps without hardcoded artifact paths.
+
+```yaml
+- id: build
+  type: shell
+  run: bun build
+
+- id: upload_build
+  type: artifact
+  op: upload
+  name: build
+  paths: ["dist/**"]
+
+- id: download_build
+  type: artifact
+  op: download
+  name: build
+  path: ./tmp/build
+```
+
+Upload outputs include `artifactPath` and `files` for downstream references.
+
+### Structured Events
+
+Emit NDJSON events for step and workflow lifecycle updates:
+
+```bash
+keystone run workflow.yaml --events
+```
+
+Events include `workflow.start`, `step.start`, `step.end`, and `workflow.complete`.
 
 ### Global Errors Block
 
@@ -837,6 +899,9 @@ The MCP server provides two modes for running workflows:
 
 The async pattern is ideal for LLM-heavy workflows that may take minutes to complete.
 
+When an async run pauses for a human step, the MCP server emits a notification:
+`notifications/keystone.human_input` with the run ID, step ID, input type, and instructions.
+
 #### Global MCP Servers
 Define shared MCP servers in `.keystone/config.yaml` to reuse them across different workflows. Keystone ensures that multiple steps using the same global server will share a single running process.
 
@@ -890,9 +955,10 @@ In these examples, the agent will have access to all tools provided by the MCP s
 | Command | Description |
 | :--- | :--- |
 | `init` | Initialize a new Keystone project |
-| `run <workflow>` | Execute a workflow (use `-i key=val`, `--resume` to auto-resume, `--dry-run`, `--debug`, `--no-dedup`, `--explain`) |
-| `resume <run_id>` | Resume a failed/paused/crashed workflow by ID (use `-i key=val` to answer human steps) |
-| `rerun <workflow>` | Rerun a workflow from a specific step (use `--from <step_id>` and optional `--run <run_id>`) |
+| `run <workflow>` | Execute a workflow (use `-i key=val`, `--resume` to auto-resume, `--dry-run`, `--debug`, `--no-dedup`, `--explain`, `--events`) |
+| `watch <workflow>` | Watch a workflow and re-run on changes (`--debug`, `--events`, `--debounce`) |
+| `resume <run_id>` | Resume a failed/paused/crashed workflow by ID (use `-i key=val` to answer human steps, `--events` for NDJSON) |
+| `rerun <workflow>` | Rerun a workflow from a specific step (use `--from <step_id>` and optional `--run <run_id>`, `--events`) |
 | `validate [path]` | Check workflow files for errors |
 | `lint [path]` | Alias for `validate` |
 | `workflows` | List available workflows |
@@ -922,6 +988,14 @@ In these examples, the agent will have access to all tools provided by the MCP s
 | `prune [--days N]` | Alias for `maintenance` |
 
 ---
+
+### Watch Mode
+
+Use `keystone watch` to re-run a workflow when the workflow file or its input files change:
+
+```bash
+keystone watch workflow.yaml
+```
 
 ### Compile
 `keystone compile -o ./keystone-app` emits the executable plus a `keystone-runtime/` directory next to it.

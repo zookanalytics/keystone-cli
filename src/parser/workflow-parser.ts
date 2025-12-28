@@ -22,6 +22,9 @@ export class WorkflowParser {
       const workflow = WorkflowSchema.parse(raw);
       const workflowDir = dirname(path);
 
+      // Expand matrix strategies into foreach items
+      WorkflowParser.applyMatrixStrategies(workflow);
+
       // Resolve implicit dependencies from expressions
       WorkflowParser.resolveImplicitDependencies(workflow);
 
@@ -30,6 +33,9 @@ export class WorkflowParser {
 
       // Validate agents exist
       WorkflowParser.validateAgents(workflow, workflowDir);
+
+      // Validate artifact steps
+      WorkflowParser.validateArtifacts(workflow);
 
       // Validate errors block
       WorkflowParser.validateErrors(workflow);
@@ -74,6 +80,43 @@ export class WorkflowParser {
 
     for (const child of Object.values(record)) {
       WorkflowParser.normalizeAliases(child);
+    }
+  }
+
+  /**
+   * Expand step.strategy.matrix into foreach expressions.
+   */
+  private static applyMatrixStrategies(workflow: Workflow): void {
+    const allSteps = [...workflow.steps, ...(workflow.errors || []), ...(workflow.finally || [])];
+    for (const step of allSteps) {
+      if (!step.strategy?.matrix) continue;
+
+      if (step.foreach) {
+        throw new Error(`Step "${step.id}" cannot use both foreach and strategy.matrix`);
+      }
+
+      const matrix = step.strategy.matrix;
+      const keys = Object.keys(matrix);
+      if (keys.length === 0) {
+        throw new Error(`Step "${step.id}" matrix must define at least one axis`);
+      }
+
+      let combos: Array<Record<string, unknown>> = [{}];
+      for (const key of keys) {
+        const values = matrix[key];
+        if (!Array.isArray(values) || values.length === 0) {
+          throw new Error(`Step "${step.id}" matrix axis "${key}" must have at least one value`);
+        }
+        combos = combos.flatMap((combo) =>
+          values.map((value) => ({
+            ...combo,
+            [key]: value,
+          }))
+        );
+      }
+
+      step.foreach = JSON.stringify(combos);
+      step.strategy = undefined;
     }
   }
 
@@ -168,6 +211,22 @@ export class WorkflowParser {
         } catch (error) {
           throw new Error(`Agent "${step.agent}" referenced in step "${step.id}" not found.`);
         }
+      }
+    }
+  }
+
+  /**
+   * Validate artifact steps have the required fields for their operation.
+   */
+  private static validateArtifacts(workflow: Workflow): void {
+    const allSteps = [...workflow.steps, ...(workflow.errors || []), ...(workflow.finally || [])];
+    for (const step of allSteps) {
+      if (step.type !== 'artifact') continue;
+      if (step.op === 'upload' && (!step.paths || step.paths.length === 0)) {
+        throw new Error(`Artifact step "${step.id}" requires paths for upload`);
+      }
+      if (step.op === 'download' && !step.path) {
+        throw new Error(`Artifact step "${step.id}" requires path for download`);
       }
     }
   }

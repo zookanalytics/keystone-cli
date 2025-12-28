@@ -3,6 +3,7 @@ import type { ExpressionContext } from '../expression/evaluator.ts';
 import { ExpressionEvaluator } from '../expression/evaluator.ts';
 // Removed synchronous file I/O imports - using Bun's async file API instead
 import type {
+  ArtifactStep,
   BlueprintStep,
   EngineStep,
   FileStep,
@@ -26,6 +27,7 @@ import { createRequire } from 'node:module';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as readline from 'node:readline/promises';
+import { globSync } from 'glob';
 import { LIMITS, TIMEOUTS } from '../utils/constants.ts';
 import { SafeSandbox } from '../utils/sandbox.ts';
 import { executeLlmStep } from './llm-executor.ts';
@@ -213,6 +215,13 @@ export async function executeStep(
         break;
       case 'file':
         result = await executeFileStep(step, context, logger, dryRun);
+        break;
+      case 'artifact':
+        result = await executeArtifactStep(step, context, logger, {
+          artifactRoot,
+          workflowDir,
+          runId,
+        });
         break;
       case 'request':
         result = await executeRequestStep(step, context, logger, abortSignal);
@@ -573,6 +582,174 @@ async function executeFileStep(
     default:
       throw new Error(`Unknown file operation: ${step.op}`);
   }
+}
+
+/**
+ * Execute an artifact step (upload/download)
+ */
+async function executeArtifactStep(
+  step: ArtifactStep,
+  context: ExpressionContext,
+  logger: Logger,
+  options: { artifactRoot?: string; workflowDir?: string; runId?: string }
+): Promise<StepResult> {
+  const baseDir = options.workflowDir || process.cwd();
+  const rawName = ExpressionEvaluator.evaluateString(step.name, context);
+  if (typeof rawName !== 'string' || rawName.trim().length === 0) {
+    throw new Error('Artifact name must be a non-empty string');
+  }
+  const sanitizedName = rawName.replace(/[^a-zA-Z0-9._-]/g, '_');
+  if (sanitizedName !== rawName) {
+    logger.warn(`⚠️  Artifact name "${rawName}" contained unsafe characters. Using "${sanitizedName}".`);
+  }
+
+  const artifactRoot = options.artifactRoot || path.join(process.cwd(), '.keystone', 'artifacts');
+  const runDir = options.runId ? path.join(artifactRoot, options.runId) : artifactRoot;
+  const artifactDir = path.join(runDir, 'artifacts', sanitizedName);
+
+  const realBaseDir = fs.realpathSync(baseDir);
+  const isWithin = (target: string) => {
+    const relativePath = path.relative(realBaseDir, target);
+    return !(relativePath.startsWith('..') || path.isAbsolute(relativePath));
+  };
+  const getExistingAncestorRealPath = (start: string) => {
+    let current = start;
+    while (!fs.existsSync(current)) {
+      const parent = path.dirname(current);
+      if (parent === current) {
+        break;
+      }
+      current = parent;
+    }
+    if (!fs.existsSync(current)) {
+      return realBaseDir;
+    }
+    return fs.realpathSync(current);
+  };
+  const assertWithinBase = (rawPath: string, resolvedPath: string) => {
+    if (step.allowOutsideCwd) return;
+    if (fs.existsSync(resolvedPath)) {
+      const realTarget = fs.realpathSync(resolvedPath);
+      if (!isWithin(realTarget)) {
+        throw new Error(`Access denied: Path '${rawPath}' resolves outside the working directory.`);
+      }
+    } else {
+      const realParent = getExistingAncestorRealPath(path.dirname(resolvedPath));
+      if (!isWithin(realParent)) {
+        throw new Error(`Access denied: Path '${rawPath}' resolves outside the working directory.`);
+      }
+    }
+  };
+
+  const walkDir = (dir: string): string[] => {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    const files: string[] = [];
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        files.push(...walkDir(fullPath));
+      } else if (entry.isFile()) {
+        files.push(fullPath);
+      }
+    }
+    return files;
+  };
+
+  if (step.op === 'upload') {
+    if (!step.paths || step.paths.length === 0) {
+      throw new Error('Artifact upload requires at least one path');
+    }
+
+    const fileSet = new Set<string>();
+    for (const pattern of step.paths) {
+      const evaluated = ExpressionEvaluator.evaluateString(pattern, context);
+      const matches = globSync(evaluated, {
+        cwd: baseDir,
+        dot: true,
+        absolute: true,
+        nodir: false,
+      });
+      if (matches.length === 0) {
+        throw new Error(`No files matched artifact pattern: ${evaluated}`);
+      }
+      for (const match of matches) {
+        const stat = fs.statSync(match);
+        if (stat.isDirectory()) {
+          for (const file of walkDir(match)) {
+            fileSet.add(file);
+          }
+        } else {
+          fileSet.add(match);
+        }
+      }
+    }
+
+    if (fileSet.size === 0) {
+      throw new Error('No files found to upload as artifacts');
+    }
+
+    if (fs.existsSync(artifactDir)) {
+      fs.rmSync(artifactDir, { recursive: true, force: true });
+    }
+    fs.mkdirSync(artifactDir, { recursive: true });
+
+    const storedFiles: string[] = [];
+    for (const filePath of fileSet) {
+      const resolvedPath = path.resolve(filePath);
+      assertWithinBase(filePath, resolvedPath);
+
+      let relative = path.relative(baseDir, resolvedPath);
+      if (relative.startsWith('..') || path.isAbsolute(relative)) {
+        const safeName = resolvedPath.replace(/[^a-zA-Z0-9._-]/g, '_');
+        relative = path.join('__external__', safeName);
+      }
+
+      const destPath = path.join(artifactDir, relative);
+      fs.mkdirSync(path.dirname(destPath), { recursive: true });
+      fs.copyFileSync(resolvedPath, destPath);
+      storedFiles.push(relative);
+    }
+
+    return {
+      output: {
+        name: rawName,
+        artifactPath: artifactDir,
+        files: storedFiles.sort(),
+        fileCount: storedFiles.length,
+      },
+      status: 'success',
+    };
+  }
+
+  const evaluatedPath = ExpressionEvaluator.evaluateString(step.path || '', context);
+  const destination = path.resolve(baseDir, evaluatedPath);
+  assertWithinBase(evaluatedPath, destination);
+
+  if (!fs.existsSync(artifactDir)) {
+    throw new Error(`Artifact not found: ${artifactDir}`);
+  }
+  fs.mkdirSync(destination, { recursive: true });
+
+  const artifactFiles = walkDir(artifactDir);
+  const copiedFiles: string[] = [];
+  for (const filePath of artifactFiles) {
+    const relative = path.relative(artifactDir, filePath);
+    const destPath = path.join(destination, relative);
+    fs.mkdirSync(path.dirname(destPath), { recursive: true });
+    fs.copyFileSync(filePath, destPath);
+    copiedFiles.push(relative);
+  }
+
+  return {
+    output: {
+      name: rawName,
+      artifactPath: artifactDir,
+      path: destination,
+      files: copiedFiles.sort(),
+      fileCount: copiedFiles.length,
+    },
+    status: 'success',
+  };
 }
 
 async function readResponseTextWithLimit(

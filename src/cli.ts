@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, watch } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import type { FSWatcher } from 'node:fs';
 import { Command } from 'commander';
 
 import exploreAgent from './templates/agents/explore.md' with { type: 'text' };
@@ -28,11 +29,12 @@ import { WorkflowSuspendedError, WorkflowWaitingError } from './runner/step-exec
 import { TestHarness } from './runner/test-harness.ts';
 import { ConfigLoader } from './utils/config-loader.ts';
 import { LIMITS } from './utils/constants.ts';
-import { ConsoleLogger } from './utils/logger.ts';
+import { ConsoleLogger, SilentLogger } from './utils/logger.ts';
 import { generateMermaidGraph, renderWorkflowAsAscii } from './utils/mermaid.ts';
 import { WorkflowRegistry } from './utils/workflow-registry.ts';
 import { container } from './utils/container.ts';
 import { MemoryDb } from './db/memory-db.ts';
+import { ExpressionEvaluator } from './expression/evaluator.ts';
 
 // Bootstrap DI container with default services
 container.factory('logger', () => new ConsoleLogger());
@@ -445,6 +447,7 @@ program
   .option('-i, --input <key=value...>', 'Input values')
   .option('--dry-run', 'Show what would be executed without actually running it')
   .option('--debug', 'Enable interactive debug mode on failure')
+  .option('--events', 'Emit structured JSON events (NDJSON) to stdout')
   .option('--no-dedup', 'Disable idempotency/deduplication')
   .option('--resume', 'Resume the last run of this workflow if it failed or was paused')
   .option('--explain', 'Show detailed error context with suggestions on failure')
@@ -459,7 +462,13 @@ program
 
       // Import WorkflowRunner dynamically
       const { WorkflowRunner } = await import('./runner/workflow-runner.ts');
-      const logger = new ConsoleLogger();
+      const eventsEnabled = !!options.events;
+      const logger = eventsEnabled ? new SilentLogger() : new ConsoleLogger();
+      const onEvent = eventsEnabled
+        ? (event: unknown) => {
+            process.stdout.write(`${JSON.stringify(event)}\n`);
+          }
+        : undefined;
 
       let resumeRunId: string | undefined;
 
@@ -476,16 +485,22 @@ program
             lastRun.status === 'running'
           ) {
             resumeRunId = lastRun.id;
-            console.log(
-              `Resuming run ${lastRun.id} (status: ${lastRun.status}) from ${new Date(
-                lastRun.started_at
-              ).toLocaleString()}`
-            );
+            if (!eventsEnabled) {
+              console.log(
+                `Resuming run ${lastRun.id} (status: ${lastRun.status}) from ${new Date(
+                  lastRun.started_at
+                ).toLocaleString()}`
+              );
+            }
           } else {
-            console.log(`Last run ${lastRun.id} completed successfully. Starting new run.`);
+            if (!eventsEnabled) {
+              console.log(`Last run ${lastRun.id} completed successfully. Starting new run.`);
+            }
           }
         } else {
-          console.log('No previous run found. Starting new run.');
+          if (!eventsEnabled) {
+            console.log('No previous run found. Starting new run.');
+          }
         }
       }
 
@@ -498,11 +513,12 @@ program
         dedup: options.dedup,
         resumeRunId,
         logger,
+        onEvent,
       });
 
       const outputs = await runner.run();
 
-      if (Object.keys(outputs).length > 0) {
+      if (!eventsEnabled && Object.keys(outputs).length > 0) {
         console.log('Outputs:');
         console.log(JSON.stringify(runner.redact(outputs), null, 2));
       }
@@ -532,6 +548,228 @@ program
       }
       process.exit(1);
     }
+  });
+
+// ===== keystone watch =====
+program
+  .command('watch')
+  .description('Watch a workflow and re-run on changes')
+  .argument('<workflow>', 'Workflow name or path to workflow file')
+  .option('-i, --input <key=value...>', 'Input values')
+  .option('--debug', 'Enable interactive debug mode on failure')
+  .option('--events', 'Emit structured JSON events (NDJSON) to stdout')
+  .option('--debounce <ms>', 'Debounce delay in milliseconds', '200')
+  .action(async (workflowPathArg, options) => {
+    const inputs = parseInputs(options.input);
+    const eventsEnabled = !!options.events;
+    const logger = eventsEnabled ? new SilentLogger() : new ConsoleLogger();
+    const onEvent = eventsEnabled
+      ? (event: unknown) => {
+          process.stdout.write(`${JSON.stringify(event)}\n`);
+        }
+      : undefined;
+    const debounceMs = Number.parseInt(options.debounce, 10);
+
+    if (!Number.isFinite(debounceMs) || debounceMs < 0) {
+      console.error('✗ debounce must be a non-negative integer');
+      process.exit(1);
+    }
+
+    let resolvedPath: string;
+    try {
+      resolvedPath = WorkflowRegistry.resolvePath(workflowPathArg);
+    } catch (error) {
+      console.error('✗ Failed to resolve workflow:', error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+
+    const watchers = new Map<string, FSWatcher>();
+    const warned = new Set<string>();
+    let running = false;
+    let rerunQueued = false;
+    let debounceTimer: NodeJS.Timeout | undefined;
+
+    const logInfo = (message: string) => {
+      if (!eventsEnabled) {
+        console.log(message);
+      }
+    };
+
+    const logWarn = (message: string) => {
+      if (!eventsEnabled) {
+        console.warn(message);
+      }
+    };
+
+    const normalizePath = (filePath: string) => resolve(filePath);
+
+    const scheduleRun = (reason?: string) => {
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+      }
+      debounceTimer = setTimeout(() => {
+        debounceTimer = undefined;
+        if (reason && !eventsEnabled) {
+          console.log(`Change detected in ${reason}. Rerunning...`);
+        }
+        void runWorkflow();
+      }, debounceMs);
+    };
+
+    const ensureWatcher = (filePath: string) => {
+      if (watchers.has(filePath)) return;
+      if (!existsSync(filePath)) {
+        if (!warned.has(filePath)) {
+          warned.add(filePath);
+          logWarn(`⚠️  Watch skipped (path not found): ${filePath}`);
+        }
+        return;
+      }
+      try {
+        const watcher = watch(filePath, () => scheduleRun(filePath));
+        watchers.set(filePath, watcher);
+      } catch (error) {
+        if (!warned.has(filePath)) {
+          warned.add(filePath);
+          logWarn(
+            `⚠️  Failed to watch ${filePath}: ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
+      }
+    };
+
+    const updateWatchers = (paths: Set<string>) => {
+      for (const existing of Array.from(watchers.keys())) {
+        if (!paths.has(existing)) {
+          watchers.get(existing)?.close();
+          watchers.delete(existing);
+        }
+      }
+
+      for (const filePath of paths) {
+        ensureWatcher(filePath);
+      }
+
+      logInfo(`Watching ${paths.size} file(s).`);
+    };
+
+    const collectWatchPaths = (
+      workflowPath: string,
+      workflow: Workflow,
+      visited: Set<string> = new Set()
+    ): Set<string> => {
+      const normalizedPath = normalizePath(workflowPath);
+      if (visited.has(normalizedPath)) return new Set();
+      visited.add(normalizedPath);
+
+      const watchPaths = new Set<string>([normalizedPath]);
+      const baseDir = dirname(workflowPath);
+      const allSteps = [
+        ...workflow.steps,
+        ...(workflow.errors || []),
+        ...(workflow.finally || []),
+      ];
+
+      for (const step of allSteps) {
+        if (step.type === 'file' && step.op === 'read') {
+          if (ExpressionEvaluator.hasExpression(step.path)) {
+            const warningKey = `${workflowPath}:${step.id}:file`;
+            if (!warned.has(warningKey)) {
+              warned.add(warningKey);
+              logWarn(
+                `⚠️  Watch skipped for dynamic file path in step "${step.id}".`
+              );
+            }
+            continue;
+          }
+          watchPaths.add(normalizePath(resolve(baseDir, step.path)));
+        }
+
+        if (step.type === 'workflow') {
+          if (ExpressionEvaluator.hasExpression(step.path)) {
+            const warningKey = `${workflowPath}:${step.id}:workflow`;
+            if (!warned.has(warningKey)) {
+              warned.add(warningKey);
+              logWarn(
+                `⚠️  Watch skipped for dynamic workflow path in step "${step.id}".`
+              );
+            }
+            continue;
+          }
+          try {
+            const childPath = WorkflowRegistry.resolvePath(step.path, baseDir);
+            const childWorkflow = WorkflowParser.loadWorkflow(childPath);
+            for (const child of collectWatchPaths(childPath, childWorkflow, visited)) {
+              watchPaths.add(child);
+            }
+          } catch (error) {
+            const warningKey = `${workflowPath}:${step.id}:workflow-load`;
+            if (!warned.has(warningKey)) {
+              warned.add(warningKey);
+              logWarn(
+                `⚠️  Failed to load sub-workflow for step "${step.id}": ${
+                  error instanceof Error ? error.message : String(error)
+                }`
+              );
+            }
+          }
+        }
+      }
+
+      return watchPaths;
+    };
+
+    const runWorkflow = async () => {
+      if (running) {
+        rerunQueued = true;
+        return;
+      }
+      running = true;
+
+      try {
+        const workflow = WorkflowParser.loadWorkflow(resolvedPath);
+        const watchPaths = collectWatchPaths(resolvedPath, workflow);
+        updateWatchers(watchPaths);
+
+        const { WorkflowRunner } = await import('./runner/workflow-runner.ts');
+        const runner = new WorkflowRunner(workflow, {
+          inputs,
+          workflowDir: dirname(resolvedPath),
+          debug: !!options.debug,
+          logger,
+          onEvent,
+        });
+
+        const outputs = await runner.run();
+        if (!eventsEnabled && Object.keys(outputs).length > 0) {
+          console.log('Outputs:');
+          console.log(JSON.stringify(runner.redact(outputs), null, 2));
+        }
+      } catch (error) {
+        console.error(
+          '✗ Watch run failed:',
+          error instanceof Error ? error.message : error
+        );
+      } finally {
+        running = false;
+        if (rerunQueued) {
+          rerunQueued = false;
+          scheduleRun();
+        }
+      }
+    };
+
+    updateWatchers(new Set([normalizePath(resolvedPath)]));
+    logInfo(`Watching workflow: ${resolvedPath}`);
+    scheduleRun('initial');
+
+    process.on('SIGINT', () => {
+      for (const watcher of watchers.values()) {
+        watcher.close();
+      }
+      logInfo('\nStopping watch.');
+      process.exit(0);
+    });
   });
 
 // ===== keystone test =====
@@ -680,9 +918,11 @@ program
   .argument('<run_id>', 'Run ID to resume')
   .option('-w, --workflow <path>', 'Path to workflow file (auto-detected if not specified)')
   .option('-i, --input <key=value...>', 'Input values for resume')
+  .option('--events', 'Emit structured JSON events (NDJSON) to stdout')
   .action(async (runId, options) => {
     try {
       const db = new WorkflowDb();
+      const eventsEnabled = !!options.events;
 
       // Load run from database to get workflow name
       const run = await db.getRun(runId);
@@ -693,7 +933,9 @@ program
         process.exit(1);
       }
 
-      console.log(`Found run: ${run.workflow_name} (status: ${run.status})`);
+      if (!eventsEnabled) {
+        console.log(`Found run: ${run.workflow_name} (status: ${run.status})`);
+      }
 
       // Determine workflow file path
       let workflowPath = options.workflow;
@@ -710,7 +952,9 @@ program
         }
       }
 
-      console.log(`Loading workflow from: ${workflowPath}\n`);
+      if (!eventsEnabled) {
+        console.log(`Loading workflow from: ${workflowPath}\n`);
+      }
 
       // Close DB before loading workflow (will be reopened by runner)
       db.close();
@@ -720,18 +964,24 @@ program
 
       // Import WorkflowRunner dynamically
       const { WorkflowRunner } = await import('./runner/workflow-runner.ts');
-      const logger = new ConsoleLogger();
+      const logger = eventsEnabled ? new SilentLogger() : new ConsoleLogger();
+      const onEvent = eventsEnabled
+        ? (event: unknown) => {
+            process.stdout.write(`${JSON.stringify(event)}\n`);
+          }
+        : undefined;
       const inputs = parseInputs(options.input);
       const runner = new WorkflowRunner(workflow, {
         resumeRunId: runId,
         resumeInputs: inputs,
         workflowDir: dirname(workflowPath),
         logger,
+        onEvent,
       });
 
       const outputs = await runner.run();
 
-      if (Object.keys(outputs).length > 0) {
+      if (!eventsEnabled && Object.keys(outputs).length > 0) {
         console.log('Outputs:');
         console.log(JSON.stringify(runner.redact(outputs), null, 2));
       }
@@ -750,12 +1000,14 @@ program
   .requiredOption('--from <step_id>', 'Step ID to rerun (downstream steps will be invalidated)')
   .option('-r, --run <run_id>', 'Run ID to rerun (defaults to last run of the workflow)')
   .option('-i, --input <key=value...>', 'Input values for rerun')
+  .option('--events', 'Emit structured JSON events (NDJSON) to stdout')
   .action(async (workflowPathArg, options) => {
     let db: WorkflowDb | undefined;
     try {
       const resolvedPath = WorkflowRegistry.resolvePath(workflowPathArg);
       const workflow = WorkflowParser.loadWorkflow(resolvedPath);
       const inputs = parseInputs(options.input);
+      const eventsEnabled = !!options.events;
 
       db = new WorkflowDb();
       const runId =
@@ -792,24 +1044,32 @@ program
       db.close();
       db = undefined;
 
-      console.log(
-        `Cleared ${clearedSteps} step execution(s), ${clearedIdempotency} idempotency record(s), ${clearedTimers} timer(s), ${clearedCompensations} compensation(s).`
-      );
-      console.log(`Resuming run ${runId} from step ${options.from}...\n`);
+      if (!eventsEnabled) {
+        console.log(
+          `Cleared ${clearedSteps} step execution(s), ${clearedIdempotency} idempotency record(s), ${clearedTimers} timer(s), ${clearedCompensations} compensation(s).`
+        );
+        console.log(`Resuming run ${runId} from step ${options.from}...\n`);
+      }
 
       const { WorkflowRunner } = await import('./runner/workflow-runner.ts');
-      const logger = new ConsoleLogger();
+      const logger = eventsEnabled ? new SilentLogger() : new ConsoleLogger();
+      const onEvent = eventsEnabled
+        ? (event: unknown) => {
+            process.stdout.write(`${JSON.stringify(event)}\n`);
+          }
+        : undefined;
       const runner = new WorkflowRunner(workflow, {
         resumeRunId: runId,
         resumeInputs: inputs,
         workflowDir: dirname(resolvedPath),
         logger,
         allowSuccessResume: true,
+        onEvent,
       });
 
       const outputs = await runner.run();
 
-      if (Object.keys(outputs).length > 0) {
+      if (!eventsEnabled && Object.keys(outputs).length > 0) {
         console.log('Outputs:');
         console.log(JSON.stringify(runner.redact(outputs), null, 2));
       }
@@ -2095,7 +2355,7 @@ __keystone_runs() {
   COMPREPLY=()
   cur="\${COMP_WORDS[COMP_CWORD]}"
   prev="\${COMP_WORDS[COMP_CWORD - 1]}"
-  opts="init validate lint graph run resume rerun workflows history logs prune ui mcp config auth completion"
+  opts="init validate lint graph run watch resume rerun workflows history logs prune ui mcp config auth completion"
 
   case "\${prev}" in
     run|graph|rerun)

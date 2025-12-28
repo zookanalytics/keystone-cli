@@ -82,6 +82,30 @@ steps:
       expect(workflow.steps.length).toBeGreaterThan(0);
     });
 
+    test('should expand matrix strategy into foreach', () => {
+      const content = `
+name: matrix-workflow
+steps:
+  - id: test_matrix
+    type: shell
+    run: echo test
+    strategy:
+      matrix:
+        node: [18, 20]
+        os: [ubuntu, macos]
+`;
+      const filePath = join(tempDir, 'matrix.yaml');
+      writeFileSync(filePath, content);
+      const workflow = WorkflowParser.loadWorkflow(filePath);
+      const step = workflow.steps[0] as { foreach?: string; strategy?: unknown };
+      expect(step.foreach).toBeDefined();
+      const items = JSON.parse(step.foreach || '[]') as Array<Record<string, unknown>>;
+      expect(items).toHaveLength(4);
+      expect(items[0]).toHaveProperty('node');
+      expect(items[0]).toHaveProperty('os');
+      expect(step.strategy).toBeUndefined();
+    });
+
     test('should throw on invalid schema', () => {
       const content = `
 name: invalid

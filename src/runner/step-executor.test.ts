@@ -10,13 +10,14 @@ import {
   spyOn,
 } from 'bun:test';
 import * as dns from 'node:dns/promises';
-import { mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as readlinePromises from 'node:readline/promises';
 import type { MemoryDb } from '../db/memory-db';
 import type { ExpressionContext } from '../expression/evaluator';
 import type {
+  ArtifactStep,
   EngineStep,
   FileStep,
   HumanStep,
@@ -254,6 +255,60 @@ describe('step-executor', () => {
       const result = await executeStep(step, context);
       expect(result.status).toBe('failed');
       expect(result.error).toContain('Access denied');
+    });
+  });
+
+  describe('artifact', () => {
+    it('should upload and download artifacts', async () => {
+      const workspace = join(tempDir, 'artifact-workspace');
+      const distDir = join(workspace, 'dist');
+      mkdirSync(distDir, { recursive: true });
+      writeFileSync(join(distDir, 'bundle.js'), 'console.log("hello");');
+      writeFileSync(join(distDir, 'styles.css'), 'body { color: #333; }');
+
+      const artifactRoot = join(tempDir, 'artifact-store');
+      const uploadStep: ArtifactStep = {
+        id: 'upload',
+        type: 'artifact',
+        needs: [],
+        op: 'upload',
+        name: 'build',
+        paths: ['dist/**'],
+      };
+
+      const uploadResult = await executeStep(uploadStep, context, undefined, {
+        artifactRoot,
+        runId: 'run-1',
+        workflowDir: workspace,
+      });
+
+      expect(uploadResult.status).toBe('success');
+      const uploadOutput = uploadResult.output as {
+        artifactPath: string;
+        files: string[];
+        fileCount: number;
+      };
+      expect(uploadOutput.fileCount).toBe(2);
+      expect(uploadOutput.files).toContain(join('dist', 'bundle.js'));
+      expect(existsSync(join(uploadOutput.artifactPath, 'dist', 'bundle.js'))).toBe(true);
+
+      const downloadStep: ArtifactStep = {
+        id: 'download',
+        type: 'artifact',
+        needs: [],
+        op: 'download',
+        name: 'build',
+        path: 'downloaded',
+      };
+
+      const downloadResult = await executeStep(downloadStep, context, undefined, {
+        artifactRoot,
+        runId: 'run-1',
+        workflowDir: workspace,
+      });
+
+      expect(downloadResult.status).toBe('success');
+      expect(existsSync(join(workspace, 'downloaded', 'dist', 'bundle.js'))).toBe(true);
     });
   });
 

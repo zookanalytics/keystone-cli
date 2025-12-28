@@ -12,8 +12,15 @@ import { ConsoleLogger, type Logger } from '../utils/logger.ts';
 
 export type DebugAction =
   | { type: 'retry'; modifiedStep?: Step }
+  | { type: 'continue'; modifiedStep?: Step }
   | { type: 'skip' }
   | { type: 'continue_failure' }; // Default behavior (exit debug mode, let it fail)
+
+export type DebugReplMode = 'error' | 'breakpoint';
+
+export interface DebugReplOptions {
+  mode?: DebugReplMode;
+}
 
 export class DebugRepl {
   constructor(
@@ -22,21 +29,35 @@ export class DebugRepl {
     private error: unknown,
     private logger: Logger = new ConsoleLogger(),
     private inputStream: NodeJS.ReadableStream = process.stdin,
-    private outputStream: NodeJS.WritableStream = process.stdout
+    private outputStream: NodeJS.WritableStream = process.stdout,
+    private options: DebugReplOptions = {}
   ) {}
 
   public async start(): Promise<DebugAction> {
-    this.logger.error(`\n❌ Step '${this.step.id}' failed.`);
-    this.logger.error(
-      `   Error: ${this.error instanceof Error ? this.error.message : String(this.error)}`
-    );
-    this.logger.log('\nEntering Debug Mode. Available commands:');
-    this.logger.log('  > context      (view current inputs/outputs involved in this step)');
-    this.logger.log('  > retry        (re-run step, optionally with edited definition)');
-    this.logger.log('  > edit         (edit the step definition in your $EDITOR)');
-    this.logger.log('  > skip         (skip this step and proceed)');
-    this.logger.log('  > eval <code>  (run JS expression against context)');
-    this.logger.log('  > exit         (resume failure/exit)');
+    const mode = this.options.mode || 'error';
+
+    if (mode === 'breakpoint') {
+      this.logger.log(`\n⛔ Breakpoint hit before step '${this.step.id}'.`);
+      this.logger.log('\nEntering Debug Mode. Available commands:');
+      this.logger.log('  > context      (view current inputs/outputs involved in this step)');
+      this.logger.log('  > continue     (run the step, optionally with edited definition)');
+      this.logger.log('  > edit         (edit the step definition in your $EDITOR)');
+      this.logger.log('  > skip         (skip this step and proceed)');
+      this.logger.log('  > eval <code>  (run JS expression against context)');
+      this.logger.log('  > exit         (continue without changes)');
+    } else {
+      this.logger.error(`\n❌ Step '${this.step.id}' failed.`);
+      this.logger.error(
+        `   Error: ${this.error instanceof Error ? this.error.message : String(this.error)}`
+      );
+      this.logger.log('\nEntering Debug Mode. Available commands:');
+      this.logger.log('  > context      (view current inputs/outputs involved in this step)');
+      this.logger.log('  > retry        (re-run step, optionally with edited definition)');
+      this.logger.log('  > edit         (edit the step definition in your $EDITOR)');
+      this.logger.log('  > skip         (skip this step and proceed)');
+      this.logger.log('  > eval <code>  (run JS expression against context)');
+      this.logger.log('  > exit         (resume failure/exit)');
+    }
 
     const rl = readline.createInterface({
       input: this.inputStream,
@@ -74,8 +95,21 @@ export class DebugRepl {
             break;
 
           case 'retry':
-            resolveOnce({ type: 'retry', modifiedStep: this.step });
-            rl.close();
+            if (mode === 'breakpoint') {
+              resolveOnce({ type: 'continue', modifiedStep: this.step });
+              rl.close();
+            } else {
+              resolveOnce({ type: 'retry', modifiedStep: this.step });
+              rl.close();
+            }
+            break;
+
+          case 'continue':
+          case 'run':
+            if (mode === 'breakpoint') {
+              resolveOnce({ type: 'continue', modifiedStep: this.step });
+              rl.close();
+            }
             break;
 
           case 'skip':
@@ -85,7 +119,11 @@ export class DebugRepl {
 
           case 'exit':
           case 'quit':
-            resolveOnce({ type: 'continue_failure' });
+            if (mode === 'breakpoint') {
+              resolveOnce({ type: 'continue', modifiedStep: this.step });
+            } else {
+              resolveOnce({ type: 'continue_failure' });
+            }
             rl.close();
             break;
 
@@ -125,7 +163,12 @@ export class DebugRepl {
             break;
         }
 
-        if (cmd !== 'retry' && cmd !== 'skip' && cmd !== 'exit' && cmd !== 'quit') {
+        const terminalCommands =
+          mode === 'breakpoint'
+            ? new Set(['retry', 'continue', 'run', 'skip', 'exit', 'quit'])
+            : new Set(['retry', 'skip', 'exit', 'quit']);
+
+        if (!terminalCommands.has(cmd)) {
           rl.prompt();
         }
       });

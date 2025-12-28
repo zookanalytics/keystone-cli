@@ -30,6 +30,7 @@ import { WorkflowState, type StepContext, type ForeachStepContext } from './work
 import { WorkflowScheduler } from './workflow-scheduler.ts';
 import { ConsoleLogger, type Logger } from '../utils/logger.ts';
 import { container } from '../utils/container.ts';
+import type { EventHandler, StepPhase, WorkflowEvent } from './events.ts';
 
 /**
  * A logger wrapper that redacts secrets from all log messages
@@ -99,6 +100,7 @@ export interface RunOptions {
   artifactRoot?: string;
   db?: WorkflowDb;
   memoryDb?: MemoryDb;
+  onEvent?: EventHandler;
 }
 
 // Redacted StepContext and ForeachStepContext (moved to workflow-state.ts)
@@ -605,6 +607,24 @@ export class WorkflowRunner {
               )
               : undefined,
           op: step.op,
+          allowOutsideCwd: step.allowOutsideCwd,
+        });
+      case 'artifact':
+        return stripUndefined({
+          op: step.op,
+          name: ExpressionEvaluator.evaluateString(
+            (step as import('../parser/schema.ts').ArtifactStep).name,
+            context
+          ),
+          paths: (step as import('../parser/schema.ts').ArtifactStep).paths?.map((p) =>
+            ExpressionEvaluator.evaluateString(p, context)
+          ),
+          path: (step as import('../parser/schema.ts').ArtifactStep).path
+            ? ExpressionEvaluator.evaluateString(
+                (step as import('../parser/schema.ts').ArtifactStep).path as string,
+                context
+              )
+            : undefined,
           allowOutsideCwd: step.allowOutsideCwd,
         });
       case 'request': {
@@ -1162,6 +1182,64 @@ export class WorkflowRunner {
 
     if (!isRecursion) {
       await this.db.startStep(stepExecId);
+    }
+
+    if (stepToExecute.breakpoint && this.options.debug && !isRecursion) {
+      if (!process.stdin.isTTY) {
+        const message = `Breakpoint hit before step ${stepToExecute.id}`;
+        if (dedupEnabled && idempotencyClaimed) {
+          await this.recordIdempotencyResult(
+            scopedIdempotencyKey,
+            stepToExecute.id,
+            StepStatus.SUSPENDED,
+            null,
+            message,
+            idempotencyTtlSeconds
+          );
+        }
+        await this.db.completeStep(
+          stepExecId,
+          StepStatus.SUSPENDED,
+          null,
+          this.redactAtRest ? this.redactor.redact(message) : message
+        );
+        return {
+          output: null,
+          outputs: {},
+          status: StepStatus.SUSPENDED,
+          error: message,
+        };
+      }
+
+      try {
+        const { DebugRepl } = await import('./debug-repl.ts');
+        const repl = new DebugRepl(context, stepToExecute, undefined, this.logger, process.stdin, process.stdout, {
+          mode: 'breakpoint',
+        });
+        const action = await repl.start();
+
+        if (action.type === 'skip') {
+          this.logger.log(`  ⏭️ Skipping step ${stepToExecute.id} at breakpoint`);
+          await this.db.completeStep(
+            stepExecId,
+            StepStatus.SKIPPED,
+            null,
+            undefined,
+            undefined
+          );
+          return {
+            output: null,
+            outputs: {},
+            status: StepStatus.SKIPPED,
+          };
+        }
+
+        if (action.type === 'continue' || action.type === 'retry') {
+          stepToExecute = action.modifiedStep || stepToExecute;
+        }
+      } catch (replError) {
+        this.logger.error(`  ✗ Debug REPL error: ${replError}`);
+      }
     }
 
     const operation = async (attemptContext: ExpressionContext, abortSignal?: AbortSignal) => {
@@ -2029,12 +2107,76 @@ Please provide a corrected response that exactly matches the required schema.`;
     return this.redactor.redactValue(value) as T;
   }
 
+  private emitEvent(event: WorkflowEvent): void {
+    if (!this.options.onEvent) return;
+    try {
+      const redacted = this.redactor.redactValue(event) as WorkflowEvent;
+      this.options.onEvent(redacted);
+    } catch (error) {
+      this.logger.warn(
+        `  ⚠️ Failed to emit event: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  private emitStepStart(
+    step: Step,
+    phase: StepPhase,
+    stepIndex?: number,
+    totalSteps?: number
+  ): number {
+    const startedAt = Date.now();
+    this.emitEvent({
+      type: 'step.start',
+      timestamp: new Date(startedAt).toISOString(),
+      runId: this.runId,
+      workflow: this.workflow.name,
+      stepId: step.id,
+      stepType: step.type,
+      phase,
+      stepIndex,
+      totalSteps,
+    });
+    return startedAt;
+  }
+
+  private emitStepEnd(
+    step: Step,
+    phase: StepPhase,
+    startedAt: number,
+    error?: unknown,
+    stepIndex?: number,
+    totalSteps?: number
+  ): void {
+    const endedAt = Date.now();
+    const context = this.state.get(step.id);
+    const status = context?.status || StepStatus.FAILED;
+    const errorMsg =
+      context?.error || (error instanceof Error ? error.message : error ? String(error) : undefined);
+
+    this.emitEvent({
+      type: 'step.end',
+      timestamp: new Date(endedAt).toISOString(),
+      runId: this.runId,
+      workflow: this.workflow.name,
+      stepId: step.id,
+      stepType: step.type,
+      phase,
+      status,
+      durationMs: endedAt - startedAt,
+      error: status === StepStatus.SUCCESS || status === StepStatus.SKIPPED ? undefined : errorMsg,
+      stepIndex,
+      totalSteps,
+    });
+  }
+
   /**
    * Execute the workflow
    */
   async run(): Promise<Record<string, unknown>> {
     const expressionStrict = ConfigLoader.load().expression?.strict ?? false;
     ExpressionEvaluator.setStrictMode(expressionStrict);
+    let completionEvent: WorkflowEvent | null = null;
 
     // Handle resume state restoration
     if (this.resumeRunId && !this.restored) {
@@ -2060,6 +2202,13 @@ Please provide a corrected response that exactly matches the required schema.`;
       await this.db.createRun(this.runId, this.workflow.name, this.redactForStorage(this.inputs));
     }
     await this.db.updateRunStatus(this.runId, 'running');
+    this.emitEvent({
+      type: 'workflow.start',
+      timestamp: new Date().toISOString(),
+      runId: this.runId,
+      workflow: this.workflow.name,
+      inputs: this.redact(this.inputs),
+    });
 
     try {
       // Use scheduler's execution order
@@ -2071,6 +2220,14 @@ Please provide a corrected response that exactly matches the required schema.`;
         const outputs = this.evaluateOutputs();
         await this.db.updateRunStatus(this.runId, 'success', this.redactForStorage(outputs));
         this.logger.log('✨ Workflow already completed!\n');
+        completionEvent = {
+          type: 'workflow.complete',
+          timestamp: new Date().toISOString(),
+          runId: this.runId,
+          workflow: this.workflow.name,
+          status: WorkflowStatus.SUCCESS,
+          outputs: this.redact(outputs),
+        };
         return outputs;
       }
 
@@ -2145,6 +2302,7 @@ Please provide a corrected response that exactly matches the required schema.`;
 
             const promise = (async () => {
               let release: (() => void) | undefined;
+              const startedAt = this.emitStepStart(step, 'main', stepIndex, totalSteps);
               try {
                 this.logger.debug?.(
                   `[${stepIndex}/${totalSteps}] ⏳ Waiting for pool: ${poolName}`
@@ -2156,8 +2314,12 @@ Please provide a corrected response that exactly matches the required schema.`;
                 );
 
                 await this.executeStepWithForeach(step);
+                this.emitStepEnd(step, 'main', startedAt, undefined, stepIndex, totalSteps);
                 this.scheduler.markStepComplete(stepId);
                 this.logger.log(`[${stepIndex}/${totalSteps}] ✓ Step ${step.id} completed\n`);
+              } catch (error) {
+                this.emitStepEnd(step, 'main', startedAt, error, stepIndex, totalSteps);
+                throw error;
               } finally {
                 if (typeof release === 'function') {
                   release();
@@ -2212,17 +2374,42 @@ Please provide a corrected response that exactly matches the required schema.`;
 
       this.logger.log('✨ Workflow completed successfully!\n');
 
+      completionEvent = {
+        type: 'workflow.complete',
+        timestamp: new Date().toISOString(),
+        runId: this.runId,
+        workflow: this.workflow.name,
+        status: WorkflowStatus.SUCCESS,
+        outputs: this.redact(outputs),
+      };
+
       return outputs;
     } catch (error) {
       if (error instanceof WorkflowSuspendedError) {
         await this.db.updateRunStatus(this.runId, 'paused');
         this.logger.log(`\n⏸  Workflow paused: ${error.message}`);
+        completionEvent = {
+          type: 'workflow.complete',
+          timestamp: new Date().toISOString(),
+          runId: this.runId,
+          workflow: this.workflow.name,
+          status: WorkflowStatus.PAUSED,
+          error: error.message,
+        };
         throw error;
       }
 
       if (error instanceof WorkflowWaitingError) {
         await this.db.updateRunStatus(this.runId, 'paused');
         this.logger.log(`\n⏳ Workflow waiting: ${error.message}`);
+        completionEvent = {
+          type: 'workflow.complete',
+          timestamp: new Date().toISOString(),
+          runId: this.runId,
+          workflow: this.workflow.name,
+          status: WorkflowStatus.PAUSED,
+          error: error.message,
+        };
         throw error;
       }
 
@@ -2246,10 +2433,21 @@ Please provide a corrected response that exactly matches the required schema.`;
         undefined,
         this.redactAtRest ? this.redactor.redact(errorMsg) : errorMsg
       );
+      completionEvent = {
+        type: 'workflow.complete',
+        timestamp: new Date().toISOString(),
+        runId: this.runId,
+        workflow: this.workflow.name,
+        status: WorkflowStatus.FAILED,
+        error: errorMsg,
+      };
       throw error;
     } finally {
       this.removeSignalHandlers();
       await this.runFinally();
+      if (completionEvent) {
+        this.emitEvent(completionEvent);
+      }
       if (!this.options.mcpManager) {
         await this.mcpManager.stopAll();
       }
@@ -2292,8 +2490,22 @@ Please provide a corrected response that exactly matches the required schema.`;
             this.logger.log(
               `[${finallyStepIndex}/${totalFinallySteps}] ▶ Executing finally step: ${step.id} (${step.type})`
             );
+            const startedAt = this.emitStepStart(
+              step,
+              'finally',
+              finallyStepIndex,
+              totalFinallySteps
+            );
             const promise = this.executeStepWithForeach(step)
               .then(() => {
+                this.emitStepEnd(
+                  step,
+                  'finally',
+                  startedAt,
+                  undefined,
+                  finallyStepIndex,
+                  totalFinallySteps
+                );
                 completedFinallySteps.add(stepId);
                 runningPromises.delete(stepId);
                 this.logger.log(
@@ -2301,6 +2513,14 @@ Please provide a corrected response that exactly matches the required schema.`;
                 );
               })
               .catch((err) => {
+                this.emitStepEnd(
+                  step,
+                  'finally',
+                  startedAt,
+                  err,
+                  finallyStepIndex,
+                  totalFinallySteps
+                );
                 runningPromises.delete(stepId);
                 this.logger.error(
                   `  ✗ Finally step ${step.id} failed: ${err instanceof Error ? err.message : String(err)}`
@@ -2374,8 +2594,22 @@ Please provide a corrected response that exactly matches the required schema.`;
             this.logger.log(
               `[${errorsStepIndex}/${totalErrorsSteps}] ▶ Executing errors step: ${step.id} (${step.type})`
             );
+            const startedAt = this.emitStepStart(
+              step,
+              'errors',
+              errorsStepIndex,
+              totalErrorsSteps
+            );
             const promise = this.executeStepWithForeach(step)
               .then(() => {
+                this.emitStepEnd(
+                  step,
+                  'errors',
+                  startedAt,
+                  undefined,
+                  errorsStepIndex,
+                  totalErrorsSteps
+                );
                 completedErrorsSteps.add(stepId);
                 runningPromises.delete(stepId);
                 this.logger.log(
@@ -2383,6 +2617,14 @@ Please provide a corrected response that exactly matches the required schema.`;
                 );
               })
               .catch((err) => {
+                this.emitStepEnd(
+                  step,
+                  'errors',
+                  startedAt,
+                  err,
+                  errorsStepIndex,
+                  totalErrorsSteps
+                );
                 runningPromises.delete(stepId);
                 this.logger.error(
                   `  ✗ Errors step ${step.id} failed: ${err instanceof Error ? err.message : String(err)}`
