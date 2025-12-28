@@ -21,6 +21,16 @@ export const TIMEOUTS = {
 export const DB = {
   /** SQLite busy/locked error code */
   SQLITE_BUSY: 5,
+  /** Base delay for retry backoff in ms */
+  RETRY_BASE_DELAY_MS: 20,
+  /** Multiplier for exponential backoff */
+  RETRY_BACKOFF_MULTIPLIER: 1.5,
+  /** Maximum delay between retries in ms */
+  RETRY_MAX_DELAY_MS: 1000,
+  /** Random jitter to add to delays in ms */
+  RETRY_JITTER_MS: 20,
+  /** Retry count threshold for warning log */
+  RETRY_WARN_THRESHOLD: 5,
 } as const;
 
 /** Limit values for various operations */

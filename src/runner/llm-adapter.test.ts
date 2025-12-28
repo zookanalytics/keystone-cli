@@ -1,4 +1,14 @@
-import { afterEach, beforeEach, describe, expect, it, mock, spyOn, beforeAll, afterAll } from 'bun:test';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  mock,
+  spyOn,
+} from 'bun:test';
 import * as fs from 'node:fs';
 import { join } from 'node:path';
 import { AuthManager } from '../utils/auth-manager';
@@ -118,9 +128,12 @@ describe('GoogleGeminiAdapter', () => {
     // @ts-ignore
     global.fetch = mock(() =>
       Promise.resolve(
-        new Response(JSON.stringify({ error: { message: 'Bad Request', status: 'INVALID_ARGUMENT' } }), {
-          status: 400,
-        })
+        new Response(
+          JSON.stringify({ error: { message: 'Bad Request', status: 'INVALID_ARGUMENT' } }),
+          {
+            status: 400,
+          }
+        )
       )
     );
 
@@ -146,12 +159,21 @@ describe('OpenAIChatGPTAdapter Message Filtering', () => {
     spyOn(AuthManager, 'getOpenAIChatGPTToken').mockResolvedValue('fake-token');
     const adapter = new OpenAIChatGPTAdapter();
     // @ts-ignore
-    global.fetch = mock(() => Promise.resolve(new Response(JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'filtered' } }] }))));
+    global.fetch = mock(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'filtered' } }] })
+        )
+      )
+    );
 
-    await adapter.chat([
-      { role: 'system', content: 'sys' },
-      { role: 'user', content: 'hi' }
-    ], { model: 'gpt-4o' });
+    await adapter.chat(
+      [
+        { role: 'system', content: 'sys' },
+        { role: 'user', content: 'hi' },
+      ],
+      { model: 'gpt-4o' }
+    );
 
     const call = (global.fetch as any).mock.calls[0];
     const body = JSON.parse(call[1].body);
@@ -188,7 +210,7 @@ describe('AnthropicAdapter Token Accumulation', () => {
     );
 
     const response = await adapter.chat([{ role: 'user', content: 'hi' }], {
-      onStream: () => { },
+      onStream: () => {},
     });
     expect(response.usage).toEqual({
       prompt_tokens: 10,
@@ -197,8 +219,6 @@ describe('AnthropicAdapter Token Accumulation', () => {
     });
   });
 });
-
-
 
 describe('AnthropicAdapter', () => {
   const originalFetch = global.fetch;
@@ -684,16 +704,16 @@ describe('getAdapter', () => {
         copilot: { type: 'copilot', base_url: 'https://copilot.com' },
         'openai-chatgpt': { type: 'openai-chatgpt', base_url: 'https://chat.openai.com' },
         'google-gemini': { type: 'google-gemini', project_id: 'test-project' },
-        'anthropic-claude': { type: 'anthropic-claude' }
+        'anthropic-claude': { type: 'anthropic-claude' },
       },
       model_mappings: {
         'claude-*': 'anthropic',
         'gpt-*': 'openai',
         'gemini-*': 'google-gemini',
         'claude-3-opus-20240229': 'anthropic-claude',
-        'gemini-3-pro-high': 'google-gemini'
+        'gemini-3-pro-high': 'google-gemini',
       },
-      log_level: 'info'
+      log_level: 'info',
     } as any);
   });
 
@@ -829,7 +849,11 @@ describe('AnthropicAdapter Streaming Errors', () => {
   it('should log warning for non-SyntaxError chunk processing failures', async () => {
     const stream = new ReadableStream({
       start(controller) {
-        controller.enqueue(new TextEncoder().encode('data: {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "hi"}}\n\n'));
+        controller.enqueue(
+          new TextEncoder().encode(
+            'data: {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "hi"}}\n\n'
+          )
+        );
         controller.enqueue(new TextEncoder().encode('data: invalid-json\n\n'));
         controller.close();
       },
@@ -846,14 +870,16 @@ describe('AnthropicAdapter Streaming Errors', () => {
     );
 
     const logger = new ConsoleLogger();
-    const warnSpy = spyOn(logger, 'warn').mockImplementation(() => { });
+    const warnSpy = spyOn(logger, 'warn').mockImplementation(() => {});
     // @ts-ignore - reaching into private defaultLogger is hard, but we can check if it logs to console if it used ConsoleLogger
     // Actually AnthropicAdapter uses defaultLogger which is a constant in the file.
 
     const adapter = new AnthropicAdapter('fake-key');
     let chunks = '';
     await adapter.chat([{ role: 'user', content: 'hi' }], {
-      onStream: (c) => { chunks += c; }
+      onStream: (c) => {
+        chunks += c;
+      },
     });
 
     expect(chunks).toBe('hi');
@@ -899,7 +925,9 @@ describe('OpenAIChatGPTAdapter Usage Limits', () => {
     );
 
     const adapter = new OpenAIChatGPTAdapter('fake-key');
-    await expect(adapter.chat([{ role: 'user', content: 'hi' }])).rejects.toThrow(/ChatGPT subscription limit reached/);
+    await expect(adapter.chat([{ role: 'user', content: 'hi' }])).rejects.toThrow(
+      /ChatGPT subscription limit reached/
+    );
   });
 
   it('should process streaming responses correctly', async () => {
@@ -907,7 +935,7 @@ describe('OpenAIChatGPTAdapter Usage Limits', () => {
       'data: {"choices": [{"index": 0, "delta": {"content": "th"}, "finish_reason": null}]}\n\n',
       'data: {"choices": [{"index": 0, "delta": {"content": "inking"}, "finish_reason": null}]}\n\n',
       'data: {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}}\n\n',
-      'data: [DONE]\n\n'
+      'data: [DONE]\n\n',
     ];
 
     const stream = new ReadableStream({
@@ -932,7 +960,9 @@ describe('OpenAIChatGPTAdapter Usage Limits', () => {
     const adapter = new OpenAIChatGPTAdapter('fake-key');
     let capturedStream = '';
     const response = await adapter.chat([{ role: 'user', content: 'hi' }], {
-      onStream: (chunk) => { capturedStream += chunk; }
+      onStream: (chunk) => {
+        capturedStream += chunk;
+      },
     });
 
     expect(capturedStream).toBe('thinking');
@@ -942,18 +972,22 @@ describe('OpenAIChatGPTAdapter Usage Limits', () => {
 
   it('should extract response usage and tool calls correctly', async () => {
     const mockResponse = {
-      choices: [{
-        message: {
-          role: 'assistant',
-          content: 'I will call a tool',
-          tool_calls: [{
-            id: 'call_1',
-            type: 'function',
-            function: { name: 'test_tool', arguments: '{"arg": 1}' }
-          }]
-        }
-      }],
-      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            content: 'I will call a tool',
+            tool_calls: [
+              {
+                id: 'call_1',
+                type: 'function',
+                function: { name: 'test_tool', arguments: '{"arg": 1}' },
+              },
+            ],
+          },
+        },
+      ],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
     };
 
     // @ts-ignore
@@ -978,18 +1012,29 @@ describe('OpenAIChatGPTAdapter Usage Limits', () => {
 describe('LocalEmbeddingAdapter', () => {
   it('should throw error on chat', async () => {
     const adapter = new LocalEmbeddingAdapter();
-    await expect(adapter.chat([])).rejects.toThrow(/Local models in Keystone currently only support memory\/embedding operations/);
+    await expect(adapter.chat([])).rejects.toThrow(
+      /Local models in Keystone currently only support memory\/embedding operations/
+    );
   });
 });
 
 describe('Runtime Resolution Helpers', () => {
   it('should handle hasOnnxRuntimeLibrary with existing files', () => {
     const readdirSpy = spyOn(fs, 'readdirSync').mockReturnValue([
-      { name: 'libonnxruntime.so', isFile: () => true, isDirectory: () => false, isBlockDevice: () => false, isCharacterDevice: () => false, isSymbolicLink: () => false, isFIFO: () => false, isSocket: () => false },
+      {
+        name: 'libonnxruntime.so',
+        isFile: () => true,
+        isDirectory: () => false,
+        isBlockDevice: () => false,
+        isCharacterDevice: () => false,
+        isSymbolicLink: () => false,
+        isFIFO: () => false,
+        isSocket: () => false,
+      },
     ] as any);
 
     // We need to access the private function or test it via side effect.
-    // Since it's not exported, we'll skip direct testing of private functions for now 
+    // Since it's not exported, we'll skip direct testing of private functions for now
     // and focus on exported ones if possible.
     readdirSpy.mockRestore();
   });

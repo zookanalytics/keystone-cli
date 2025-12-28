@@ -4,15 +4,15 @@ import { globSync } from 'glob';
 import { ConfigLoader } from './config-loader';
 
 export interface ContextData {
-    readme?: string;
-    agentsMd?: string;
-    cursorRules?: string[];
+  readme?: string;
+  agentsMd?: string;
+  cursorRules?: string[];
 }
 
 export interface ContextInjectorConfig {
-    enabled: boolean;
-    search_depth: number;
-    sources: ('readme' | 'agents_md' | 'cursor_rules')[];
+  enabled: boolean;
+  search_depth: number;
+  sources: ('readme' | 'agents_md' | 'cursor_rules')[];
 }
 
 /**
@@ -20,219 +20,221 @@ export interface ContextInjectorConfig {
  * into LLM system prompts.
  */
 export class ContextInjector {
-    private static contextCache = new Map<string, { context: ContextData; timestamp: number }>();
-    private static CACHE_TTL_MS = 60000; // 1 minute cache
+  private static contextCache = new Map<string, { context: ContextData; timestamp: number }>();
+  private static CACHE_TTL_MS = 60000; // 1 minute cache
 
-    /**
-     * Find the project root by looking for common project markers
-     */
-    static findProjectRoot(startPath: string): string {
-        const markers = ['.git', 'package.json', 'Cargo.toml', 'go.mod', 'pyproject.toml', '.keystone'];
-        let current = path.resolve(startPath);
-        const root = path.parse(current).root;
+  /**
+   * Find the project root by looking for common project markers
+   */
+  static findProjectRoot(startPath: string): string {
+    const markers = ['.git', 'package.json', 'Cargo.toml', 'go.mod', 'pyproject.toml', '.keystone'];
+    let current = path.resolve(startPath);
+    const root = path.parse(current).root;
 
-        while (current !== root) {
-            for (const marker of markers) {
-                if (fs.existsSync(path.join(current, marker))) {
-                    return current;
-                }
-            }
-            current = path.dirname(current);
+    while (current !== root) {
+      for (const marker of markers) {
+        if (fs.existsSync(path.join(current, marker))) {
+          return current;
         }
-
-        return startPath; // Fallback to original path if no marker found
+      }
+      current = path.dirname(current);
     }
 
-    /**
-     * Scan directories for README.md and AGENTS.md files
-     */
-    static scanDirectoryContext(dir: string, depth: number = 3): Omit<ContextData, 'cursorRules'> {
-        const result: Omit<ContextData, 'cursorRules'> = {};
-        const projectRoot = this.findProjectRoot(dir);
-        let current = path.resolve(dir);
+    return startPath; // Fallback to original path if no marker found
+  }
 
-        // Walk from current dir up to project root, limited by depth
-        for (let i = 0; i < depth && current.length >= projectRoot.length; i++) {
-            // Check for README.md (only use first one found, closest to working dir)
-            if (!result.readme) {
-                const readmePath = path.join(current, 'README.md');
-                if (fs.existsSync(readmePath)) {
-                    try {
-                        result.readme = fs.readFileSync(readmePath, 'utf-8');
-                    } catch {
-                        // Ignore read errors
-                    }
-                }
-            }
+  /**
+   * Scan directories for README.md and AGENTS.md files
+   */
+  static scanDirectoryContext(dir: string, depth = 3): Omit<ContextData, 'cursorRules'> {
+    const result: Omit<ContextData, 'cursorRules'> = {};
+    const projectRoot = this.findProjectRoot(dir);
+    let current = path.resolve(dir);
 
-            // Check for AGENTS.md (only use first one found, closest to working dir)
-            if (!result.agentsMd) {
-                const agentsMdPath = path.join(current, 'AGENTS.md');
-                if (fs.existsSync(agentsMdPath)) {
-                    try {
-                        result.agentsMd = fs.readFileSync(agentsMdPath, 'utf-8');
-                    } catch {
-                        // Ignore read errors
-                    }
-                }
-            }
-
-            // Move up one directory
-            const parent = path.dirname(current);
-            if (parent === current) break;
-            current = parent;
+    // Walk from current dir up to project root, limited by depth
+    for (let i = 0; i < depth && current.length >= projectRoot.length; i++) {
+      // Check for README.md (only use first one found, closest to working dir)
+      if (!result.readme) {
+        const readmePath = path.join(current, 'README.md');
+        if (fs.existsSync(readmePath)) {
+          try {
+            result.readme = fs.readFileSync(readmePath, 'utf-8');
+          } catch {
+            // Ignore read errors
+          }
         }
+      }
 
-        return result;
+      // Check for AGENTS.md (only use first one found, closest to working dir)
+      if (!result.agentsMd) {
+        const agentsMdPath = path.join(current, 'AGENTS.md');
+        if (fs.existsSync(agentsMdPath)) {
+          try {
+            result.agentsMd = fs.readFileSync(agentsMdPath, 'utf-8');
+          } catch {
+            // Ignore read errors
+          }
+        }
+      }
+
+      // Move up one directory
+      const parent = path.dirname(current);
+      if (parent === current) break;
+      current = parent;
     }
 
-    /**
-     * Scan for .cursor/rules or .claude/rules files that apply to accessed files
-     */
-    static scanRules(filesAccessed: string[]): string[] {
-        const rules: string[] = [];
-        const rulesDirs = ['.cursor/rules', '.claude/rules'];
-        const projectRoot = filesAccessed.length > 0
-            ? this.findProjectRoot(path.dirname(filesAccessed[0]))
-            : process.cwd();
+    return result;
+  }
 
-        for (const rulesDir of rulesDirs) {
-            const rulesPath = path.join(projectRoot, rulesDir);
-            if (!fs.existsSync(rulesPath)) continue;
+  /**
+   * Scan for .cursor/rules or .claude/rules files that apply to accessed files
+   */
+  static scanRules(filesAccessed: string[]): string[] {
+    const rules: string[] = [];
+    const rulesDirs = ['.cursor/rules', '.claude/rules'];
+    const projectRoot =
+      filesAccessed.length > 0
+        ? this.findProjectRoot(path.dirname(filesAccessed[0]))
+        : process.cwd();
 
-            try {
-                const files = fs.readdirSync(rulesPath);
-                for (const file of files) {
-                    const rulePath = path.join(rulesPath, file);
-                    if (!fs.statSync(rulePath).isFile()) continue;
+    for (const rulesDir of rulesDirs) {
+      const rulesPath = path.join(projectRoot, rulesDir);
+      if (!fs.existsSync(rulesPath)) continue;
 
-                    const content = fs.readFileSync(rulePath, 'utf-8');
+      try {
+        const files = fs.readdirSync(rulesPath);
+        for (const file of files) {
+          const rulePath = path.join(rulesPath, file);
+          if (!fs.statSync(rulePath).isFile()) continue;
 
-                    // Check if rule applies to any of the accessed files
-                    // Rules can have a glob pattern on the first line prefixed with "applies:"
-                    const firstLine = content.split('\n')[0];
-                    if (firstLine.startsWith('applies:')) {
-                        const pattern = firstLine.slice('applies:'.length).trim();
-                        const matchesAny = filesAccessed.some(f => {
-                            const relativePath = path.relative(projectRoot, f);
-                            try {
-                                const matches = globSync(pattern, { cwd: projectRoot });
-                                return matches.includes(relativePath);
-                            } catch {
-                                return false;
-                            }
-                        });
-                        if (!matchesAny) continue;
-                    }
+          const content = fs.readFileSync(rulePath, 'utf-8');
 
-                    rules.push(content);
-                }
-            } catch {
-                // Ignore errors reading rules directory
-            }
+          // Check if rule applies to any of the accessed files
+          // Rules can have a glob pattern on the first line prefixed with "applies:"
+          const firstLine = content.split('\n')[0];
+          if (firstLine.startsWith('applies:')) {
+            const pattern = firstLine.slice('applies:'.length).trim();
+            const matchesAny = filesAccessed.some((f) => {
+              const relativePath = path.relative(projectRoot, f);
+              try {
+                const matches = globSync(pattern, { cwd: projectRoot });
+                return matches.includes(relativePath);
+              } catch {
+                return false;
+              }
+            });
+            if (!matchesAny) continue;
+          }
+
+          rules.push(content);
         }
-
-        return rules;
+      } catch {
+        // Ignore errors reading rules directory
+      }
     }
 
-    /**
-     * Generate the system prompt addition from context data
-     */
-    static generateSystemPromptAddition(context: ContextData): string {
-        const parts: string[] = [];
+    return rules;
+  }
 
-        if (context.agentsMd) {
-            parts.push('=== AGENTS.MD (Project AI Guidelines) ===');
-            parts.push(context.agentsMd);
-            parts.push('');
-        }
+  /**
+   * Generate the system prompt addition from context data
+   */
+  static generateSystemPromptAddition(context: ContextData): string {
+    const parts: string[] = [];
 
-        if (context.readme) {
-            // Truncate README to first 2000 chars to avoid overwhelming the context
-            const truncatedReadme = context.readme.length > 2000
-                ? context.readme.slice(0, 2000) + '\n[... README truncated ...]'
-                : context.readme;
-            parts.push('=== README.md (Project Overview) ===');
-            parts.push(truncatedReadme);
-            parts.push('');
-        }
-
-        if (context.cursorRules && context.cursorRules.length > 0) {
-            parts.push('=== Project Rules ===');
-            for (const rule of context.cursorRules) {
-                parts.push(rule);
-                parts.push('---');
-            }
-            parts.push('');
-        }
-
-        return parts.join('\n');
+    if (context.agentsMd) {
+      parts.push('=== AGENTS.MD (Project AI Guidelines) ===');
+      parts.push(context.agentsMd);
+      parts.push('');
     }
 
-    /**
-     * Get context for a directory, using cache if available
-     */
-    static getContext(
-        dir: string,
-        filesAccessed: string[],
-        config?: ContextInjectorConfig
-    ): ContextData {
-        // Default config from ConfigLoader
-        if (!config) {
-            try {
-                const appConfig = ConfigLoader.load();
-                const contextConfig = appConfig.features?.context_injection;
-                if (!contextConfig?.enabled) {
-                    return {};
-                }
-                config = {
-                    enabled: contextConfig.enabled,
-                    search_depth: contextConfig.search_depth ?? 3,
-                    sources: contextConfig.sources ?? ['readme', 'agents_md', 'cursor_rules'],
-                };
-            } catch {
-                return {};
-            }
-        }
-
-        if (!config.enabled) {
-            return {};
-        }
-
-        // Check cache
-        const cacheKey = dir;
-        const cached = this.contextCache.get(cacheKey);
-        if (cached && Date.now() - cached.timestamp < this.CACHE_TTL_MS) {
-            return cached.context;
-        }
-
-        // Build context based on sources
-        const context: ContextData = {};
-
-        if (config.sources.includes('readme') || config.sources.includes('agents_md')) {
-            const dirContext = this.scanDirectoryContext(dir, config.search_depth);
-            if (config.sources.includes('readme')) {
-                context.readme = dirContext.readme;
-            }
-            if (config.sources.includes('agents_md')) {
-                context.agentsMd = dirContext.agentsMd;
-            }
-        }
-
-        if (config.sources.includes('cursor_rules')) {
-            context.cursorRules = this.scanRules(filesAccessed);
-        }
-
-        // Cache the result
-        this.contextCache.set(cacheKey, { context, timestamp: Date.now() });
-
-        return context;
+    if (context.readme) {
+      // Truncate README to first 2000 chars to avoid overwhelming the context
+      const truncatedReadme =
+        context.readme.length > 2000
+          ? context.readme.slice(0, 2000) + '\n[... README truncated ...]'
+          : context.readme;
+      parts.push('=== README.md (Project Overview) ===');
+      parts.push(truncatedReadme);
+      parts.push('');
     }
 
-    /**
-     * Clear the context cache
-     */
-    static clearCache(): void {
-        this.contextCache.clear();
+    if (context.cursorRules && context.cursorRules.length > 0) {
+      parts.push('=== Project Rules ===');
+      for (const rule of context.cursorRules) {
+        parts.push(rule);
+        parts.push('---');
+      }
+      parts.push('');
     }
+
+    return parts.join('\n');
+  }
+
+  /**
+   * Get context for a directory, using cache if available
+   */
+  static getContext(
+    dir: string,
+    filesAccessed: string[],
+    config?: ContextInjectorConfig
+  ): ContextData {
+    // Default config from ConfigLoader
+    if (!config) {
+      try {
+        const appConfig = ConfigLoader.load();
+        const contextConfig = appConfig.features?.context_injection;
+        if (!contextConfig?.enabled) {
+          return {};
+        }
+        config = {
+          enabled: contextConfig.enabled,
+          search_depth: contextConfig.search_depth ?? 3,
+          sources: contextConfig.sources ?? ['readme', 'agents_md', 'cursor_rules'],
+        };
+      } catch {
+        return {};
+      }
+    }
+
+    if (!config.enabled) {
+      return {};
+    }
+
+    // Check cache
+    const cacheKey = dir;
+    const cached = this.contextCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < this.CACHE_TTL_MS) {
+      return cached.context;
+    }
+
+    // Build context based on sources
+    const context: ContextData = {};
+
+    if (config.sources.includes('readme') || config.sources.includes('agents_md')) {
+      const dirContext = this.scanDirectoryContext(dir, config.search_depth);
+      if (config.sources.includes('readme')) {
+        context.readme = dirContext.readme;
+      }
+      if (config.sources.includes('agents_md')) {
+        context.agentsMd = dirContext.agentsMd;
+      }
+    }
+
+    if (config.sources.includes('cursor_rules')) {
+      context.cursorRules = this.scanRules(filesAccessed);
+    }
+
+    // Cache the result
+    this.contextCache.set(cacheKey, { context, timestamp: Date.now() });
+
+    return context;
+  }
+
+  /**
+   * Clear the context cache
+   */
+  static clearCache(): void {
+    this.contextCache.clear();
+  }
 }

@@ -549,9 +549,15 @@ class SSETransport implements MCPTransport {
               }
             }
           } catch (e) {
-            // Ignore stream errors
+            // Log stream errors if in debug mode
+            this.activeReaders.delete(reader);
           } finally {
-            try { await reader.cancel(); } catch { }
+            try {
+              await reader.cancel();
+            } catch (error) {
+              // Silently ignore cancellation errors but track for debugging
+              // We've already deleted from activeReaders
+            }
             this.activeReaders.delete(reader);
           }
         })();

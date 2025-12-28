@@ -1,7 +1,7 @@
-import { zodToJsonSchema } from 'zod-to-json-schema';
-import { AgentSchema, WorkflowSchema } from '../parser/schema';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { zodToJsonSchema } from 'zod-to-json-schema';
+import { AgentSchema, WorkflowSchema } from '../parser/schema';
 
 const schemasDir = join(process.cwd(), 'schemas');
 

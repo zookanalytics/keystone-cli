@@ -107,7 +107,11 @@ export class ProcessSandbox {
   ): string {
     // Check for prototype pollution attempts before serialization
     const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
-    const checkForDangerousKeys = (obj: unknown, path: string = '', visited = new WeakSet<object>()): void => {
+    const checkForDangerousKeys = (
+      obj: unknown,
+      path = '',
+      visited = new WeakSet<object>()
+    ): void => {
       if (obj === null || typeof obj !== 'object') return;
 
       // Prevent infinite loops with circular references
@@ -125,10 +129,14 @@ export class ProcessSandbox {
         if (dangerousKeys.includes(key)) {
           throw new Error(
             `Security Error: Context contains forbidden key "${key}"${path ? ` at path "${path}"` : ''}. ` +
-            `This may indicate a prototype pollution attack.`
+              `This may indicate a prototype pollution attack.`
           );
         }
-        checkForDangerousKeys((obj as Record<string, unknown>)[key], path ? `${path}.${key}` : key, visited);
+        checkForDangerousKeys(
+          (obj as Record<string, unknown>)[key],
+          path ? `${path}.${key}` : key,
+          visited
+        );
       }
     };
     checkForDangerousKeys(context);
@@ -407,7 +415,7 @@ globalThis.console = __keystone_console;
    * Clean up orphaned temp directories from previous sandbox executions.
    * Should be called on startup to remove directories left behind by
    * SIGKILL or process crashes.
-   * 
+   *
    * @param logger Optional logger for cleanup messages
    * @returns Number of directories cleaned up
    */
@@ -440,7 +448,9 @@ globalThis.console = __keystone_console;
       }
 
       if (cleaned > 0) {
-        logger?.log(`Cleaned up ${cleaned} orphaned sandbox temp director${cleaned === 1 ? 'y' : 'ies'}`);
+        logger?.log(
+          `Cleaned up ${cleaned} orphaned sandbox temp director${cleaned === 1 ? 'y' : 'ies'}`
+        );
       }
     } catch {
       // Ignore errors reading temp directory

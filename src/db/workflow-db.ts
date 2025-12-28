@@ -1,4 +1,4 @@
-import { Database, Statement } from 'bun:sqlite';
+import { Database, type Statement } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -9,8 +9,8 @@ import {
   WorkflowStatus as WorkflowStatusConst,
   type WorkflowStatusType,
 } from '../types/status';
-import { PathResolver } from '../utils/paths';
 import { DB } from '../utils/constants';
+import { PathResolver } from '../utils/paths';
 
 export type RunStatus = WorkflowStatusType | 'pending';
 export type StepStatus = StepStatusType;
@@ -237,7 +237,9 @@ export class WorkflowDb {
       DELETE FROM idempotency_records
       WHERE expires_at IS NOT NULL AND datetime(expires_at) < datetime('now')
     `);
-    this.clearIdempotencyRecordsStmt = this.db.prepare('DELETE FROM idempotency_records WHERE run_id = ?');
+    this.clearIdempotencyRecordsStmt = this.db.prepare(
+      'DELETE FROM idempotency_records WHERE run_id = ?'
+    );
     this.listIdempotencyRecordsStmt = this.db.prepare(`
       SELECT * FROM idempotency_records
       ORDER BY created_at DESC
@@ -356,13 +358,12 @@ export class WorkflowDb {
   /**
    * Retry wrapper for SQLite operations that may encounter SQLITE_BUSY errors
    * during high concurrency scenarios (e.g., foreach loops)
-   * 
+   *
    * Uses exponential backoff with jitter to reduce contention.
    * Default maxRetries is 20 to handle high-contention scenarios.
    */
   private async withRetry<T>(operation: () => T, maxRetries = 20): Promise<T> {
     let lastError: Error | undefined;
-    const WARN_THRESHOLD = 5;
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
@@ -373,15 +374,18 @@ export class WorkflowDb {
           lastError = error instanceof Error ? error : new Error(String(error));
 
           // Log warning after threshold to help diagnose contention issues
-          if (attempt === WARN_THRESHOLD) {
+          if (attempt === DB.RETRY_WARN_THRESHOLD) {
             console.warn(
-              `[WorkflowDb] SQLite busy after ${WARN_THRESHOLD} retries. ` +
+              `[WorkflowDb] SQLite busy after ${DB.RETRY_WARN_THRESHOLD} retries. ` +
               `High contention detected - consider reducing concurrency.`
             );
           }
 
-          // Exponential backoff with jitter: 20ms base, max ~1s
-          const delayMs = Math.min(1000, 20 * 1.5 ** attempt + Math.random() * 20);
+          // Exponential backoff with jitter
+          const delayMs = Math.min(
+            DB.RETRY_MAX_DELAY_MS,
+            DB.RETRY_BASE_DELAY_MS * DB.RETRY_BACKOFF_MULTIPLIER ** attempt + Math.random() * DB.RETRY_JITTER_MS
+          );
           await Bun.sleep(delayMs);
           continue;
         }
@@ -793,14 +797,20 @@ export class WorkflowDb {
   ): Promise<boolean> {
     return await this.withRetry(() => {
       const expiresAt = this.formatExpiresAt(ttlSeconds);
-      const result = this.insertIdempotencyRecordIfAbsentStmt.run(key, runId, stepId, status, expiresAt);
+      const result = this.insertIdempotencyRecordIfAbsentStmt.run(
+        key,
+        runId,
+        stepId,
+        status,
+        expiresAt
+      );
       return result.changes > 0;
     });
   }
 
   /**
    * Mark an idempotency record as running if it's not already running or successful.
-   * 
+   *
    * This operation is atomic within SQLite - the UPDATE only succeeds if the
    * status condition is met, preventing race conditions where multiple processes
    * try to claim the same key simultaneously.
@@ -828,12 +838,12 @@ export class WorkflowDb {
 
   /**
    * Atomically claim an idempotency key.
-   * 
+   *
    * This combines the check-and-claim into a single atomic operation:
    * 1. If no record exists, creates one with 'running' status
    * 2. If a record exists but is not running/successful, updates it to 'running'
    * 3. Returns the current record state for decision making
-   * 
+   *
    * This prevents race conditions where two processes might both think
    * they successfully claimed the same key.
    */
@@ -855,7 +865,13 @@ export class WorkflowDb {
         if (!existing) {
           // No record exists - claim it
           const expiresAt = this.formatExpiresAt(ttlSeconds);
-          const insertResult = this.insertIdempotencyRecordIfAbsentStmt.run(key, runId, stepId, StepStatusConst.RUNNING, expiresAt);
+          const insertResult = this.insertIdempotencyRecordIfAbsentStmt.run(
+            key,
+            runId,
+            stepId,
+            StepStatusConst.RUNNING,
+            expiresAt
+          );
 
           // Verify the insert actually succeeded (INSERT OR IGNORE returns changes=0 on conflict)
           if (insertResult.changes > 0) {
@@ -1189,13 +1205,7 @@ export class WorkflowDb {
   ): Promise<void> {
     await this.withRetry(() => {
       const expiresAt = this.formatExpiresAt(ttlSeconds);
-      this.storeStepCacheStmt.run(
-        key,
-        workflowName,
-        stepId,
-        JSON.stringify(output),
-        expiresAt
-      );
+      this.storeStepCacheStmt.run(key, workflowName, stepId, JSON.stringify(output), expiresAt);
     });
   }
 
@@ -1251,14 +1261,7 @@ export class WorkflowDb {
     source: 'thinking' | 'reasoning'
   ): Promise<void> {
     await this.withRetry(() => {
-      this.createThoughtStmt.run(
-        randomUUID(),
-        runId,
-        workflowName,
-        stepId,
-        content,
-        source
-      );
+      this.createThoughtStmt.run(randomUUID(), runId, workflowName, stepId, content, source);
     });
   }
 

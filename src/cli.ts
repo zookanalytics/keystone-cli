@@ -1,31 +1,33 @@
 #!/usr/bin/env bun
-import { existsSync, mkdirSync, readFileSync, writeFileSync, watch } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, watch, writeFileSync } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { Command } from 'commander';
 
+import agentHandoffWorkflow from './templates/agent-handoff.yaml' with { type: 'text' };
 import exploreAgent from './templates/agents/explore.md' with { type: 'text' };
 import generalAgent from './templates/agents/general.md' with { type: 'text' };
+import handoffRouterAgent from './templates/agents/handoff-router.md' with { type: 'text' };
+import handoffSpecialistAgent from './templates/agents/handoff-specialist.md' with { type: 'text' };
 import architectAgent from './templates/agents/keystone-architect.md' with { type: 'text' };
 import softwareEngineerAgent from './templates/agents/software-engineer.md' with { type: 'text' };
 import summarizerAgent from './templates/agents/summarizer.md' with { type: 'text' };
 import testerAgent from './templates/agents/tester.md' with { type: 'text' };
-import handoffRouterAgent from './templates/agents/handoff-router.md' with { type: 'text' };
-import handoffSpecialistAgent from './templates/agents/handoff-specialist.md' with { type: 'text' };
 import decomposeImplementWorkflow from './templates/decompose-implement.yaml' with { type: 'text' };
 import decomposeWorkflow from './templates/decompose-problem.yaml' with { type: 'text' };
 import decomposeResearchWorkflow from './templates/decompose-research.yaml' with { type: 'text' };
 import decomposeReviewWorkflow from './templates/decompose-review.yaml' with { type: 'text' };
 import devWorkflow from './templates/dev.yaml' with { type: 'text' };
 import reviewLoopWorkflow from './templates/review-loop.yaml' with { type: 'text' };
-import agentHandoffWorkflow from './templates/agent-handoff.yaml' with { type: 'text' };
 // Default templates
 import scaffoldWorkflow from './templates/scaffold-feature.yaml' with { type: 'text' };
 import scaffoldGenerateWorkflow from './templates/scaffold-generate.yaml' with { type: 'text' };
 import scaffoldPlanWorkflow from './templates/scaffold-plan.yaml' with { type: 'text' };
 
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
+import { MemoryDb } from './db/memory-db.ts';
 import { WorkflowDb, type WorkflowRun } from './db/workflow-db.ts';
+import { ExpressionEvaluator } from './expression/evaluator.ts';
 import type { Workflow } from './parser/schema.ts';
 import type { TestDefinition } from './parser/test-schema.ts';
 import { WorkflowParser } from './parser/workflow-parser.ts';
@@ -33,12 +35,10 @@ import { WorkflowSuspendedError, WorkflowWaitingError } from './runner/step-exec
 import { TestHarness } from './runner/test-harness.ts';
 import { ConfigLoader } from './utils/config-loader.ts';
 import { LIMITS } from './utils/constants.ts';
+import { container } from './utils/container.ts';
 import { ConsoleLogger, SilentLogger } from './utils/logger.ts';
 import { generateMermaidGraph, renderWorkflowAsAscii } from './utils/mermaid.ts';
 import { WorkflowRegistry } from './utils/workflow-registry.ts';
-import { container } from './utils/container.ts';
-import { MemoryDb } from './db/memory-db.ts';
-import { ExpressionEvaluator } from './expression/evaluator.ts';
 
 // Bootstrap DI container with default services
 container.factory('logger', () => new ConsoleLogger());
@@ -459,6 +459,28 @@ program
     }
   });
 
+// ===== keystone doc =====
+program
+  .command('doc')
+  .description('Generate Markdown documentation for a workflow')
+  .argument('<workflow>', 'Workflow name or path to workflow file')
+  .action(async (workflowPath) => {
+    try {
+      const resolvedPath = WorkflowRegistry.resolvePath(workflowPath);
+      const workflow = WorkflowParser.loadWorkflow(resolvedPath);
+      const { generateWorkflowDocs } = await import('./utils/doc-generator.ts');
+
+      const markdown = generateWorkflowDocs(workflow);
+      console.log(markdown);
+    } catch (error) {
+      console.error(
+        '✗ Failed to generate documentation:',
+        error instanceof Error ? error.message : error
+      );
+      process.exit(1);
+    }
+  });
+
 // ===== keystone schema =====
 program
   .command('schema')
@@ -479,7 +501,10 @@ program
       mkdirSync(outputDir, { recursive: true });
     }
 
-    writeFileSync(join(outputDir, 'workflow.schema.json'), JSON.stringify(workflowJsonSchema, null, 2));
+    writeFileSync(
+      join(outputDir, 'workflow.schema.json'),
+      JSON.stringify(workflowJsonSchema, null, 2)
+    );
     writeFileSync(join(outputDir, 'agent.schema.json'), JSON.stringify(agentJsonSchema, null, 2));
 
     console.log(`✓ Generated JSON schemas in ${outputDir}/`);
@@ -534,8 +559,8 @@ program
       const logger = eventsEnabled ? new SilentLogger() : new ConsoleLogger();
       const onEvent = eventsEnabled
         ? (event: unknown) => {
-          process.stdout.write(`${JSON.stringify(event)}\n`);
-        }
+            process.stdout.write(`${JSON.stringify(event)}\n`);
+          }
         : undefined;
 
       let resumeRunId: string | undefined;
@@ -633,8 +658,8 @@ program
     const logger = eventsEnabled ? new SilentLogger() : new ConsoleLogger();
     const onEvent = eventsEnabled
       ? (event: unknown) => {
-        process.stdout.write(`${JSON.stringify(event)}\n`);
-      }
+          process.stdout.write(`${JSON.stringify(event)}\n`);
+        }
       : undefined;
     const debounceMs = Number.parseInt(options.debounce, 10);
 
@@ -647,7 +672,10 @@ program
     try {
       resolvedPath = WorkflowRegistry.resolvePath(workflowPathArg);
     } catch (error) {
-      console.error('✗ Failed to resolve workflow:', error instanceof Error ? error.message : error);
+      console.error(
+        '✗ Failed to resolve workflow:',
+        error instanceof Error ? error.message : error
+      );
       process.exit(1);
     }
 
@@ -732,11 +760,7 @@ program
 
       const watchPaths = new Set<string>([normalizedPath]);
       const baseDir = dirname(workflowPath);
-      const allSteps = [
-        ...workflow.steps,
-        ...(workflow.errors || []),
-        ...(workflow.finally || []),
-      ];
+      const allSteps = [...workflow.steps, ...(workflow.errors || []), ...(workflow.finally || [])];
 
       for (const step of allSteps) {
         if (step.type === 'file' && step.op === 'read') {
@@ -744,9 +768,7 @@ program
             const warningKey = `${workflowPath}:${step.id}:file`;
             if (!warned.has(warningKey)) {
               warned.add(warningKey);
-              logWarn(
-                `⚠️  Watch skipped for dynamic file path in step "${step.id}".`
-              );
+              logWarn(`⚠️  Watch skipped for dynamic file path in step "${step.id}".`);
             }
             continue;
           }
@@ -758,9 +780,7 @@ program
             const warningKey = `${workflowPath}:${step.id}:workflow`;
             if (!warned.has(warningKey)) {
               warned.add(warningKey);
-              logWarn(
-                `⚠️  Watch skipped for dynamic workflow path in step "${step.id}".`
-              );
+              logWarn(`⚠️  Watch skipped for dynamic workflow path in step "${step.id}".`);
             }
             continue;
           }
@@ -775,7 +795,8 @@ program
             if (!warned.has(warningKey)) {
               warned.add(warningKey);
               logWarn(
-                `⚠️  Failed to load sub-workflow for step "${step.id}": ${error instanceof Error ? error.message : String(error)
+                `⚠️  Failed to load sub-workflow for step "${step.id}": ${
+                  error instanceof Error ? error.message : String(error)
                 }`
               );
             }
@@ -813,10 +834,7 @@ program
           console.log(JSON.stringify(runner.redact(outputs), null, 2));
         }
       } catch (error) {
-        console.error(
-          '✗ Watch run failed:',
-          error instanceof Error ? error.message : error
-        );
+        console.error('✗ Watch run failed:', error instanceof Error ? error.message : error);
       } finally {
         running = false;
         if (rerunQueued) {
@@ -879,7 +897,7 @@ program
           const workflowPath = WorkflowRegistry.resolvePath(testDef.workflow);
           const workflow = WorkflowParser.loadWorkflow(workflowPath);
 
-          const harness = new TestHarness(workflow, testDef.fixture);
+          const harness = new TestHarness(workflow, testDef.fixture, testDef.options);
           const result = await harness.run();
 
           if (!testDef.snapshot || options.update) {
@@ -1034,8 +1052,8 @@ program
       const logger = eventsEnabled ? new SilentLogger() : new ConsoleLogger();
       const onEvent = eventsEnabled
         ? (event: unknown) => {
-          process.stdout.write(`${JSON.stringify(event)}\n`);
-        }
+            process.stdout.write(`${JSON.stringify(event)}\n`);
+          }
         : undefined;
       const inputs = parseInputs(options.input);
       const runner = new WorkflowRunner(workflow, {
@@ -1096,9 +1114,7 @@ program
       }
 
       if (run.status === 'running') {
-        console.warn(
-          '⚠️  Rerunning a run marked as running. Ensure no other instances are active.'
-        );
+        console.warn('⚠️  Rerunning a run marked as running. Ensure no other instances are active.');
       }
 
       const stepIds = collectDownstreamSteps(workflow, options.from);
@@ -1122,8 +1138,8 @@ program
       const logger = eventsEnabled ? new SilentLogger() : new ConsoleLogger();
       const onEvent = eventsEnabled
         ? (event: unknown) => {
-          process.stdout.write(`${JSON.stringify(event)}\n`);
-        }
+            process.stdout.write(`${JSON.stringify(event)}\n`);
+          }
         : undefined;
       const runner = new WorkflowRunner(workflow, {
         resumeRunId: runId,

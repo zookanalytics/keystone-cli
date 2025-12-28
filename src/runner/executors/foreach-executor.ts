@@ -5,8 +5,8 @@ import type { Step } from '../../parser/schema.ts';
 import { StepStatus, type StepStatusType, WorkflowStatus } from '../../types/status.ts';
 import type { Logger } from '../../utils/logger.ts';
 import type { ResourcePoolManager } from '../resource-pool.ts';
+import type { ForeachStepContext, StepContext } from '../workflow-state.ts';
 import { WorkflowSuspendedError } from './types.ts';
-import { type ForeachStepContext, type StepContext } from '../workflow-state.ts';
 
 export type ExecuteStepCallback = (
   step: Step,
@@ -24,7 +24,7 @@ export class ForeachExecutor {
     private executeStepFn: ExecuteStepCallback,
     private abortSignal?: AbortSignal,
     private resourcePool?: ResourcePoolManager
-  ) { }
+  ) {}
 
   /**
    * Aggregate outputs from multiple iterations of a foreach step
@@ -151,7 +151,9 @@ export class ForeachExecutor {
               existingIterations.set(s.iteration_index, s);
             }
           }
-        } catch (e) { /* ignore */ }
+        } catch (e) {
+          /* ignore */
+        }
       }
 
       // Pre-generate IDs and batch-create step records for all pending iterations

@@ -1,6 +1,6 @@
 import { Box, Newline, Text, render, useInput } from 'ink';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { WorkflowDb, type StepExecution } from '../db/workflow-db.ts';
+import { type StepExecution, WorkflowDb } from '../db/workflow-db.ts';
 import { ConsoleLogger } from '../utils/logger.ts';
 
 interface Run {

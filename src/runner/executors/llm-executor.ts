@@ -4,16 +4,16 @@ import { parseAgent, resolveAgentPath } from '../../parser/agent-parser';
 import type { Agent, LlmStep, Step } from '../../parser/schema';
 import { ConfigLoader } from '../../utils/config-loader';
 import { LIMITS } from '../../utils/constants';
+import { ContextInjector } from '../../utils/context-injector';
 import { extractJson } from '../../utils/json-parser';
 import { ConsoleLogger, type Logger } from '../../utils/logger.ts';
 import { RedactionBuffer, Redactor } from '../../utils/redactor';
-import { ContextInjector } from '../../utils/context-injector';
+import type { WorkflowEvent } from '../events.ts';
 import { type LLMAdapter, type LLMMessage, type LLMResponse, getAdapter } from '../llm-adapter';
 import { MCPClient } from '../mcp-client';
 import type { MCPManager, MCPServerConfig } from '../mcp-manager';
 import { STANDARD_TOOLS, validateStandardToolSecurity } from '../standard-tools';
 import type { StepResult } from './types.ts';
-import type { WorkflowEvent } from '../events.ts';
 
 const SUMMARY_MESSAGE_NAME = 'context_summary';
 const SUMMARY_MESSAGE_MAX_BYTES = 4000;
@@ -264,9 +264,7 @@ function formatMessageForSummary(message: LLMMessage): string {
   }
 
   const combined = parts.join('\n').trim();
-  const trimmed = combined
-    ? truncateStringByBytes(combined, SUMMARY_INPUT_MESSAGE_MAX_BYTES)
-    : '';
+  const trimmed = combined ? truncateStringByBytes(combined, SUMMARY_INPUT_MESSAGE_MAX_BYTES) : '';
   return `[${roleLabel}]${trimmed ? ` ${trimmed}` : ''}`;
 }
 
@@ -310,8 +308,7 @@ async function summarizeMessagesIfNeeded(
 
   const maxNonSystem = Math.max(0, options.maxHistory - systemMessages.length - 1);
   const overCount = nonSystemMessages.length > maxNonSystem;
-  const overBytes =
-    options.maxBytes > 0 && estimateConversationBytes(messages) > options.maxBytes;
+  const overBytes = options.maxBytes > 0 && estimateConversationBytes(messages) > options.maxBytes;
 
   if (!overCount && !overBytes) {
     return { messages, summarized: false };
@@ -778,7 +775,11 @@ export async function executeLlmStep(
       if (update && typeof update === 'object' && !Array.isArray(update)) {
         const updateRecord = update as Record<string, unknown>;
 
-        if (updateRecord.env && typeof updateRecord.env === 'object' && !Array.isArray(updateRecord.env)) {
+        if (
+          updateRecord.env &&
+          typeof updateRecord.env === 'object' &&
+          !Array.isArray(updateRecord.env)
+        ) {
           const envUpdates = updateRecord.env as Record<string, unknown>;
           context.env = context.env ?? {};
           context.envOverrides = context.envOverrides ?? {};
@@ -788,9 +789,9 @@ export async function executeLlmStep(
               typeof val === 'string'
                 ? val
                 : (() => {
-                  const json = safeJsonStringify(val);
-                  return typeof json === 'string' ? json : String(val);
-                })();
+                    const json = safeJsonStringify(val);
+                    return typeof json === 'string' ? json : String(val);
+                  })();
             context.env[key] = stringValue;
             context.envOverrides[key] = stringValue;
           }
@@ -975,7 +976,9 @@ export async function executeLlmStep(
       messages.push(message);
 
       // 1. Check for native record_output tool call (forced by Anthropic adapter)
-      const recordOutputCall = message.tool_calls?.find((tc) => tc.function.name === 'record_output');
+      const recordOutputCall = message.tool_calls?.find(
+        (tc) => tc.function.name === 'record_output'
+      );
       if (step.outputSchema && recordOutputCall) {
         let output: any;
         try {

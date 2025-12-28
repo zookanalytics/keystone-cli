@@ -18,7 +18,7 @@ import type { StepResult } from './types.ts';
 class LRUCache<K, V> {
   private cache = new Map<K, V>();
 
-  constructor(private maxSize: number) { }
+  constructor(private maxSize: number) {}
 
   get(key: K): V | undefined {
     const value = this.cache.get(key);
@@ -535,4 +535,3 @@ export async function executeEngineStepWrapper(
     status: 'success',
   };
 }
-

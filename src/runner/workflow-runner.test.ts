@@ -1,15 +1,15 @@
 import { afterAll, afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
-import { existsSync, rmSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { existsSync, rmSync } from 'node:fs';
+import { MemoryDb } from '../db/memory-db';
 import { WorkflowDb } from '../db/workflow-db';
 import type { Workflow } from '../parser/schema';
 import { WorkflowParser } from '../parser/workflow-parser';
 import { ConfigLoader } from '../utils/config-loader';
-import { WorkflowRegistry } from '../utils/workflow-registry';
-import { WorkflowRunner } from './workflow-runner';
 import { container } from '../utils/container';
 import { ConsoleLogger } from '../utils/logger';
-import { MemoryDb } from '../db/memory-db';
+import { WorkflowRegistry } from '../utils/workflow-registry';
+import { WorkflowRunner } from './workflow-runner';
 
 describe('WorkflowRunner', () => {
   const dbPath = ':memory:';
@@ -191,8 +191,8 @@ describe('WorkflowRunner', () => {
       },
       error: (msg: string) => console.error(msg),
       warn: (msg: string) => console.warn(msg),
-      info: (msg: string) => { },
-      debug: (msg: string) => { },
+      info: (msg: string) => {},
+      debug: (msg: string) => {},
     };
 
     const finallyWorkflow: Workflow = {
@@ -328,10 +328,10 @@ describe('WorkflowRunner', () => {
           errorsBlockExecuted = true;
         }
       },
-      error: () => { },
-      warn: () => { },
-      info: () => { },
-      debug: () => { },
+      error: () => {},
+      warn: () => {},
+      info: () => {},
+      debug: () => {},
     };
 
     const errorsWorkflow: Workflow = {
@@ -387,10 +387,10 @@ describe('WorkflowRunner', () => {
           idempotencyHitCount++;
         }
       },
-      error: () => { },
-      warn: () => { },
-      info: () => { },
-      debug: () => { },
+      error: () => {},
+      warn: () => {},
+      info: () => {},
+      debug: () => {},
     };
 
     const idempotencyWorkflow: Workflow = {
@@ -676,10 +676,10 @@ describe('WorkflowRunner', () => {
       log: (msg: string) => {
         if (msg.includes('Executing step: s1')) s1Executed = true;
       },
-      error: () => { },
-      warn: () => { },
-      info: () => { },
-      debug: () => { },
+      error: () => {},
+      warn: () => {},
+      info: () => {},
+      debug: () => {},
     };
 
     const runner2 = new WorkflowRunner(fixedWorkflow, {
@@ -808,15 +808,15 @@ describe('WorkflowRunner', () => {
   it('should continue even if finally step fails', async () => {
     let finallyFailedLogged = false;
     const runnerLogger = {
-      log: () => { },
+      log: () => {},
       error: (msg: string) => {
         if (msg.includes('Finally step fin failed')) {
           finallyFailedLogged = true;
         }
       },
-      warn: () => { },
-      info: () => { },
-      debug: () => { },
+      warn: () => {},
+      info: () => {},
+      debug: () => {},
     };
 
     const failFinallyWorkflow: Workflow = {
@@ -838,10 +838,10 @@ describe('WorkflowRunner', () => {
           retryLogged = true;
         }
       },
-      error: () => { },
-      warn: () => { },
-      info: () => { },
-      debug: () => { },
+      error: () => {},
+      warn: () => {},
+      info: () => {},
+      debug: () => {},
     };
 
     const retryWorkflow: Workflow = {
@@ -1037,15 +1037,15 @@ describe('WorkflowRunner', () => {
     // Verify warnings
     let warningLogged = false;
     const logger = {
-      log: () => { },
-      error: () => { },
+      log: () => {},
+      error: () => {},
       warn: (msg: string) => {
         if (msg.includes("Resuming a run marked as 'running'")) {
           warningLogged = true;
         }
       },
-      info: () => { },
-      debug: () => { },
+      info: () => {},
+      debug: () => {},
     };
 
     const runner = new WorkflowRunner(workflow, {
@@ -1150,9 +1150,9 @@ describe('WorkflowRunner', () => {
           loggedResume = true;
         }
       },
-      error: () => { },
-      warn: () => { },
-      info: () => { },
+      error: () => {},
+      warn: () => {},
+      info: () => {},
     };
 
     const runner = new WorkflowRunner(workflow, {

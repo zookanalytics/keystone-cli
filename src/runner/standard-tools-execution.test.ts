@@ -19,7 +19,7 @@ describe('Standard Tools Execution Verification', () => {
               readdirSync: () => [],
               statSync: () => ({ size: 0 }),
               readFileSync: () => '',
-              writeFileSync: () => { },
+              writeFileSync: () => {},
             };
           }
           if (mod === 'node:path' || mod === 'path') {

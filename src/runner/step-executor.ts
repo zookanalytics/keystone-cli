@@ -1,31 +1,28 @@
 import type { MemoryDb } from '../db/memory-db.ts';
 import type { ExpressionContext } from '../expression/evaluator.ts';
 import { ExpressionEvaluator } from '../expression/evaluator.ts';
-import type {
-  Step,
-  WorkflowStep,
-} from '../parser/schema.ts';
+import type { Step, WorkflowStep } from '../parser/schema.ts';
 import { ConsoleLogger, type Logger } from '../utils/logger.ts';
 
+import { executeArtifactStep } from './executors/artifact-executor.ts';
 import { executeBlueprintStep } from './executors/blueprint-executor.ts';
 import { executeEngineStepWrapper } from './executors/engine-executor.ts';
-import { executeShellStep } from './executors/shell-executor.ts';
-import { executeLlmStep } from './executors/llm-executor.ts';
-import { executePlanStep } from './executors/plan-executor.ts';
-import { executeWaitStep } from './executors/wait-executor.ts';
 import { executeFileStep } from './executors/file-executor.ts';
-import { executeArtifactStep } from './executors/artifact-executor.ts';
-import { executeRequestStep } from './executors/request-executor.ts';
 import { executeHumanStep, executeSleepStep } from './executors/human-executor.ts';
-import { executeScriptStep } from './executors/script-executor.ts';
-import { executeMemoryStep } from './executors/memory-executor.ts';
 import { executeJoinStep } from './executors/join-executor.ts';
+import { executeLlmStep } from './executors/llm-executor.ts';
+import { executeMemoryStep } from './executors/memory-executor.ts';
+import { executePlanStep } from './executors/plan-executor.ts';
+import { executeRequestStep } from './executors/request-executor.ts';
+import { executeScriptStep } from './executors/script-executor.ts';
+import { executeShellStep } from './executors/shell-executor.ts';
 import {
-  type StepResult,
   type StepExecutorOptions,
+  type StepResult,
   WorkflowSuspendedError,
   WorkflowWaitingError,
 } from './executors/types.ts';
+import { executeWaitStep } from './executors/wait-executor.ts';
 
 // Re-export for external consumers
 export type { StepResult, StepExecutorOptions };
@@ -111,7 +108,9 @@ export async function executeStep(
           abortSignal,
           getAdapter,
           options.emitEvent,
-          options.workflowName ? { runId: options.runId, workflow: options.workflowName } : undefined
+          options.workflowName
+            ? { runId: options.runId, workflow: options.workflowName }
+            : undefined
         );
         break;
       case 'plan':

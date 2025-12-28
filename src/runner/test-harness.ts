@@ -32,6 +32,10 @@ export interface TestSnapshot {
   outputs: Record<string, unknown>;
 }
 
+export interface TestOptions {
+  allowSideEffects?: boolean;
+}
+
 export class TestHarness {
   private stepResults: Map<string, { status: string; output: unknown; error?: string }> = new Map();
   private mockResponses: Map<string, unknown> = new Map();
@@ -39,7 +43,8 @@ export class TestHarness {
 
   constructor(
     private workflow: Workflow,
-    private fixture: TestFixture = {}
+    private fixture: TestFixture = {},
+    private options: TestOptions = {}
   ) {
     if (fixture.mocks) {
       for (const mock of fixture.mocks) {
@@ -116,6 +121,14 @@ export class TestHarness {
       return result;
     }
 
+    if (!this.options.allowSideEffects && this.isSideEffectStep(step)) {
+      throw new Error(
+        `🛑 Safety Violation: Step "${step.id}" of type "${step.type}" attempts to execute a side-effect.\n` +
+          `To allow this, set 'options.allowSideEffects: true' in your test file.\n` +
+          `Otherwise, provide a mock response in 'fixture.mocks'.`
+      );
+    }
+
     // Default to real execution but capture snapshot
     const result = await executeStep(step, context, logger, {
       ...options,
@@ -130,6 +143,14 @@ export class TestHarness {
     });
 
     return result;
+  }
+
+  private isSideEffectStep(step: Step): boolean {
+    if (['shell', 'script', 'engine', 'request', 'artifact'].includes(step.type)) return true;
+    if (step.type === 'file' && (step as any).op !== 'read') return true;
+    // LLM is generally considered "safe" (no system modification) but costly.
+    // For now we allow LLM unless mocked, as users might want to test prompt logic.
+    return false;
   }
 
   private getMockAdapter(model: string): { adapter: LLMAdapter; resolvedModel: string } {

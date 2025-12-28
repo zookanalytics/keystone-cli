@@ -95,7 +95,6 @@ export async function executeShellStep(
   };
 }
 
-
 /**
  * Escape a shell argument for safe use in shell commands
  * Wraps the argument in single quotes and escapes any single quotes within
@@ -145,12 +144,12 @@ const DANGEROUS_PATTERN_SOURCES: string[] = [
   'wget\\s+.*\\|\\s*(?:sh|bash)', // Download and execute pattern
   // Additional patterns for more comprehensive detection
   'base64\\s+(-d|--decode)\\s*\\|', // Base64 decode piped to another command
-  "\\beval\\s+[\"'\\$]", // eval with variable/string (likely injection)
+  '\\beval\\s+["\'\\$]', // eval with variable/string (likely injection)
   '\\bexec\\s+\\d+[<>]', // exec with file descriptor redirection
-  "python[23]?\\s+-c\\s*[\"']", // Python one-liner with quoted code
-  "node\\s+(-e|--eval)\\s*[\"']", // Node.js one-liner with quoted code
-  "perl\\s+-e\\s*[\"']", // Perl one-liner with quoted code
-  "ruby\\s+-e\\s*[\"']", // Ruby one-liner with quoted code
+  'python[23]?\\s+-c\\s*["\']', // Python one-liner with quoted code
+  'node\\s+(-e|--eval)\\s*["\']', // Node.js one-liner with quoted code
+  'perl\\s+-e\\s*["\']', // Perl one-liner with quoted code
+  'ruby\\s+-e\\s*["\']', // Ruby one-liner with quoted code
   '\\bdd\\s+.*\\bof=/', // dd write operation to root paths
   'chmod\\s+[0-7]{3,4}\\s+/(?!tmp)', // chmod on root paths (except /tmp)
   'mkfs\\.', // Filesystem formatting commands
@@ -216,9 +215,8 @@ export function resetRe2State(): void {
   usingRe2 = false;
 }
 
-// Combine all patterns into single regex for O(m) matching instead of O(n×m)
-// This is used as fallback and for backwards compatibility
-const COMBINED_DANGEROUS_PATTERN = new RegExp(COMBINED_PATTERN_SOURCE);
+// Note: Pattern is lazily created in getDetectionPattern() to avoid
+// creating a duplicate RegExp when RE2 is successfully loaded
 
 const TRUNCATED_SUFFIX = '... [truncated output]';
 

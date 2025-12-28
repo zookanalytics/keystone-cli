@@ -5,14 +5,14 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import type { ExpressionContext } from '../expression/evaluator';
+import { ExpressionEvaluator } from '../expression/evaluator';
+import { parseAgent } from '../parser/agent-parser';
 import type { LlmStep, Step } from '../parser/schema';
-import type { LLMAdapter, LLMMessage, LLMResponse, LLMTool } from './llm-adapter';
+import { ConsoleLogger, type Logger } from '../utils/logger';
 import { executeLlmStep } from './executors/llm-executor.ts';
+import type { LLMAdapter, LLMMessage, LLMResponse, LLMTool } from './llm-adapter';
 import type { MCPServerConfig } from './mcp-manager';
 import type { StepResult } from './step-executor';
-import { ConsoleLogger, type Logger } from '../utils/logger';
-import { parseAgent } from '../parser/agent-parser';
-import { ExpressionEvaluator } from '../expression/evaluator';
 
 // Mock adapters
 // Instead of mutating prototypes (which causes cross-test contamination),
@@ -160,14 +160,14 @@ describe('llm-executor', () => {
     // Mock spawn to avoid actual process creation
     const mockProcess = Object.assign(new EventEmitter(), {
       stdout: new Readable({
-        read() { },
+        read() {},
       }),
       stdin: new Writable({
         write(_chunk, _encoding, cb: (error?: Error | null) => void) {
           cb();
         },
       }),
-      kill: mock(() => { }),
+      kill: mock(() => {}),
     });
     spawnSpy = spyOn(child_process, 'spawn').mockReturnValue(
       mockProcess as unknown as child_process.ChildProcess
@@ -291,11 +291,11 @@ You are a context-aware agent.`;
     };
 
     const logger: Logger = {
-      log: mock(() => { }),
-      error: mock(() => { }),
-      warn: mock(() => { }),
-      info: mock(() => { }),
-      debug: mock(() => { }),
+      log: mock(() => {}),
+      error: mock(() => {}),
+      warn: mock(() => {}),
+      info: mock(() => {}),
+      debug: mock(() => {}),
     };
 
     await executeLlmStep(
@@ -541,7 +541,7 @@ You are a context-aware agent.`;
     const mcpManager = createMockMcpManager({
       errors: { 'fail-mcp': new Error('Connect failed') },
     });
-    const consoleSpy = spyOn(console, 'error').mockImplementation(() => { });
+    const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
 
     await executeLlmStep(
       step,
@@ -784,7 +784,7 @@ You are a context-aware agent.`;
     };
     const context: ExpressionContext = { inputs: {}, steps: {} };
     const executeStepFn = mock(async () => ({ status: 'success' as const, output: 'ok' }));
-    const consoleSpy = spyOn(console, 'error').mockImplementation(() => { });
+    const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
 
     await executeLlmStep(
       step,
@@ -798,7 +798,9 @@ You are a context-aware agent.`;
     );
 
     expect(consoleSpy).toHaveBeenCalledWith(
-      expect.stringContaining("Cannot reference global MCP server 'some-global-server' without MCPManager")
+      expect.stringContaining(
+        "Cannot reference global MCP server 'some-global-server' without MCPManager"
+      )
     );
     consoleSpy.mockRestore();
   });
@@ -868,11 +870,11 @@ You are a context-aware agent.`;
 
   it('should fall back to truncation if summarization fails', async () => {
     const logger: Logger = {
-      log: mock(() => { }),
-      error: mock(() => { }),
-      warn: mock(() => { }),
-      info: mock(() => { }),
-      debug: mock(() => { }),
+      log: mock(() => {}),
+      error: mock(() => {}),
+      warn: mock(() => {}),
+      info: mock(() => {}),
+      debug: mock(() => {}),
     };
 
     const getAdapter = (modelString: string) => {
@@ -926,18 +928,20 @@ You are a context-aware agent.`;
       getAdapter
     );
 
-    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Context summarization failed'));
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Context summarization failed')
+    );
   });
 
   it('should extract thought blocks and emit thought events', async () => {
     const logger: Logger = {
-      log: mock(() => { }),
-      error: mock(() => { }),
-      warn: mock(() => { }),
-      info: mock(() => { }),
+      log: mock(() => {}),
+      error: mock(() => {}),
+      warn: mock(() => {}),
+      info: mock(() => {}),
     };
 
-    const emitEvent = mock(() => { });
+    const emitEvent = mock(() => {});
     const eventContext = { runId: 'run-1', workflow: 'wf-1' };
 
     const chatMock = mock(async () => {
@@ -976,7 +980,9 @@ You are a context-aware agent.`;
       eventContext
     );
 
-    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Thought (thinking): I should do X'));
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.stringContaining('Thought (thinking): I should do X')
+    );
     expect(emitEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'llm.thought',
@@ -985,7 +991,6 @@ You are a context-aware agent.`;
       })
     );
   });
-
 
   it('should not add global MCP server if already explicitly listed', async () => {
     const mockClient = createMockMcpClient();
@@ -1117,7 +1122,7 @@ You are a context-aware agent.`;
     // We can't easily add 'stream' to LlmStep without changing schema,
     // but we can mock the adapter to stream if onStream is provided.
 
-    const chatMock = mock(async function (messages: LLMMessage[], options: any) {
+    const chatMock = mock(async (messages: LLMMessage[], options: any) => {
       if (options.onStream) {
         options.onStream('<thinking>thought</thinking>done');
       }
@@ -1131,7 +1136,7 @@ You are a context-aware agent.`;
     const context: ExpressionContext = { inputs: {}, steps: {} };
     spyOn(process.stdout, 'write').mockImplementation(() => true);
 
-    const emitThought = mock(() => { });
+    const emitThought = mock(() => {});
 
     await executeLlmStep(
       step as any,
@@ -1157,44 +1162,42 @@ You are a context-aware agent.`;
     let sawOriginalToolAfter = false;
     let sawTargetPrompt = false;
 
-    const chatMock = mock(
-      async (messages: LLMMessage[], options: { tools?: LLMTool[] }) => {
-        callCount++;
-        const toolNames = options.tools?.map((t) => t.function.name) || [];
+    const chatMock = mock(async (messages: LLMMessage[], options: { tools?: LLMTool[] }) => {
+      callCount++;
+      const toolNames = options.tools?.map((t) => t.function.name) || [];
 
-        if (callCount === 1) {
-          sawTransferTool = toolNames.includes('transfer_to_agent');
-          sawOriginalTool = toolNames.includes('test-tool');
-          return {
-            message: {
-              role: 'assistant',
-              content: null,
-              tool_calls: [
-                {
-                  id: 'call-transfer',
-                  type: 'function',
-                  function: {
-                    name: 'transfer_to_agent',
-                    arguments: '{"agent_name":"handoff-target"}',
-                  },
-                },
-              ],
-            },
-          };
-        }
-
-        const systemMessages = messages.filter((m) => m.role === 'system');
-        sawTargetPrompt = systemMessages.some(
-          (m) => typeof m.content === 'string' && m.content.includes('specialist for billing')
-        );
-        sawTargetToolAfter = toolNames.includes('specialist-tool');
-        sawOriginalToolAfter = toolNames.includes('test-tool');
-
+      if (callCount === 1) {
+        sawTransferTool = toolNames.includes('transfer_to_agent');
+        sawOriginalTool = toolNames.includes('test-tool');
         return {
-          message: { role: 'assistant', content: 'done' },
+          message: {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'call-transfer',
+                type: 'function',
+                function: {
+                  name: 'transfer_to_agent',
+                  arguments: '{"agent_name":"handoff-target"}',
+                },
+              },
+            ],
+          },
         };
       }
-    ) as unknown as LLMAdapter['chat'];
+
+      const systemMessages = messages.filter((m) => m.role === 'system');
+      sawTargetPrompt = systemMessages.some(
+        (m) => typeof m.content === 'string' && m.content.includes('specialist for billing')
+      );
+      sawTargetToolAfter = toolNames.includes('specialist-tool');
+      sawOriginalToolAfter = toolNames.includes('test-tool');
+
+      return {
+        message: { role: 'assistant', content: 'done' },
+      };
+    }) as unknown as LLMAdapter['chat'];
     const getAdapter = createMockGetAdapter(chatMock);
 
     const step: LlmStep = {

@@ -189,9 +189,9 @@ describe('WorkflowRunner - Subflows & Compensations', () => {
     const logger: Logger = {
       log: (msg: string) => logs.push(msg),
       error: (msg: string) => logs.push(msg),
-      warn: () => { },
-      info: () => { },
-      debug: () => { },
+      warn: () => {},
+      info: () => {},
+      debug: () => {},
     };
 
     const runner = new WorkflowRunner(workflow, { dbPath, logger });
@@ -231,9 +231,9 @@ describe('WorkflowRunner - Subflows & Compensations', () => {
     const logger: Logger = {
       log: (msg: string) => logs.push(msg),
       error: (msg: string) => logs.push(msg),
-      warn: () => { },
-      info: () => { },
-      debug: () => { },
+      warn: () => {},
+      info: () => {},
+      debug: () => {},
     };
 
     const runner = new WorkflowRunner(workflow, { dbPath: wfCompDbPath, logger });

@@ -343,8 +343,12 @@ describe('MCPServer', () => {
       getRunId: mock(() => 'run123'),
     } as unknown as WorkflowRunner;
 
-    const testServer = new MCPServer(db, process.stdin, outputStream, new ConsoleLogger(), () =>
-      runner
+    const testServer = new MCPServer(
+      db,
+      process.stdin,
+      outputStream,
+      new ConsoleLogger(),
+      () => runner
     );
 
     await handleMessage(

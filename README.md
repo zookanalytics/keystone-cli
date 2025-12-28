@@ -47,6 +47,7 @@ Keystone allows you to define complex automation workflows using a simple YAML s
 - 🛡️ **Secret Redaction:** Automatically redacts environment variables and secrets from logs and outputs.
 - 🧠 **Semantic Memory:** Store/search text with vector embeddings (and auto-index via `learn`).
 - 🎯 **Prompt Optimization:** Iteratively optimize prompts via `keystone optimize` + workflow `eval`.
+- 📖 **Documentation Generator:** Automatically generate Markdown documentation from your workflow definitions.
 
 ---
 
@@ -853,6 +854,27 @@ steps:
     pool: api_pool
 ```
 
+### Automated Testing
+
+Run workflow tests with fixtures and snapshots. Keystone includes a **Safe Mode** that blocks side-effecting steps (shell, request, file writes) by default during tests unless explicitly allowed or mocked.
+
+```yaml
+name: my-test
+workflow: my-workflow
+options:
+  allowSideEffects: false # Default
+fixture:
+  inputs: { name: "test" }
+  mocks:
+    - step: write_file
+      response: { success: true }
+```
+
+Run tests via CLI:
+```bash
+keystone test .keystone/tests/
+```
+
 ### Compensations (Rollback)
 
 Define "undo" actions for steps that have side effects. Compensations run in reverse order (LIFO) if a workflow fails or is cancelled.
@@ -1071,6 +1093,7 @@ In these examples, the agent will have access to all tools provided by the MCP s
 | `history` | Show recent workflow runs |
 | `logs <run_id>` | View logs, outputs, and errors for a specific run (`-v` for full output) |
 | `graph <workflow>` | Generate a Mermaid diagram of the workflow |
+| `doc <workflow>` | Generate Markdown documentation for a workflow |
 | `test [path]` | Run workflow tests with fixtures and snapshots |
 | `optimize <workflow>` | Optimize a specific step in a workflow (requires --target and workflow `eval`) |
 | `compile` | Compile a project into a single executable with embedded assets |

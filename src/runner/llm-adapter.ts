@@ -151,7 +151,10 @@ export function ensureOnnxRuntimeLibraryPath(): void {
   }
 }
 
-export function resolveNativeModuleFallback(request: string, parentFilename: string): string | null {
+export function resolveNativeModuleFallback(
+  request: string,
+  parentFilename: string
+): string | null {
   const normalizedRequest = request.replace(/\\/g, '/');
   const fileName = normalizedRequest.split('/').pop();
   if (!fileName) return null;
@@ -399,7 +402,8 @@ export class OpenAIAdapter implements LLMAdapter {
 
   constructor(apiKey?: string, baseUrl?: string) {
     this.apiKey = apiKey || ConfigLoader.getSecret('OPENAI_API_KEY') || '';
-    this.baseUrl = baseUrl || ConfigLoader.getSecret('OPENAI_BASE_URL') || 'https://api.openai.com/v1';
+    this.baseUrl =
+      baseUrl || ConfigLoader.getSecret('OPENAI_BASE_URL') || 'https://api.openai.com/v1';
 
     if (!this.apiKey && this.baseUrl === 'https://api.openai.com/v1') {
       defaultLogger.warn('Warning: OPENAI_API_KEY is not set.');
@@ -431,13 +435,13 @@ export class OpenAIAdapter implements LLMAdapter {
         stream: isStreaming,
         response_format: options?.responseSchema
           ? {
-            type: 'json_schema',
-            json_schema: {
-              name: 'output',
-              strict: true,
-              schema: options.responseSchema,
-            },
-          }
+              type: 'json_schema',
+              json_schema: {
+                name: 'output',
+                strict: true,
+                schema: options.responseSchema,
+              },
+            }
           : undefined,
       }),
       signal: options?.signal,
@@ -504,7 +508,8 @@ export class AnthropicAdapter implements LLMAdapter {
 
   constructor(apiKey?: string, baseUrl?: string, authMode: 'api-key' | 'oauth' = 'api-key') {
     this.apiKey = apiKey || ConfigLoader.getSecret('ANTHROPIC_API_KEY') || '';
-    this.baseUrl = baseUrl || ConfigLoader.getSecret('ANTHROPIC_BASE_URL') || 'https://api.anthropic.com/v1';
+    this.baseUrl =
+      baseUrl || ConfigLoader.getSecret('ANTHROPIC_BASE_URL') || 'https://api.anthropic.com/v1';
     this.authMode = authMode;
 
     if (
@@ -622,25 +627,22 @@ export class AnthropicAdapter implements LLMAdapter {
 
     const anthropicTools = options?.tools
       ? options.tools.map((t) => ({
-        name: t.function.name,
-        description: t.function.description,
-        input_schema: t.function.parameters,
-      }))
+          name: t.function.name,
+          description: t.function.description,
+          input_schema: t.function.parameters,
+        }))
       : undefined;
 
     // If responseSchema is provided, Anthropic requires using tool call to force output
     const responseTool = options?.responseSchema
       ? {
-        name: 'record_output',
-        description: 'Record the structured output matching the requested schema',
-        input_schema: options.responseSchema,
-      }
+          name: 'record_output',
+          description: 'Record the structured output matching the requested schema',
+          input_schema: options.responseSchema,
+        }
       : undefined;
 
-    const combinedTools = [
-      ...(anthropicTools || []),
-      ...(responseTool ? [responseTool] : []),
-    ];
+    const combinedTools = [...(anthropicTools || []), ...(responseTool ? [responseTool] : [])];
 
     const authHeaders = await this.getAuthHeaders();
     const response = await fetch(`${this.baseUrl}/messages`, {
@@ -780,11 +782,18 @@ export class AnthropicAdapter implements LLMAdapter {
     };
 
     const textBlocks = data.content.filter((c) => c.type === 'text');
-    const thinkingBlocks = data.content.filter((c) => c.type === 'thinking' as any);
+    const thinkingBlocks = data.content.filter((c) => c.type === ('thinking' as any));
 
-    let content = textBlocks.map(tb => tb.text).filter(Boolean).join('\n') || null;
+    let content =
+      textBlocks
+        .map((tb) => tb.text)
+        .filter(Boolean)
+        .join('\n') || null;
     if (thinkingBlocks.length > 0) {
-      const thoughts = thinkingBlocks.map(tb => (tb as any).thinking).filter(Boolean).join('\n');
+      const thoughts = thinkingBlocks
+        .map((tb) => (tb as any).thinking)
+        .filter(Boolean)
+        .join('\n');
       if (thoughts) {
         content = `<thinking>\n${thoughts}\n</thinking>${content ? `\n\n${content}` : ''}`;
       }
@@ -831,7 +840,8 @@ export class OpenAIChatGPTAdapter implements LLMAdapter {
   private baseUrl: string;
 
   constructor(baseUrl?: string) {
-    this.baseUrl = baseUrl || ConfigLoader.getSecret('OPENAI_CHATGPT_BASE_URL') || 'https://api.openai.com/v1';
+    this.baseUrl =
+      baseUrl || ConfigLoader.getSecret('OPENAI_CHATGPT_BASE_URL') || 'https://api.openai.com/v1';
   }
 
   private filterMessages(messages: LLMMessage[], model: string): ChatGPTMessage[] {
@@ -852,7 +862,10 @@ export class OpenAIChatGPTAdapter implements LLMAdapter {
         };
       }
 
-      if (m.role === 'system' && (normalizedModel === 'gpt-4o' || normalizedModel.startsWith('o1-'))) {
+      if (
+        m.role === 'system' &&
+        (normalizedModel === 'gpt-4o' || normalizedModel.startsWith('o1-'))
+      ) {
         return { ...rest, role: 'developer' as any };
       }
 
@@ -905,13 +918,13 @@ export class OpenAIChatGPTAdapter implements LLMAdapter {
         include: ['reasoning.encrypted_content'],
         response_format: options?.responseSchema
           ? {
-            type: 'json_schema',
-            json_schema: {
-              name: 'output',
-              strict: true,
-              schema: options.responseSchema,
-            },
-          }
+              type: 'json_schema',
+              json_schema: {
+                name: 'output',
+                strict: true,
+                schema: options.responseSchema,
+              },
+            }
           : undefined,
       }),
       signal: options?.signal,
@@ -1087,8 +1100,8 @@ export class GoogleGeminiAdapter implements LLMAdapter {
     const systemInstruction =
       systemParts.length > 0
         ? {
-          parts: [{ text: systemParts.join('\n\n') }],
-        }
+            parts: [{ text: systemParts.join('\n\n') }],
+          }
         : undefined;
 
     return { contents, systemInstruction };
@@ -1407,8 +1420,8 @@ export class LocalEmbeddingAdapter implements LLMAdapter {
   ): Promise<LLMResponse> {
     throw new Error(
       'Local models in Keystone currently only support memory/embedding operations. ' +
-      'To use a local LLM for chat/generation, please use an OpenAI-compatible local server ' +
-      '(like Ollama, LM Studio, or LocalAI) and configure it as an OpenAI provider in your config.'
+        'To use a local LLM for chat/generation, please use an OpenAI-compatible local server ' +
+        '(like Ollama, LM Studio, or LocalAI) and configure it as an OpenAI provider in your config.'
     );
   }
 
@@ -1466,7 +1479,9 @@ export function getAdapter(model: string): { adapter: LLMAdapter; resolvedModel:
   } else if (providerConfig.type === 'anthropic-claude') {
     adapter = new AnthropicClaudeAdapter(providerConfig.base_url);
   } else {
-    const apiKey = providerConfig.api_key_env ? ConfigLoader.getSecret(providerConfig.api_key_env) : undefined;
+    const apiKey = providerConfig.api_key_env
+      ? ConfigLoader.getSecret(providerConfig.api_key_env)
+      : undefined;
 
     if (providerConfig.type === 'anthropic') {
       adapter = new AnthropicAdapter(apiKey, providerConfig.base_url);

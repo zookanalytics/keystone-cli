@@ -2,8 +2,8 @@ import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { ConsoleLogger, type Logger } from './logger';
 import { TIMEOUTS } from './constants';
+import { ConsoleLogger, type Logger } from './logger';
 
 export interface AuthData {
   github_token?: string;
@@ -45,14 +45,15 @@ export const COPILOT_HEADERS = {
   'User-Agent': 'GithubCopilot/1.255.0',
 };
 
-const GITHUB_CLIENT_ID = '013444988716b5155f4c'; // GitHub CLI Client ID
+// OAuth Client IDs - configurable via environment variables for different deployment environments
+const GITHUB_CLIENT_ID = process.env.KEYSTONE_GITHUB_CLIENT_ID ?? '013444988716b5155f4c';
 const TOKEN_REFRESH_BUFFER_SECONDS = 300;
-const OPENAI_CHATGPT_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
+const OPENAI_CHATGPT_CLIENT_ID = process.env.KEYSTONE_OPENAI_CLIENT_ID ?? 'app_EMoamEEZ73f0CkXaXp7hrann';
 const OPENAI_CHATGPT_REDIRECT_URI = 'http://localhost:1455/callback';
-const ANTHROPIC_OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
+const ANTHROPIC_OAUTH_CLIENT_ID = process.env.KEYSTONE_ANTHROPIC_CLIENT_ID ?? '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 const ANTHROPIC_OAUTH_REDIRECT_URI = 'https://console.anthropic.com/oauth/code/callback';
 const ANTHROPIC_OAUTH_SCOPE = 'org:create_api_key user:profile user:inference';
-const GOOGLE_GEMINI_OAUTH_CLIENT_ID =
+const GOOGLE_GEMINI_OAUTH_CLIENT_ID = process.env.KEYSTONE_GOOGLE_CLIENT_ID ??
   '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com';
 const GOOGLE_GEMINI_OAUTH_REDIRECT_URI = 'http://localhost:51121/oauth-callback';
 const GOOGLE_GEMINI_OAUTH_SCOPES = [
@@ -108,6 +109,14 @@ export class AuthManager {
     return {};
   }
 
+  private static sanitizeError(error: unknown): string {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.replace(
+      /(?:token|key|secret|password|credential|auth|private|cookie|session|signature)(?:["'\\s:=]+)([a-zA-Z0-9._~%-]+)/gi,
+      (match, p1) => match.replace(p1, '***REDACTED***')
+    );
+  }
+
   static save(data: AuthData): void {
     const path = AuthManager.getAuthPath();
     const current = AuthManager.load();
@@ -115,7 +124,7 @@ export class AuthManager {
       writeFileSync(path, JSON.stringify({ ...current, ...data }, null, 2), { mode: 0o600 });
     } catch (error) {
       AuthManager.logger.error(
-        `Failed to save auth data: ${error instanceof Error ? error.message : String(error)}`
+        `Failed to save auth data: ${AuthManager.sanitizeError(error)}`
       );
     }
   }
@@ -254,7 +263,7 @@ export class AuthManager {
 
       return data.token;
     } catch (error) {
-      AuthManager.logger.error(`Error refreshing Copilot token: ${String(error)}`);
+      AuthManager.logger.error(`Error refreshing Copilot token: ${AuthManager.sanitizeError(error)}`);
       return undefined;
     }
   }
@@ -390,13 +399,10 @@ export class AuthManager {
       const stopServer = () => {
         serverRef.current?.stop();
       };
-      const timeout = setTimeout(
-        () => {
-          stopServer();
-          reject(new Error('Login timed out after 5 minutes'));
-        },
-        TIMEOUTS.OAUTH_LOGIN_TIMEOUT_MS
-      );
+      const timeout = setTimeout(() => {
+        stopServer();
+        reject(new Error('Login timed out after 5 minutes'));
+      }, TIMEOUTS.OAUTH_LOGIN_TIMEOUT_MS);
 
       serverRef.current = Bun.serve({
         port: 51121,
@@ -543,13 +549,10 @@ export class AuthManager {
       const stopServer = () => {
         serverRef.current?.stop();
       };
-      const timeout = setTimeout(
-        () => {
-          stopServer();
-          reject(new Error('Login timed out after 5 minutes'));
-        },
-        TIMEOUTS.OAUTH_LOGIN_TIMEOUT_MS
-      );
+      const timeout = setTimeout(() => {
+        stopServer();
+        reject(new Error('Login timed out after 5 minutes'));
+      }, TIMEOUTS.OAUTH_LOGIN_TIMEOUT_MS);
 
       serverRef.current = Bun.serve({
         port: 1455,
@@ -691,7 +694,7 @@ export class AuthManager {
 
       return data.access_token;
     } catch (error) {
-      AuthManager.logger.error(`Error refreshing OpenAI ChatGPT token: ${String(error)}`);
+      AuthManager.logger.error(`Error refreshing OpenAI ChatGPT token: ${AuthManager.sanitizeError(error)}`);
       return undefined;
     }
   }
@@ -743,7 +746,7 @@ export class AuthManager {
 
       return data.access_token;
     } catch (error) {
-      AuthManager.logger.error(`Error refreshing Google Gemini token: ${String(error)}`);
+      AuthManager.logger.error(`Error refreshing Google Gemini token: ${AuthManager.sanitizeError(error)}`);
       return undefined;
     }
   }
@@ -789,7 +792,7 @@ export class AuthManager {
 
       return data.access_token;
     } catch (error) {
-      AuthManager.logger.error(`Error refreshing Anthropic Claude token: ${String(error)}`);
+      AuthManager.logger.error(`Error refreshing Anthropic Claude token: ${AuthManager.sanitizeError(error)}`);
       return undefined;
     }
   }

@@ -13,6 +13,9 @@ export interface TestDefinition {
       response: any;
     }>;
   };
+  options?: {
+    allowSideEffects?: boolean;
+  };
   snapshot?: {
     steps: Record<
       string,

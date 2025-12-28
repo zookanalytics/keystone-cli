@@ -155,7 +155,9 @@ describe('WorkflowDb', () => {
   describe('Transactions', () => {
     it('should commit successful transactions', () => {
       db.withTransaction((sqlite) => {
-        sqlite.exec("INSERT INTO workflow_runs (id, workflow_name, status, inputs, started_at) VALUES ('tx-1', 'wf', 'pending', '{}', 'now')");
+        sqlite.exec(
+          "INSERT INTO workflow_runs (id, workflow_name, status, inputs, started_at) VALUES ('tx-1', 'wf', 'pending', '{}', 'now')"
+        );
       });
       // @ts-ignore
       const run = db.db.query("SELECT * FROM workflow_runs WHERE id = 'tx-1'").get();
@@ -165,7 +167,9 @@ describe('WorkflowDb', () => {
     it('should rollback failed transactions', () => {
       try {
         db.withTransaction((sqlite) => {
-          sqlite.exec("INSERT INTO workflow_runs (id, workflow_name, status, inputs, started_at) VALUES ('tx-2', 'wf', 'pending', '{}', 'now')");
+          sqlite.exec(
+            "INSERT INTO workflow_runs (id, workflow_name, status, inputs, started_at) VALUES ('tx-2', 'wf', 'pending', '{}', 'now')"
+          );
           throw new Error('rollback');
         });
       } catch (e) {
@@ -220,7 +224,9 @@ describe('WorkflowDb', () => {
 
       // Store with expired date manually
       // @ts-ignore
-      db.db.exec(`INSERT INTO idempotency_records (idempotency_key, run_id, step_id, status, created_at, expires_at) VALUES ('exp-key', '${runId}', 's1', 'success', '2000-01-01', '2000-01-02')`);
+      db.db.exec(
+        `INSERT INTO idempotency_records (idempotency_key, run_id, step_id, status, created_at, expires_at) VALUES ('exp-key', '${runId}', 's1', 'success', '2000-01-01', '2000-01-02')`
+      );
 
       const changes = await db.clearExpiredIdempotencyRecord('exp-key');
       expect(changes).toBe(1);
@@ -230,7 +236,9 @@ describe('WorkflowDb', () => {
       const runId = 'run-prune';
       await db.createRun(runId, 'wf', {});
       // @ts-ignore
-      db.db.exec(`INSERT INTO idempotency_records (idempotency_key, run_id, step_id, status, created_at, expires_at) VALUES ('prune-key', '${runId}', 's1', 'success', '2000-01-01', '2000-01-02')`);
+      db.db.exec(
+        `INSERT INTO idempotency_records (idempotency_key, run_id, step_id, status, created_at, expires_at) VALUES ('prune-key', '${runId}', 's1', 'success', '2000-01-01', '2000-01-02')`
+      );
 
       const changes = await db.pruneIdempotencyRecords();
       expect(changes).toBeGreaterThanOrEqual(1);
@@ -320,8 +328,8 @@ describe('WorkflowDb', () => {
       await db.createTimer('t-future', runId, 's2', 'sleep', '2099-01-01T00:00:00Z');
 
       const pending = await db.getPendingTimers();
-      expect(pending.some(t => t.id === 't-back')).toBe(true);
-      expect(pending.some(t => t.id === 't-future')).toBe(false);
+      expect(pending.some((t) => t.id === 't-back')).toBe(true);
+      expect(pending.some((t) => t.id === 't-future')).toBe(false);
     });
 
     it('should list and clear timers', async () => {
@@ -363,7 +371,7 @@ describe('WorkflowDb', () => {
       await db.registerCompensation('c2', runId, 'step-2', 'comp-step-2', '{}');
       await db.clearCompensationsForSteps(runId, ['step-2']);
       const allAfter = await db.getAllCompensations(runId);
-      expect(allAfter.some(c => c.id === 'c2')).toBe(false);
+      expect(allAfter.some((c) => c.id === 'c2')).toBe(false);
     });
 
     it('should handle step cache', async () => {
@@ -427,7 +435,7 @@ describe('WorkflowDb', () => {
 
     it('should get last run', async () => {
       await db.createRun('last-1', 'last-wf', {});
-      await new Promise(r => setTimeout(r, 10));
+      await new Promise((r) => setTimeout(r, 10));
       await db.createRun('last-2', 'last-wf', {});
 
       const last = await db.getLastRun('last-wf');

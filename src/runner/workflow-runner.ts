@@ -10,15 +10,21 @@ import type { LlmStep, PlanStep, Step, Workflow, WorkflowStep } from '../parser/
 import { WorkflowParser } from '../parser/workflow-parser.ts';
 import { StepStatus, type StepStatusType, WorkflowStatus } from '../types/status.ts';
 import { ConfigLoader } from '../utils/config-loader.ts';
+import { container } from '../utils/container.ts';
 import { extractJson } from '../utils/json-parser.ts';
-import { Redactor } from '../utils/redactor.ts';
+import { ConsoleLogger, type Logger } from '../utils/logger.ts';
+import type { Redactor } from '../utils/redactor.ts';
 import { formatSchemaErrors, validateJsonSchema } from '../utils/schema-validator.ts';
 import { WorkflowRegistry } from '../utils/workflow-registry.ts';
+import type { EventHandler, StepPhase, WorkflowEvent } from './events.ts';
 import { ForeachExecutor } from './executors/foreach-executor.ts';
 import { type LLMMessage, getAdapter } from './llm-adapter.ts';
 import { MCPManager } from './mcp-manager.ts';
 import { ResourcePoolManager } from './resource-pool.ts';
 import { withRetry } from './retry.ts';
+import { ContextBuilder } from './services/context-builder.ts';
+import { SecretManager } from './services/secret-manager.ts';
+import { WorkflowValidator } from './services/workflow-validator.ts';
 import {
   type StepResult,
   WorkflowSuspendedError,
@@ -26,14 +32,8 @@ import {
   executeStep,
 } from './step-executor.ts';
 import { withTimeout } from './timeout.ts';
-import { WorkflowState, type StepContext, type ForeachStepContext } from './workflow-state.ts';
 import { WorkflowScheduler } from './workflow-scheduler.ts';
-import { ConsoleLogger, type Logger } from '../utils/logger.ts';
-import { container } from '../utils/container.ts';
-import type { EventHandler, StepPhase, WorkflowEvent } from './events.ts';
-import { SecretManager } from './services/secret-manager.ts';
-import { ContextBuilder } from './services/context-builder.ts';
-import { WorkflowValidator } from './services/workflow-validator.ts';
+import { type ForeachStepContext, type StepContext, WorkflowState } from './workflow-state.ts';
 
 /**
  * A logger wrapper that redacts secrets from all log messages
@@ -42,7 +42,7 @@ class RedactingLogger implements Logger {
   constructor(
     private inner: Logger,
     private redactor: Redactor
-  ) { }
+  ) {}
 
   log(msg: string): void {
     this.inner.log(this.redactor.redact(msg));
@@ -185,7 +185,7 @@ export class WorkflowRunner {
 
     if (parentSignal.aborted) {
       controller.abort();
-      return { controller, cleanup: () => { } };
+      return { controller, cleanup: () => {} };
     }
 
     parentSignal.addEventListener('abort', onAbort, { once: true });
@@ -209,7 +209,9 @@ export class WorkflowRunner {
     // Use injected instances or resolve from container or create new from paths
     this.db =
       options.db ||
-      (options.dbPath ? new WorkflowDb(options.dbPath) : container.resolveOptional<WorkflowDb>('db')) ||
+      (options.dbPath
+        ? new WorkflowDb(options.dbPath)
+        : container.resolveOptional<WorkflowDb>('db')) ||
       new WorkflowDb(options.dbPath);
 
     this.memoryDb =
@@ -449,7 +451,9 @@ export class WorkflowRunner {
               await this.cascadeRollback(subRunId, errorReason);
             }
           } catch (e) {
-            this.logger.warn(`  ⚠️ Failed to parse sub-workflow output for rollback: ${e instanceof Error ? e.message : String(e)}`);
+            this.logger.warn(
+              `  ⚠️ Failed to parse sub-workflow output for rollback: ${e instanceof Error ? e.message : String(e)}`
+            );
           }
         }
       }
@@ -598,9 +602,9 @@ export class WorkflowRunner {
           content:
             (step as import('../parser/schema.ts').FileStep).content !== undefined
               ? ExpressionEvaluator.evaluateString(
-                (step as import('../parser/schema.ts').FileStep).content as string,
-                context
-              )
+                  (step as import('../parser/schema.ts').FileStep).content as string,
+                  context
+                )
               : undefined,
           op: step.op,
           allowOutsideCwd: step.allowOutsideCwd,
@@ -617,9 +621,9 @@ export class WorkflowRunner {
           ),
           path: (step as import('../parser/schema.ts').ArtifactStep).path
             ? ExpressionEvaluator.evaluateString(
-              (step as import('../parser/schema.ts').ArtifactStep).path as string,
-              context
-            )
+                (step as import('../parser/schema.ts').ArtifactStep).path as string,
+                context
+              )
             : undefined,
           allowOutsideCwd: step.allowOutsideCwd,
         });
@@ -663,9 +667,7 @@ export class WorkflowRunner {
           provider: step.provider
             ? ExpressionEvaluator.evaluateString(step.provider, context)
             : undefined,
-          model: step.model
-            ? ExpressionEvaluator.evaluateString(step.model, context)
-            : undefined,
+          model: step.model ? ExpressionEvaluator.evaluateString(step.model, context) : undefined,
           prompt: ExpressionEvaluator.evaluateString(step.prompt, context),
           tools: step.tools,
           maxIterations: step.maxIterations,
@@ -704,9 +706,9 @@ export class WorkflowRunner {
           input:
             (step as import('../parser/schema.ts').EngineStep).input !== undefined
               ? ExpressionEvaluator.evaluateObject(
-                (step as import('../parser/schema.ts').EngineStep).input,
-                context
-              )
+                  (step as import('../parser/schema.ts').EngineStep).input,
+                  context
+                )
               : undefined,
           env,
           cwd: ExpressionEvaluator.evaluateString(
@@ -992,11 +994,11 @@ export class WorkflowRunner {
     const idempotencyContextForRetry =
       idempotencyClaimed && scopedIdempotencyKey
         ? {
-          rawKey: idempotencyKey || scopedIdempotencyKey,
-          scopedKey: scopedIdempotencyKey,
-          ttlSeconds: idempotencyTtlSeconds,
-          claimed: true,
-        }
+            rawKey: idempotencyKey || scopedIdempotencyKey,
+            scopedKey: scopedIdempotencyKey,
+            ttlSeconds: idempotencyTtlSeconds,
+            claimed: true,
+          }
         : undefined;
 
     let stepToExecute = step;
@@ -1051,20 +1053,22 @@ export class WorkflowRunner {
 
       try {
         const { DebugRepl } = await import('./debug-repl.ts');
-        const repl = new DebugRepl(context, stepToExecute, undefined, this.logger, process.stdin, process.stdout, {
-          mode: 'breakpoint',
-        });
+        const repl = new DebugRepl(
+          context,
+          stepToExecute,
+          undefined,
+          this.logger,
+          process.stdin,
+          process.stdout,
+          {
+            mode: 'breakpoint',
+          }
+        );
         const action = await repl.start();
 
         if (action.type === 'skip') {
           this.logger.log(`  ⏭️ Skipping step ${stepToExecute.id} at breakpoint`);
-          await this.db.completeStep(
-            stepExecId,
-            StepStatus.SKIPPED,
-            null,
-            undefined,
-            undefined
-          );
+          await this.db.completeStep(stepExecId, StepStatus.SKIPPED, null, undefined, undefined);
           return {
             output: null,
             outputs: {},
@@ -1107,9 +1111,9 @@ export class WorkflowRunner {
         try {
           const outputForValidation =
             stepToExecute.type === 'engine' &&
-              result.output &&
-              typeof result.output === 'object' &&
-              'summary' in result.output
+            result.output &&
+            typeof result.output === 'object' &&
+            'summary' in result.output
               ? (result.output as { summary?: unknown }).summary
               : result.output;
           this.validator.validateSchema(
@@ -1866,9 +1870,7 @@ Return only the structured JSON required by the schema.`;
     }
 
     const taskDescription =
-      step.type === 'plan'
-        ? this.buildPlanPromptFromStep(step, context)
-        : step.prompt;
+      step.type === 'plan' ? this.buildPlanPromptFromStep(step, context) : step.prompt;
 
     return `Review the output for correctness, completeness, and clarity.
 
@@ -1889,9 +1891,7 @@ Return only the structured JSON required by the schema.`;
     context: ExpressionContext
   ): string {
     const basePrompt =
-      step.type === 'plan'
-        ? this.buildPlanPromptFromStep(step, context)
-        : step.prompt;
+      step.type === 'plan' ? this.buildPlanPromptFromStep(step, context) : step.prompt;
     const reviewText = JSON.stringify(review, null, 2);
     const outputText = typeof output === 'string' ? output : JSON.stringify(output, null, 2);
 
@@ -1975,7 +1975,12 @@ Revise the output to address the feedback. Return only the corrected output.`;
         });
       }
 
-      this.validator.validateSchema('output', QUALITY_GATE_SCHEMA, reviewResult.output, reviewStep.id);
+      this.validator.validateSchema(
+        'output',
+        QUALITY_GATE_SCHEMA,
+        reviewResult.output,
+        reviewStep.id
+      );
 
       const review = reviewResult.output as QualityGateReview;
       if (review.approved) {
@@ -1992,11 +1997,14 @@ Revise the output to address the feedback. Return only the corrected output.`;
       }
 
       attempts += 1;
-      this.logger.log(
-        `  🔍 Quality gate rejected output; refining (${attempts}/${maxAttempts})`
-      );
+      this.logger.log(`  🔍 Quality gate rejected output; refining (${attempts}/${maxAttempts})`);
 
-      const refinePrompt = this.buildQualityGateRefinePrompt(step, currentResult.output, review, context);
+      const refinePrompt = this.buildQualityGateRefinePrompt(
+        step,
+        currentResult.output,
+        review,
+        context
+      );
       const refinedStep: Step = {
         ...step,
         prompt: refinePrompt,
@@ -2249,7 +2257,8 @@ Revise the output to address the feedback. Return only the corrected output.`;
     const context = this.state.get(step.id);
     const status = context?.status || StepStatus.FAILED;
     const errorMsg =
-      context?.error || (error instanceof Error ? error.message : error ? String(error) : undefined);
+      context?.error ||
+      (error instanceof Error ? error.message : error ? String(error) : undefined);
 
     this.emitEvent({
       type: 'step.end',
@@ -2286,7 +2295,7 @@ Revise the output to address the feedback. Return only the corrected output.`;
     this.logger.log(`Run ID: ${this.runId}`);
     this.logger.log(
       '\n⚠️  Security Warning: Only run workflows from trusted sources.\n' +
-      '   Workflows can execute arbitrary shell commands and access your environment.\n'
+        '   Workflows can execute arbitrary shell commands and access your environment.\n'
     );
 
     this.secretManager.redactAtRest = ConfigLoader.load().storage?.redact_secrets_at_rest ?? true;
@@ -2307,7 +2316,11 @@ Revise the output to address the feedback. Return only the corrected output.`;
 
     // Create run record (only for new runs, not for resume)
     if (!isResume) {
-      await this.db.createRun(this.runId, this.workflow.name, this.secretManager.redactForStorage(this.inputs));
+      await this.db.createRun(
+        this.runId,
+        this.workflow.name,
+        this.secretManager.redactForStorage(this.inputs)
+      );
     }
     await this.db.updateRunStatus(this.runId, 'running');
     this.emitEvent({
@@ -2326,7 +2339,11 @@ Revise the output to address the feedback. Return only the corrected output.`;
         this.logger.log('All steps already completed. Nothing to resume.\n');
         // Evaluate outputs from completed state
         const outputs = this.evaluateOutputs();
-        await this.db.updateRunStatus(this.runId, 'success', this.secretManager.redactForStorage(outputs));
+        await this.db.updateRunStatus(
+          this.runId,
+          'success',
+          this.secretManager.redactForStorage(outputs)
+        );
         this.logger.log('✨ Workflow already completed!\n');
         completionEvent = {
           type: 'workflow.complete',
@@ -2478,7 +2495,11 @@ Revise the output to address the feedback. Return only the corrected output.`;
       const outputs = this.evaluateOutputs();
 
       // Mark run as complete
-      await this.db.updateRunStatus(this.runId, 'success', this.secretManager.redactForStorage(outputs));
+      await this.db.updateRunStatus(
+        this.runId,
+        'success',
+        this.secretManager.redactForStorage(outputs)
+      );
 
       this.logger.log('✨ Workflow completed successfully!\n');
 
@@ -2702,12 +2723,7 @@ Revise the output to address the feedback. Return only the corrected output.`;
             this.logger.log(
               `[${errorsStepIndex}/${totalErrorsSteps}] ▶ Executing errors step: ${step.id} (${step.type})`
             );
-            const startedAt = this.emitStepStart(
-              step,
-              'errors',
-              errorsStepIndex,
-              totalErrorsSteps
-            );
+            const startedAt = this.emitStepStart(step, 'errors', errorsStepIndex, totalErrorsSteps);
             const promise = this.executeStepWithForeach(step)
               .then(() => {
                 this.emitStepEnd(
@@ -2725,14 +2741,7 @@ Revise the output to address the feedback. Return only the corrected output.`;
                 );
               })
               .catch((err) => {
-                this.emitStepEnd(
-                  step,
-                  'errors',
-                  startedAt,
-                  err,
-                  errorsStepIndex,
-                  totalErrorsSteps
-                );
+                this.emitStepEnd(step, 'errors', startedAt, err, errorsStepIndex, totalErrorsSteps);
                 runningPromises.delete(stepId);
                 this.logger.error(
                   `  ✗ Errors step ${step.id} failed: ${err instanceof Error ? err.message : String(err)}`
@@ -2799,8 +2808,6 @@ Revise the output to address the feedback. Return only the corrected output.`;
 
     return outputs;
   }
-
-
 
   /**
    * Register top-level compensation for the workflow

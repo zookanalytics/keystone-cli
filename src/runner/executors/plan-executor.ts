@@ -6,31 +6,31 @@ import { executeLlmStep } from './llm-executor.ts';
 import type { StepExecutorOptions, StepResult } from './types.ts';
 
 export const DEFAULT_PLAN_OUTPUT_SCHEMA = {
-    type: 'object',
-    properties: {
-        steps: {
-            type: 'array',
-            items: {
-                type: 'object',
-                properties: {
-                    id: { type: 'string' },
-                    title: { type: 'string' },
-                    description: { type: 'string' },
-                    needs: { type: 'array', items: { type: 'string' } },
-                    workflow: { type: 'string' },
-                    type: { type: 'string' },
-                },
-                required: ['title'],
-                additionalProperties: true,
-            },
+  type: 'object',
+  properties: {
+    steps: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          title: { type: 'string' },
+          description: { type: 'string' },
+          needs: { type: 'array', items: { type: 'string' } },
+          workflow: { type: 'string' },
+          type: { type: 'string' },
         },
-        notes: { type: 'string' },
+        required: ['title'],
+        additionalProperties: true,
+      },
     },
-    required: ['steps'],
+    notes: { type: 'string' },
+  },
+  required: ['steps'],
 };
 
 export function buildPlanPrompt(goal: string, context: string, constraints: string): string {
-    return `You are a planner. Break the goal into a concise, ordered list of steps.
+  return `You are a planner. Break the goal into a concise, ordered list of steps.
 
 Goal:
 ${goal}
@@ -48,59 +48,57 @@ Return only the structured JSON required by the schema.`;
 }
 
 export async function executePlanStep(
-    step: PlanStep,
-    context: ExpressionContext,
-    logger: Logger,
-    options: StepExecutorOptions
+  step: PlanStep,
+  context: ExpressionContext,
+  logger: Logger,
+  options: StepExecutorOptions
 ): Promise<StepResult> {
-    const goal = ExpressionEvaluator.evaluateString(step.goal, context);
-    const contextText = step.context
-        ? ExpressionEvaluator.evaluateString(step.context, context)
-        : '';
-    const constraintsText = step.constraints
-        ? ExpressionEvaluator.evaluateString(step.constraints, context)
-        : '';
-    const prompt = step.prompt
-        ? ExpressionEvaluator.evaluateString(step.prompt, context)
-        : buildPlanPrompt(goal, contextText, constraintsText);
+  const goal = ExpressionEvaluator.evaluateString(step.goal, context);
+  const contextText = step.context ? ExpressionEvaluator.evaluateString(step.context, context) : '';
+  const constraintsText = step.constraints
+    ? ExpressionEvaluator.evaluateString(step.constraints, context)
+    : '';
+  const prompt = step.prompt
+    ? ExpressionEvaluator.evaluateString(step.prompt, context)
+    : buildPlanPrompt(goal, contextText, constraintsText);
 
-    const llmStep: LlmStep = {
-        id: step.id,
-        type: 'llm',
-        agent: step.agent || 'keystone-architect',
-        provider: step.provider,
-        model: step.model,
-        prompt,
-        tools: step.tools,
-        allowedHandoffs: step.allowedHandoffs,
-        maxIterations: step.maxIterations,
-        maxMessageHistory: step.maxMessageHistory,
-        contextStrategy: step.contextStrategy,
-        qualityGate: step.qualityGate,
-        useGlobalMcp: step.useGlobalMcp,
-        allowClarification: step.allowClarification,
-        mcpServers: step.mcpServers,
-        useStandardTools: step.useStandardTools,
-        allowOutsideCwd: step.allowOutsideCwd,
-        allowInsecure: step.allowInsecure,
-        handoff: step.handoff,
-        outputSchema: step.outputSchema ?? DEFAULT_PLAN_OUTPUT_SCHEMA,
-        needs: [],
-    };
+  const llmStep: LlmStep = {
+    id: step.id,
+    type: 'llm',
+    agent: step.agent || 'keystone-architect',
+    provider: step.provider,
+    model: step.model,
+    prompt,
+    tools: step.tools,
+    allowedHandoffs: step.allowedHandoffs,
+    maxIterations: step.maxIterations,
+    maxMessageHistory: step.maxMessageHistory,
+    contextStrategy: step.contextStrategy,
+    qualityGate: step.qualityGate,
+    useGlobalMcp: step.useGlobalMcp,
+    allowClarification: step.allowClarification,
+    mcpServers: step.mcpServers,
+    useStandardTools: step.useStandardTools,
+    allowOutsideCwd: step.allowOutsideCwd,
+    allowInsecure: step.allowInsecure,
+    handoff: step.handoff,
+    outputSchema: step.outputSchema ?? DEFAULT_PLAN_OUTPUT_SCHEMA,
+    needs: [],
+  };
 
-    const execLlm = options.executeLlmStep || executeLlmStep;
-    const execStep = options.executeStep; // This will be passed from step-executor
+  const execLlm = options.executeLlmStep || executeLlmStep;
+  const execStep = options.executeStep; // This will be passed from step-executor
 
-    return execLlm(
-        llmStep,
-        context,
-        (s, c) => execStep(s, c, logger, { ...options, stepExecutionId: undefined }),
-        logger,
-        options.mcpManager,
-        options.artifactRoot, // Note: using artifactRoot as fallback for workflowDir if not explicit
-        options.abortSignal,
-        options.getAdapter,
-        options.emitEvent,
-        options.runId ? { runId: options.runId } : undefined
-    );
+  return execLlm(
+    llmStep,
+    context,
+    (s, c) => execStep(s, c, logger, { ...options, stepExecutionId: undefined }),
+    logger,
+    options.mcpManager,
+    options.artifactRoot, // Note: using artifactRoot as fallback for workflowDir if not explicit
+    options.abortSignal,
+    options.getAdapter,
+    options.emitEvent,
+    options.runId ? { runId: options.runId } : undefined
+  );
 }

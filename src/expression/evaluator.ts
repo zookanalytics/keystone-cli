@@ -109,7 +109,7 @@ export class ExpressionEvaluator {
    * Set the maximum cache size for parsed expressions.
    * Default is 1000, which is suitable for most workflows.
    * Increase for workflows with many unique expressions.
-   * 
+   *
    * @param size Maximum number of parsed expressions to cache
    */
   static setCacheSize(size: number): void {
@@ -216,10 +216,7 @@ export class ExpressionEvaluator {
    * Strict equality (===) is preserved for '==='.
    */
   static evaluate(template: string, context: ExpressionContext): unknown {
-    if (
-      ExpressionEvaluator.strictMode &&
-      (template.includes('${{') || template.includes('}}'))
-    ) {
+    if (ExpressionEvaluator.strictMode && (template.includes('${{') || template.includes('}}'))) {
       ExpressionEvaluator.validateTemplate(template);
     }
 
@@ -311,7 +308,7 @@ export class ExpressionEvaluator {
    * Evaluate a string and ensure the result is a string.
    * Objects and arrays are stringified to JSON.
    * null and undefined return an empty string.
-   * 
+   *
    * @throws TypeError if template is an object with a custom toString() method
    */
   static evaluateString(template: unknown, context: ExpressionContext): string {
@@ -325,11 +322,13 @@ export class ExpressionEvaluator {
         const proto = Object.getPrototypeOf(template);
         if (proto !== null && proto !== Object.prototype && proto !== Array.prototype) {
           // Has custom prototype - could have malicious toString
-          if (typeof (template as { toString?: unknown }).toString === 'function' &&
-            (template as { toString: () => string }).toString !== Object.prototype.toString) {
+          if (
+            typeof (template as { toString?: unknown }).toString === 'function' &&
+            (template as { toString: () => string }).toString !== Object.prototype.toString
+          ) {
             throw new TypeError(
               'Security: Cannot evaluate object with custom toString() method. ' +
-              'Pass a string template instead.'
+                'Pass a string template instead.'
             );
           }
         }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { Redactor, RedactionBuffer } from './redactor';
+import { RedactionBuffer, Redactor } from './redactor';
 
 describe('Redactor', () => {
   const secrets = {

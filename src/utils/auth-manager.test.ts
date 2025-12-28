@@ -76,10 +76,10 @@ describe('AuthManager', () => {
   describe('setLogger()', () => {
     it('should set the static logger', () => {
       const mockLogger = {
-        log: mock(() => { }),
-        warn: mock(() => { }),
-        error: mock(() => { }),
-        info: mock(() => { }),
+        log: mock(() => {}),
+        warn: mock(() => {}),
+        error: mock(() => {}),
+        info: mock(() => {}),
       };
       AuthManager.setLogger(mockLogger);
       // Trigger a log through save failure to verify
@@ -163,7 +163,7 @@ describe('AuthManager', () => {
         )
       );
 
-      const consoleSpy = spyOn(console, 'error').mockImplementation(() => { });
+      const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
       const token = await AuthManager.getCopilotToken();
 
       expect(token).toBeUndefined();
@@ -465,7 +465,7 @@ describe('AuthManager', () => {
 
       let fetchHandler: any;
       const mockServer = {
-        stop: mock(() => { }),
+        stop: mock(() => {}),
       };
 
       // @ts-ignore - mock Bun.serve
@@ -479,7 +479,7 @@ describe('AuthManager', () => {
       // @ts-ignore
       global.require = (name: string) => {
         if (name === 'node:child_process') {
-          return { spawn: () => ({ on: () => { } }) };
+          return { spawn: () => ({ on: () => {} }) };
         }
         return originalRequire ? originalRequire(name) : {};
       };
@@ -494,11 +494,18 @@ describe('AuthManager', () => {
         // Simulating the fetch handler call
         const req = new Request('http://localhost:51121/oauth-callback?code=test-code');
         // @ts-ignore
-        global.fetch = mock(() => Promise.resolve(new Response(JSON.stringify({
-          access_token: 'access',
-          refresh_token: 'refresh',
-          expires_in: 3600
-        }), { status: 200 })));
+        global.fetch = mock(() =>
+          Promise.resolve(
+            new Response(
+              JSON.stringify({
+                access_token: 'access',
+                refresh_token: 'refresh',
+                expires_in: 3600,
+              }),
+              { status: 200 }
+            )
+          )
+        );
 
         const response = await fetchHandler(req);
         expect(response.status).toBe(200);
@@ -506,7 +513,6 @@ describe('AuthManager', () => {
         await loginPromise;
         const auth = AuthManager.load();
         expect(auth.google_gemini?.access_token).toBe('access');
-
       } finally {
         serveSpy.mockRestore();
         // @ts-ignore
@@ -519,7 +525,7 @@ describe('AuthManager', () => {
     it('loginOpenAIChatGPT should handle OAuth callback', async () => {
       let fetchHandler: any;
       const mockServer = {
-        stop: mock(() => { }),
+        stop: mock(() => {}),
       };
 
       // @ts-ignore - mock Bun.serve
@@ -533,7 +539,7 @@ describe('AuthManager', () => {
       // @ts-ignore
       global.require = (name: string) => {
         if (name === 'node:child_process') {
-          return { spawn: () => ({ on: () => { } }) };
+          return { spawn: () => ({ on: () => {} }) };
         }
         return originalRequire ? originalRequire(name) : {};
       };
@@ -551,11 +557,18 @@ describe('AuthManager', () => {
         // Actually, let's just test that the handler exists and can be called.
 
         // @ts-ignore
-        global.fetch = mock(() => Promise.resolve(new Response(JSON.stringify({
-          access_token: 'access',
-          refresh_token: 'refresh',
-          expires_in: 3600
-        }), { status: 200 })));
+        global.fetch = mock(() =>
+          Promise.resolve(
+            new Response(
+              JSON.stringify({
+                access_token: 'access',
+                refresh_token: 'refresh',
+                expires_in: 3600,
+              }),
+              { status: 200 }
+            )
+          )
+        );
 
         // We skip the state check by not providing it in the URL if we want to test failure,
         // or we can try to find where it's stored.

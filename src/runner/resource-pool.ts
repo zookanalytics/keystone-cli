@@ -1,5 +1,5 @@
-import type { Logger } from '../utils/logger.ts';
 import { LIMITS } from '../utils/constants.ts';
+import type { Logger } from '../utils/logger.ts';
 
 export type ReleaseFunction = () => void;
 
@@ -56,7 +56,7 @@ export class ResourcePoolManager {
   /**
    * Acquire a resource from a pool.
    * If the pool doesn't exist, it uses the global limit.
-   * 
+   *
    * @param poolName - Name of the pool to acquire from
    * @param options.priority - Higher priority requests are processed first (default: 0)
    * @param options.signal - AbortSignal for cancellation
@@ -103,7 +103,7 @@ export class ResourcePoolManager {
     if (pool.queue.length >= this.maxQueueSize) {
       throw new Error(
         `Resource pool "${poolName}" queue is full (${this.maxQueueSize}). ` +
-        `Consider increasing concurrency limits or reducing parallel work.`
+          `Consider increasing concurrency limits or reducing parallel work.`
       );
     }
 
@@ -133,7 +133,9 @@ export class ResourcePoolManager {
           const index = poolRef.queue.indexOf(request);
           if (index !== -1) {
             poolRef.queue.splice(index, 1);
-            reject(new Error(`Resource pool "${poolName}" acquire timeout after ${options.timeout}ms`));
+            reject(
+              new Error(`Resource pool "${poolName}" acquire timeout after ${options.timeout}ms`)
+            );
           }
         }, options.timeout);
       }

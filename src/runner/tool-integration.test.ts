@@ -3,8 +3,8 @@ import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ExpressionContext } from '../expression/evaluator';
 import type { LlmStep, Step } from '../parser/schema';
-import type { LLMAdapter } from './llm-adapter';
 import { executeLlmStep } from './executors/llm-executor.ts';
+import type { LLMAdapter } from './llm-adapter';
 import type { StepResult } from './step-executor';
 
 interface MockToolCall {

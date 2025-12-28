@@ -30,8 +30,8 @@ import type {
 } from '../parser/schema';
 import { ConfigLoader } from '../utils/config-loader';
 import type { SafeSandbox } from '../utils/sandbox';
-import type { getAdapter } from './llm-adapter';
 import type { executeLlmStep } from './executors/llm-executor.ts';
+import type { getAdapter } from './llm-adapter';
 import { executeStep } from './step-executor';
 
 interface StepOutput {
@@ -47,7 +47,7 @@ interface RequestOutput {
 
 const mockRl = {
   question: mock(() => Promise.resolve('')),
-  close: mock(() => { }),
+  close: mock(() => {}),
 };
 
 describe('step-executor', () => {
@@ -209,14 +209,9 @@ describe('step-executor', () => {
       const filePath = join(tempDir, 'patch-search.txt');
       writeFileSync(filePath, 'alpha beta gamma');
 
-      const patch = [
-        '<<<<<<< SEARCH',
-        'beta',
-        '=======',
-        'delta',
-        '>>>>>>> REPLACE',
-        '',
-      ].join('\n');
+      const patch = ['<<<<<<< SEARCH', 'beta', '=======', 'delta', '>>>>>>> REPLACE', ''].join(
+        '\n'
+      );
 
       const patchStep: FileStep = {
         id: 'p2',
@@ -471,7 +466,7 @@ describe('step-executor', () => {
     });
 
     it('should pass logger to sandbox execution', async () => {
-      const logger = { log: mock(() => { }) };
+      const logger = { log: mock(() => {}) };
       // @ts-ignore
       const step = {
         id: 's1',
@@ -981,7 +976,7 @@ describe('step-executor', () => {
       };
 
       // @ts-ignore
-      const result = await executeStep(step, context, { log: () => { } });
+      const result = await executeStep(step, context, { log: () => {} });
       expect(result.status).toBe('success');
       expect(result.output).toBe(true);
       expect(mockRl.question).toHaveBeenCalled();
@@ -999,7 +994,7 @@ describe('step-executor', () => {
       };
 
       // @ts-ignore
-      const result = await executeStep(step, context, { log: () => { } });
+      const result = await executeStep(step, context, { log: () => {} });
       expect(result.status).toBe('success');
       expect(result.output).toBe('user response');
     });
@@ -1016,19 +1011,19 @@ describe('step-executor', () => {
       // Test 'yes'
       mockRl.question.mockResolvedValue('yes');
       // @ts-ignore
-      let result = await executeStep(step, context, { log: () => { } });
+      let result = await executeStep(step, context, { log: () => {} });
       expect(result.output).toBe(true);
 
       // Test 'no'
       mockRl.question.mockResolvedValue('no');
       // @ts-ignore
-      result = await executeStep(step, context, { log: () => { } });
+      result = await executeStep(step, context, { log: () => {} });
       expect(result.output).toBe(false);
 
       // Test empty string (default to true)
       mockRl.question.mockResolvedValue('');
       // @ts-ignore
-      result = await executeStep(step, context, { log: () => { } });
+      result = await executeStep(step, context, { log: () => {} });
       expect(result.output).toBe(true);
     });
 
@@ -1044,7 +1039,7 @@ describe('step-executor', () => {
       };
 
       // @ts-ignore
-      const result = await executeStep(step, context, { log: () => { } });
+      const result = await executeStep(step, context, { log: () => {} });
       expect(result.status).toBe('success');
       expect(result.output).toBe('some custom response');
     });
@@ -1061,7 +1056,7 @@ describe('step-executor', () => {
       };
 
       // @ts-ignore
-      const result = await executeStep(step, context, { log: () => { } });
+      const result = await executeStep(step, context, { log: () => {} });
       expect(result.status).toBe('suspended');
       expect(result.error).toBe('Proceed?');
     });

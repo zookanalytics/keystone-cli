@@ -9,32 +9,32 @@ import type { StepResult } from './types.ts';
  * Execute a script step (inline JavaScript)
  */
 export async function executeScriptStep(
-    step: ScriptStep,
-    context: ExpressionContext,
-    logger: Logger,
-    options: { sandbox?: typeof SafeSandbox } = {}
+  step: ScriptStep,
+  context: ExpressionContext,
+  logger: Logger,
+  options: { sandbox?: typeof SafeSandbox } = {}
 ): Promise<StepResult> {
-    if (!step.allowInsecure) {
-        return {
-            status: 'failed',
-            output: null,
-            error: 'Script execution is disabled by default. Set allowInsecure: true to run scripts.',
-        };
-    }
+  if (!step.allowInsecure) {
+    return {
+      status: 'failed',
+      output: null,
+      error: 'Script execution is disabled by default. Set allowInsecure: true to run scripts.',
+    };
+  }
 
-    try {
-        const sandbox = options.sandbox || DefaultSandbox;
-        const result = await sandbox.execute(step.run, context, { logger });
+  try {
+    const sandbox = options.sandbox || DefaultSandbox;
+    const result = await sandbox.execute(step.run, context, { logger });
 
-        return {
-            status: 'success',
-            output: result,
-        };
-    } catch (error) {
-        return {
-            status: 'failed',
-            output: null,
-            error: error instanceof Error ? error.message : String(error),
-        };
-    }
+    return {
+      status: 'success',
+      output: result,
+    };
+  } catch (error) {
+    return {
+      status: 'failed',
+      output: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }

@@ -80,8 +80,8 @@ export async function processOpenAIStream(
               if (toolCall.function?.arguments) {
                 if (
                   fullContent.length +
-                  toolCalls.reduce((acc, t) => acc + (t?.function?.arguments?.length || 0), 0) +
-                  toolCall.function.arguments.length >
+                    toolCalls.reduce((acc, t) => acc + (t?.function?.arguments?.length || 0), 0) +
+                    toolCall.function.arguments.length >
                   MAX_RESPONSE_SIZE
                 ) {
                   throw new Error(
@@ -150,8 +150,8 @@ export async function processOpenAIStream(
               if (toolCall.function?.arguments) {
                 if (
                   fullContent.length +
-                  toolCalls.reduce((acc, t) => acc + (t?.function?.arguments?.length || 0), 0) +
-                  toolCall.function.arguments.length >
+                    toolCalls.reduce((acc, t) => acc + (t?.function?.arguments?.length || 0), 0) +
+                    toolCall.function.arguments.length >
                   MAX_RESPONSE_SIZE
                 ) {
                   throw new Error(

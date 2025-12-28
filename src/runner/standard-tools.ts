@@ -332,11 +332,15 @@ export const STANDARD_TOOLS: AgentTool[] = [
   },
   {
     name: 'ast_grep_search',
-    description: 'Search for structural code patterns using AST pattern matching. More precise than regex for code refactoring.',
+    description:
+      'Search for structural code patterns using AST pattern matching. More precise than regex for code refactoring.',
     parameters: {
       type: 'object',
       properties: {
-        pattern: { type: 'string', description: 'AST-grep pattern to search for, e.g. "console.log($A)"' },
+        pattern: {
+          type: 'string',
+          description: 'AST-grep pattern to search for, e.g. "console.log($A)"',
+        },
         language: {
           type: 'string',
           description: 'Programming language (javascript, typescript, python, rust, go, etc.)',
@@ -411,11 +415,15 @@ export const STANDARD_TOOLS: AgentTool[] = [
   },
   {
     name: 'ast_grep_replace',
-    description: 'Replace structural code patterns using AST-aware rewriting. Safer than regex for code refactoring.',
+    description:
+      'Replace structural code patterns using AST-aware rewriting. Safer than regex for code refactoring.',
     parameters: {
       type: 'object',
       properties: {
-        pattern: { type: 'string', description: 'AST-grep pattern to match, e.g. "console.log($A)"' },
+        pattern: {
+          type: 'string',
+          description: 'AST-grep pattern to match, e.g. "console.log($A)"',
+        },
         rewrite: { type: 'string', description: 'Replacement pattern, e.g. "logger.info($A)"' },
         language: {
           type: 'string',
