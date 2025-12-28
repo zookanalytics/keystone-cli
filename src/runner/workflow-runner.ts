@@ -14,7 +14,7 @@ import { extractJson } from '../utils/json-parser.ts';
 import { Redactor } from '../utils/redactor.ts';
 import { formatSchemaErrors, validateJsonSchema } from '../utils/schema-validator.ts';
 import { WorkflowRegistry } from '../utils/workflow-registry.ts';
-import { ForeachExecutor } from './foreach-executor.ts';
+import { ForeachExecutor } from './executors/foreach-executor.ts';
 import { type LLMMessage, getAdapter } from './llm-adapter.ts';
 import { MCPManager } from './mcp-manager.ts';
 import { ResourcePoolManager } from './resource-pool.ts';
@@ -31,6 +31,9 @@ import { WorkflowScheduler } from './workflow-scheduler.ts';
 import { ConsoleLogger, type Logger } from '../utils/logger.ts';
 import { container } from '../utils/container.ts';
 import type { EventHandler, StepPhase, WorkflowEvent } from './events.ts';
+import { SecretManager } from './services/secret-manager.ts';
+import { ContextBuilder } from './services/context-builder.ts';
+import { WorkflowValidator } from './services/workflow-validator.ts';
 
 /**
  * A logger wrapper that redacts secrets from all log messages
@@ -136,10 +139,10 @@ export class WorkflowRunner {
   private state!: WorkflowState;
   private scheduler!: WorkflowScheduler;
   private inputs!: Record<string, unknown>;
-  private secrets: Record<string, string>;
-  private redactor: Redactor;
+  private secretManager: SecretManager;
+  private contextBuilder!: ContextBuilder;
+  private validator!: WorkflowValidator;
   private rawLogger!: Logger;
-  private secretValues: string[] = [];
   private redactAtRest = true;
   private resumeRunId?: string;
   private logger!: Logger;
@@ -216,11 +219,18 @@ export class WorkflowRunner {
         : container.resolveOptional<MemoryDb>('memoryDb')) ||
       new MemoryDb(options.memoryDbPath);
 
-    this.secrets = this.loadSecrets();
-    this.redactor = new Redactor(this.secrets, { forcedSecrets: this.secretValues });
-
+    this.secretManager = new SecretManager(options.secrets || {});
     this.initLogger(options);
     this.initRun(options);
+
+    this.validator = new WorkflowValidator(this.workflow, this.inputs);
+    this.contextBuilder = new ContextBuilder(
+      this.workflow,
+      this.inputs,
+      this.secretManager.getSecretValues(),
+      this.state,
+      this.logger
+    );
     this.mcpManager = options.mcpManager || new MCPManager();
     this.initResourcePool(options);
 
@@ -231,7 +241,7 @@ export class WorkflowRunner {
     const rawLogger =
       options.logger || container.resolveOptional<Logger>('logger') || new ConsoleLogger();
     this.rawLogger = rawLogger;
-    this.logger = new RedactingLogger(rawLogger, this.redactor);
+    this.logger = new RedactingLogger(rawLogger, this.secretManager.getRedactor());
   }
 
   private initResourcePool(options: RunOptions): void {
@@ -243,7 +253,7 @@ export class WorkflowRunner {
       const workflowPools: Record<string, number> = {};
 
       if (this.workflow.pools) {
-        const baseContext = this.buildContext();
+        const baseContext = this.contextBuilder.buildContext(this.secretManager.getSecrets());
         for (const [name, limit] of Object.entries(this.workflow.pools)) {
           if (typeof limit === 'string') {
             workflowPools[name] = Number(ExpressionEvaluator.evaluate(limit, baseContext));
@@ -275,7 +285,7 @@ export class WorkflowRunner {
       this.workflow,
       this.db,
       this.inputs,
-      this.secrets,
+      this.secretManager.getSecrets(),
       this.logger
     );
     this.scheduler = new WorkflowScheduler(this.workflow, this.state.getCompletedStepIds());
@@ -391,7 +401,7 @@ export class WorkflowRunner {
 
         // Build context for compensation
         // It has access to the original step's output via steps.<step_id>.output
-        const context = this.buildContext();
+        const context = this.contextBuilder.buildContext(this.secretManager.getSecrets());
 
         try {
           // Execute the compensation step
@@ -438,8 +448,8 @@ export class WorkflowRunner {
             if (subRunId) {
               await this.cascadeRollback(subRunId, errorReason);
             }
-          } catch (_e) {
-            // ignore parse errors
+          } catch (e) {
+            this.logger.warn(`  ⚠️ Failed to parse sub-workflow output for rollback: ${e instanceof Error ? e.message : String(e)}`);
           }
         }
       }
@@ -495,75 +505,9 @@ export class WorkflowRunner {
     }
   }
 
-  /**
-   * Load secrets from environment
-   */
-  private loadSecrets(): Record<string, string> {
-    const secrets: Record<string, string> = { ...(this.options.secrets || {}) };
-
-    // Common non-secret environment variables to exclude from redaction
-    const blocklist = new Set([
-      'USER',
-      'PATH',
-      'SHELL',
-      'HOME',
-      'PWD',
-      'LOGNAME',
-      'LANG',
-      'TERM',
-      'EDITOR',
-      'VISUAL',
-      '_',
-      'SHLVL',
-      'LC_ALL',
-      'DISPLAY',
-      'SSH_AUTH_SOCK',
-      'XPC_FLAGS',
-      'XPC_SERVICE_NAME',
-      'ITERM_SESSION_ID',
-      'ITERM_PROFILE',
-      'TERM_PROGRAM',
-      'TERM_PROGRAM_VERSION',
-      'COLORTERM',
-      'LC_TERMINAL',
-      'LC_TERMINAL_VERSION',
-      'PWD',
-      'OLDPWD',
-      'HOME',
-      'USER',
-      'SHELL',
-      'PATH',
-      'LOGNAME',
-      'TMPDIR',
-      'XDG_CONFIG_HOME',
-      'XDG_DATA_HOME',
-      'XDG_CACHE_HOME',
-      'XDG_RUNTIME_DIR',
-    ]);
-
-    // Bun automatically loads .env file
-    for (const [key, value] of Object.entries(Bun.env)) {
-      if (value && !blocklist.has(key)) {
-        secrets[key] = value;
-      }
-    }
-
-    // Explicit secrets from options take precedence over environment variables
-    if (this.options.secrets) {
-      Object.assign(secrets, this.options.secrets);
-    }
-
-    return secrets;
-  }
-
-  private refreshRedactor(): void {
-    this.redactor = new Redactor(this.loadSecrets(), { forcedSecrets: this.secretValues });
-    this.logger = new RedactingLogger(this.rawLogger, this.redactor);
-  }
-
   private redactForStorage<T>(value: T): T {
     if (!this.redactAtRest) return value;
-    return this.redactor.redactValue(value) as T;
+    return this.secretManager.getRedactor().redactValue(value) as T;
   }
 
   private async calculateStepCacheKey(
@@ -798,198 +742,6 @@ export class WorkflowRunner {
   /**
    * Collect primitive secret values from structured inputs.
    */
-  private static collectSecretValues(
-    value: unknown,
-    sink: Set<string>,
-    seen: WeakSet<object>
-  ): void {
-    if (value === null || value === undefined) return;
-
-    if (typeof value === 'string') {
-      sink.add(value);
-      return;
-    }
-
-    if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
-      sink.add(String(value));
-      return;
-    }
-
-    if (typeof value !== 'object') return;
-
-    if (seen.has(value)) return;
-    seen.add(value);
-
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        WorkflowRunner.collectSecretValues(item, sink, seen);
-      }
-      return;
-    }
-
-    for (const item of Object.values(value as Record<string, unknown>)) {
-      WorkflowRunner.collectSecretValues(item, sink, seen);
-    }
-  }
-
-  /**
-   * Apply workflow defaults to inputs and validate types
-   */
-  private applyDefaultsAndValidate(): void {
-    if (!this.workflow.inputs) return;
-
-    const secretValues = new Set<string>();
-
-    for (const [key, config] of Object.entries(this.workflow.inputs)) {
-      // Apply default if missing
-      if (this.inputs[key] === undefined && config.default !== undefined) {
-        this.inputs[key] = config.default;
-      }
-
-      if (config.secret) {
-        if (this.inputs[key] === WorkflowRunner.REDACTED_PLACEHOLDER) {
-          throw new Error(
-            `Secret input "${key}" was redacted at rest. Please provide it again to resume this run.`
-          );
-        }
-      }
-
-      // Validate required inputs
-      if (this.inputs[key] === undefined) {
-        throw new Error(`Missing required input: ${key}`);
-      }
-
-      // Basic type validation
-      const value = this.inputs[key];
-      const type = config.type.toLowerCase();
-
-      if (type === 'string' && typeof value !== 'string') {
-        throw new Error(`Input "${key}" must be a string, got ${typeof value}`);
-      }
-      if (type === 'number' && typeof value !== 'number') {
-        throw new Error(`Input "${key}" must be a number, got ${typeof value}`);
-      }
-      if (type === 'boolean' && typeof value !== 'boolean') {
-        throw new Error(`Input "${key}" must be a boolean, got ${typeof value}`);
-      }
-      if (type === 'array' && !Array.isArray(value)) {
-        throw new Error(`Input "${key}" must be an array, got ${typeof value}`);
-      }
-      if (
-        type === 'object' &&
-        (typeof value !== 'object' || value === null || Array.isArray(value))
-      ) {
-        throw new Error(`Input "${key}" must be an object, got ${typeof value}`);
-      }
-
-      if (config.values) {
-        if (type !== 'string' && type !== 'number' && type !== 'boolean') {
-          throw new Error(`Input "${key}" cannot use enum values with type "${type}"`);
-        }
-        for (const allowed of config.values) {
-          const matchesType =
-            (type === 'string' && typeof allowed === 'string') ||
-            (type === 'number' && typeof allowed === 'number') ||
-            (type === 'boolean' && typeof allowed === 'boolean');
-          if (!matchesType) {
-            throw new Error(
-              `Input "${key}" enum value ${JSON.stringify(allowed)} must be a ${type}`
-            );
-          }
-        }
-        if (!config.values.includes(value as string | number | boolean)) {
-          throw new Error(
-            `Input "${key}" must be one of: ${config.values.map((v) => JSON.stringify(v)).join(', ')}`
-          );
-        }
-      }
-
-      if (config.secret && value !== undefined && value !== WorkflowRunner.REDACTED_PLACEHOLDER) {
-        WorkflowRunner.collectSecretValues(value, secretValues, new WeakSet());
-      }
-    }
-
-    this.secretValues = Array.from(secretValues);
-    this.refreshRedactor();
-  }
-
-  /**
-   * Build expression context for evaluation
-   */
-  private buildContext(item?: unknown, index?: number): ExpressionContext {
-    const stepsContext: Record<
-      string,
-      {
-        output?: unknown;
-        outputs?: Record<string, unknown>;
-        status?: string;
-        error?: string;
-        items?: StepContext[];
-      }
-    > = {};
-
-    for (const [stepId, ctx] of this.state.entries()) {
-      // For foreach results, include items array for iteration access
-      if ('items' in ctx && ctx.items) {
-        stepsContext[stepId] = {
-          output: ctx.output,
-          outputs: ctx.outputs,
-          status: ctx.status,
-          error: ctx.error,
-          items: ctx.items,
-        };
-      } else {
-        stepsContext[stepId] = {
-          output: ctx.output,
-          outputs: ctx.outputs,
-          status: ctx.status,
-          error: ctx.error,
-        };
-      }
-    }
-
-    const baseContext: ExpressionContext = {
-      inputs: this.inputs,
-      secrets: this.loadSecrets(), // Access secrets from options
-      secretValues: this.secretValues,
-      steps: stepsContext,
-      item,
-      index,
-      env: {},
-      envOverrides: this.envOverrides,
-      memory: this.contextMemory,
-      output: item
-        ? undefined
-        : this.state.get(this.workflow.steps.find((s) => !s.foreach)?.id || '')?.output,
-      last_failed_step: this.lastFailedStep,
-    };
-
-    const resolvedEnv: Record<string, string> = {};
-    for (const [key, value] of Object.entries(process.env)) {
-      if (value !== undefined) {
-        resolvedEnv[key] = value;
-      }
-    }
-
-    if (this.workflow.env) {
-      for (const [key, value] of Object.entries(this.workflow.env)) {
-        try {
-          resolvedEnv[key] = ExpressionEvaluator.evaluateString(value, {
-            ...baseContext,
-            env: resolvedEnv,
-          });
-        } catch (error) {
-          this.logger.warn(
-            `Warning: Failed to evaluate workflow env "${key}": ${error instanceof Error ? error.message : String(error)}`
-          );
-        }
-      }
-    }
-
-    baseContext.env = { ...resolvedEnv, ...this.envOverrides };
-    return baseContext;
-  }
-
   /**
    * Evaluate a conditional expression
    */
@@ -1204,7 +956,7 @@ export class WorkflowRunner {
             stepExecId,
             StepStatus.FAILED,
             null,
-            this.redactAtRest ? this.redactor.redact(errorMsg) : errorMsg
+            this.secretManager.redactAtRest ? this.secretManager.redact(errorMsg) : errorMsg
           );
           return {
             output: null,
@@ -1218,8 +970,8 @@ export class WorkflowRunner {
     }
 
     // Global step caching (memoization)
-    const stepInputs = this.buildStepInputs(step, context);
-    const cacheKey = await this.calculateStepCacheKey(step, stepInputs);
+    const inputs = this.contextBuilder.buildStepInputs(step, context);
+    const cacheKey = await this.calculateStepCacheKey(step, inputs);
     if (cacheKey) {
       const cached = await this.db.getStepCache(cacheKey);
       if (cached) {
@@ -1287,7 +1039,7 @@ export class WorkflowRunner {
           stepExecId,
           StepStatus.SUSPENDED,
           null,
-          this.redactAtRest ? this.redactor.redact(message) : message
+          this.secretManager.redactAtRest ? this.secretManager.redact(message) : message
         );
         return {
           output: null,
@@ -1341,7 +1093,7 @@ export class WorkflowRunner {
         runId: this.runId,
         stepExecutionId: stepExecId,
         artifactRoot: this.options.artifactRoot,
-        redactForStorage: this.redactForStorage.bind(this),
+        redactForStorage: this.secretManager.redactForStorage.bind(this.secretManager),
         getAdapter: this.options.getAdapter,
         executeStep: this.options.executeStep || executeStep,
         executeLlmStep: this.options.executeLlmStep,
@@ -1360,7 +1112,7 @@ export class WorkflowRunner {
               'summary' in result.output
               ? (result.output as { summary?: unknown }).summary
               : result.output;
-          this.validateSchema(
+          this.validator.validateSchema(
             'output',
             stepToExecute.outputSchema,
             outputForValidation,
@@ -1412,7 +1164,7 @@ export class WorkflowRunner {
               runId: this.runId,
               stepExecutionId: stepExecId,
               artifactRoot: this.options.artifactRoot,
-              redactForStorage: this.redactForStorage.bind(this),
+              redactForStorage: this.secretManager.redactForStorage.bind(this.secretManager),
               executeStep: this.options.executeStep || executeStep,
               executeLlmStep: this.options.executeLlmStep,
               emitEvent: this.emitEvent.bind(this),
@@ -1425,7 +1177,7 @@ export class WorkflowRunner {
 
             // Validate the repaired output
             try {
-              this.validateSchema(
+              this.validator.validateSchema(
                 'output',
                 stepToExecute.outputSchema,
                 repairResult.output,
@@ -1479,8 +1231,8 @@ export class WorkflowRunner {
 
     try {
       if (stepToExecute.inputSchema) {
-        const inputsForValidation = this.buildStepInputs(stepToExecute, context);
-        this.validateSchema(
+        const inputsForValidation = this.contextBuilder.buildStepInputs(stepToExecute, context);
+        this.validator.validateSchema(
           'input',
           stepToExecute.inputSchema,
           inputsForValidation,
@@ -1508,10 +1260,10 @@ export class WorkflowRunner {
         await this.db.incrementRetry(stepExecId);
       });
 
-      const persistedOutput = this.redactForStorage(result.output);
+      const persistedOutput = this.secretManager.redactForStorage(result.output);
       const persistedError = result.error
-        ? this.redactAtRest
-          ? this.redactor.redact(result.error)
+        ? this.secretManager.redactAtRest
+          ? this.secretManager.redact(result.error)
           : result.error
         : result.error;
 
@@ -1537,8 +1289,8 @@ export class WorkflowRunner {
           stepExecId,
           StepStatus.SUSPENDED,
           persistedOutput,
-          this.redactAtRest
-            ? this.redactor.redact('Waiting for interaction')
+          this.secretManager.redactAtRest
+            ? this.secretManager.redact('Waiting for interaction')
             : 'Waiting for interaction',
           result.usage
         );
@@ -1568,7 +1320,7 @@ export class WorkflowRunner {
           stepExecId,
           StepStatus.WAITING,
           persistedOutput,
-          this.redactAtRest ? this.redactor.redact(waitError) : waitError,
+          this.secretManager.redactAtRest ? this.secretManager.redact(waitError) : waitError,
           result.usage
         );
         result.error = waitError;
@@ -1667,6 +1419,9 @@ export class WorkflowRunner {
 
       return finalResult;
     } catch (error) {
+      if (error instanceof WorkflowSuspendedError || error instanceof WorkflowWaitingError) {
+        throw error;
+      }
       // Reflexion (Self-Correction) logic
       if (step.reflexion) {
         const { limit = 3, hint } = step.reflexion;
@@ -1783,7 +1538,7 @@ export class WorkflowRunner {
       const failureResult = error instanceof StepExecutionError ? error.result : null;
       const errorMsg =
         failureResult?.error || (error instanceof Error ? error.message : String(error));
-      const redactedErrorMsg = this.redactor.redact(errorMsg);
+      const redactedErrorMsg = this.secretManager.redact(errorMsg);
       const failureOutput = failureResult?.output ?? null;
       const failureOutputs =
         typeof failureOutput === 'object' && failureOutput !== null && !Array.isArray(failureOutput)
@@ -1797,8 +1552,8 @@ export class WorkflowRunner {
         await this.db.completeStep(
           stepExecId,
           StepStatus.SUCCESS,
-          this.redactForStorage(failureOutput),
-          this.redactAtRest ? redactedErrorMsg : errorMsg
+          this.secretManager.redactForStorage(failureOutput),
+          this.secretManager.redactAtRest ? redactedErrorMsg : errorMsg
         );
         if (dedupEnabled && idempotencyClaimed) {
           await this.recordIdempotencyResult(
@@ -1822,8 +1577,8 @@ export class WorkflowRunner {
       await this.db.completeStep(
         stepExecId,
         StepStatus.FAILED,
-        this.redactForStorage(failureOutput),
-        this.redactAtRest ? redactedErrorMsg : errorMsg
+        this.secretManager.redactForStorage(failureOutput),
+        this.secretManager.redactAtRest ? redactedErrorMsg : errorMsg
       );
       if (dedupEnabled && idempotencyClaimed) {
         await this.recordIdempotencyResult(
@@ -1902,7 +1657,7 @@ Do not change the 'id' or 'type' or 'auto_heal' fields.
       debug: this.options.debug,
       runId: this.runId,
       artifactRoot: this.options.artifactRoot,
-      redactForStorage: this.redactForStorage.bind(this),
+      redactForStorage: this.secretManager.redactForStorage.bind(this.secretManager),
       allowInsecure: this.options.allowInsecure,
       executeStep: this.options.executeStep || executeStep,
       emitEvent: this.emitEvent.bind(this),
@@ -2205,7 +1960,7 @@ Revise the output to address the feedback. Return only the corrected output.`;
         abortSignal,
         runId: this.runId,
         artifactRoot: this.options.artifactRoot,
-        redactForStorage: this.redactForStorage.bind(this),
+        redactForStorage: this.secretManager.redactForStorage.bind(this.secretManager),
         getAdapter: this.options.getAdapter,
         executeStep: this.options.executeStep || executeStep,
         emitEvent: this.emitEvent.bind(this),
@@ -2220,7 +1975,7 @@ Revise the output to address the feedback. Return only the corrected output.`;
         });
       }
 
-      this.validateSchema('output', QUALITY_GATE_SCHEMA, reviewResult.output, reviewStep.id);
+      this.validator.validateSchema('output', QUALITY_GATE_SCHEMA, reviewResult.output, reviewStep.id);
 
       const review = reviewResult.output as QualityGateReview;
       if (review.approved) {
@@ -2261,7 +2016,7 @@ Revise the output to address the feedback. Return only the corrected output.`;
         abortSignal,
         runId: this.runId,
         artifactRoot: this.options.artifactRoot,
-        redactForStorage: this.redactForStorage.bind(this),
+        redactForStorage: this.secretManager.redactForStorage.bind(this.secretManager),
         getAdapter: this.options.getAdapter,
         executeStep: this.options.executeStep || executeStep,
         emitEvent: this.emitEvent.bind(this),
@@ -2273,7 +2028,7 @@ Revise the output to address the feedback. Return only the corrected output.`;
       }
 
       if (step.outputSchema) {
-        this.validateSchema('output', step.outputSchema, refinedResult.output, step.id);
+        this.validator.validateSchema('output', step.outputSchema, refinedResult.output, step.id);
       }
 
       currentResult = refinedResult;
@@ -2284,7 +2039,7 @@ Revise the output to address the feedback. Return only the corrected output.`;
    * Execute a step (handles foreach if present)
    */
   private async executeStepWithForeach(step: Step): Promise<void> {
-    const baseContext = this.buildContext();
+    const baseContext = this.contextBuilder.buildContext(this.secretManager.getSecrets());
 
     if (this.shouldSkipStep(step, baseContext)) {
       this.logger.log(`  ⊘ Skipping step ${step.id} (condition not met)`);
@@ -2305,7 +2060,6 @@ Revise the output to address the feedback. Return only the corrected output.`;
     }
 
     if (step.foreach) {
-      const { ForeachExecutor } = await import('./foreach-executor.ts');
       const executor = new ForeachExecutor(
         this.db,
         this.logger,
@@ -2430,12 +2184,13 @@ Revise the output to address the feedback. Return only the corrected output.`;
    * Redact secrets from a value
    */
   public redact<T>(value: T): T {
-    return this.redactor.redactValue(value) as T;
+    return this.secretManager.redactValue(value) as T;
   }
 
   private emitEvent(event: WorkflowEvent): void {
     try {
-      const redacted = this.redactor.redactValue(event) as WorkflowEvent;
+      const redactor = this.secretManager.getRedactor();
+      const redacted = redactor.redactValue(event) as WorkflowEvent;
       if (redacted.type === 'llm.thought') {
         void this.db
           .storeThoughtEvent(
@@ -2534,14 +2289,17 @@ Revise the output to address the feedback. Return only the corrected output.`;
       '   Workflows can execute arbitrary shell commands and access your environment.\n'
     );
 
-    this.redactAtRest = ConfigLoader.load().storage?.redact_secrets_at_rest ?? true;
+    this.secretManager.redactAtRest = ConfigLoader.load().storage?.redact_secrets_at_rest ?? true;
 
     // Apply defaults and validate inputs
-    this.applyDefaultsAndValidate();
+    const validated = this.validator.applyDefaultsAndValidate();
+    if (validated.secretValues.length > 0) {
+      this.secretManager.setSecretValues(validated.secretValues);
+    }
 
     // Create run record (only for new runs, not for resume)
     if (!isResume) {
-      await this.db.createRun(this.runId, this.workflow.name, this.redactForStorage(this.inputs));
+      await this.db.createRun(this.runId, this.workflow.name, this.secretManager.redactForStorage(this.inputs));
     }
     await this.db.updateRunStatus(this.runId, 'running');
     this.emitEvent({
@@ -2549,7 +2307,7 @@ Revise the output to address the feedback. Return only the corrected output.`;
       timestamp: new Date().toISOString(),
       runId: this.runId,
       workflow: this.workflow.name,
-      inputs: this.redact(this.inputs),
+      inputs: this.secretManager.redactValue(this.inputs),
     });
 
     try {
@@ -2560,7 +2318,7 @@ Revise the output to address the feedback. Return only the corrected output.`;
         this.logger.log('All steps already completed. Nothing to resume.\n');
         // Evaluate outputs from completed state
         const outputs = this.evaluateOutputs();
-        await this.db.updateRunStatus(this.runId, 'success', this.redactForStorage(outputs));
+        await this.db.updateRunStatus(this.runId, 'success', this.secretManager.redactForStorage(outputs));
         this.logger.log('✨ Workflow already completed!\n');
         completionEvent = {
           type: 'workflow.complete',
@@ -2568,7 +2326,7 @@ Revise the output to address the feedback. Return only the corrected output.`;
           runId: this.runId,
           workflow: this.workflow.name,
           status: WorkflowStatus.SUCCESS,
-          outputs: this.redact(outputs),
+          outputs: this.secretManager.redactValue(outputs),
         };
         return outputs;
       }
@@ -2588,7 +2346,7 @@ Revise the output to address the feedback. Return only the corrected output.`;
       // Evaluate global concurrency limit
       let globalConcurrencyLimit = pendingCount || 10;
       if (this.workflow.concurrency !== undefined) {
-        const baseContext = this.buildContext();
+        const baseContext = this.contextBuilder.buildContext(this.secretManager.getSecrets());
         if (typeof this.workflow.concurrency === 'string') {
           globalConcurrencyLimit = Number(
             ExpressionEvaluator.evaluate(this.workflow.concurrency, baseContext)
@@ -2712,7 +2470,7 @@ Revise the output to address the feedback. Return only the corrected output.`;
       const outputs = this.evaluateOutputs();
 
       // Mark run as complete
-      await this.db.updateRunStatus(this.runId, 'success', this.redactForStorage(outputs));
+      await this.db.updateRunStatus(this.runId, 'success', this.secretManager.redactForStorage(outputs));
 
       this.logger.log('✨ Workflow completed successfully!\n');
 
@@ -2722,7 +2480,7 @@ Revise the output to address the feedback. Return only the corrected output.`;
         runId: this.runId,
         workflow: this.workflow.name,
         status: WorkflowStatus.SUCCESS,
-        outputs: this.redact(outputs),
+        outputs: this.secretManager.redactValue(outputs),
       };
 
       return outputs;
@@ -2773,7 +2531,7 @@ Revise the output to address the feedback. Return only the corrected output.`;
         this.runId,
         'failed',
         undefined,
-        this.redactAtRest ? this.redactor.redact(errorMsg) : errorMsg
+        this.secretManager.redactAtRest ? this.secretManager.redact(errorMsg) : errorMsg
       );
       completionEvent = {
         type: 'workflow.complete',
@@ -3004,7 +2762,7 @@ Revise the output to address the feedback. Return only the corrected output.`;
    * Evaluate workflow outputs
    */
   private evaluateOutputs(): Record<string, unknown> {
-    const context = this.buildContext();
+    const context = this.contextBuilder.buildContext(this.secretManager.getSecrets());
     const outputs: Record<string, unknown> = {};
 
     if (this.workflow.outputs) {
@@ -3023,7 +2781,7 @@ Revise the output to address the feedback. Return only the corrected output.`;
     // Validate outputs against schema if provided
     if (this.workflow.outputSchema) {
       try {
-        this.validateSchema('output', this.workflow.outputSchema, outputs, 'workflow');
+        this.validator.validateSchema('output', this.workflow.outputSchema, outputs, 'workflow');
       } catch (error) {
         throw new Error(
           `Workflow output validation failed: ${error instanceof Error ? error.message : String(error)}`

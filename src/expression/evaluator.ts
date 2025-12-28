@@ -1,7 +1,7 @@
 import jsepArrow from '@jsep-plugin/arrow';
 import jsepObject from '@jsep-plugin/object';
 import jsep from 'jsep';
-import { escapeShellArg } from '../runner/shell-executor.ts';
+import { escapeShellArg } from '../runner/executors/shell-executor.ts';
 
 // Register plugins
 jsep.plugins.register(jsepArrow);
@@ -285,7 +285,11 @@ export class ExpressionEvaluator {
    * Objects and arrays are stringified to JSON.
    * null and undefined return an empty string.
    */
-  static evaluateString(template: string, context: ExpressionContext): string {
+  static evaluateString(template: unknown, context: ExpressionContext): string {
+    if (typeof template !== 'string') {
+      if (template === null || template === undefined) return '';
+      return String(template);
+    }
     const result = ExpressionEvaluator.evaluate(template, context);
 
     if (result === null || result === undefined) {

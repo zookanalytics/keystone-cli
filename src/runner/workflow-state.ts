@@ -4,7 +4,7 @@ import type { StepStatusType } from '../types/status.ts';
 import type { Logger } from '../utils/logger.ts';
 import { WorkflowStatus, StepStatus } from '../types/status.ts';
 import { WorkflowParser } from '../parser/workflow-parser.ts';
-import { ForeachExecutor } from './foreach-executor.ts';
+import { ForeachExecutor } from './executors/foreach-executor.ts';
 import type { Workflow } from '../parser/schema.ts';
 import { ExpressionEvaluator } from '../expression/evaluator.ts';
 

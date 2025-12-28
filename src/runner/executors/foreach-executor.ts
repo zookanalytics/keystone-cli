@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import type { WorkflowDb } from '../db/workflow-db.ts';
-import { type ExpressionContext, ExpressionEvaluator } from '../expression/evaluator.ts';
-import type { Step } from '../parser/schema.ts';
-import { StepStatus, type StepStatusType, WorkflowStatus } from '../types/status.ts';
-import type { Logger } from '../utils/logger.ts';
-import type { ResourcePoolManager } from './resource-pool.ts';
-import { WorkflowSuspendedError } from './step-executor.ts';
-import { type ForeachStepContext, type StepContext } from './workflow-state.ts';
+import type { WorkflowDb } from '../../db/workflow-db.ts';
+import { type ExpressionContext, ExpressionEvaluator } from '../../expression/evaluator.ts';
+import type { Step } from '../../parser/schema.ts';
+import { StepStatus, type StepStatusType, WorkflowStatus } from '../../types/status.ts';
+import type { Logger } from '../../utils/logger.ts';
+import type { ResourcePoolManager } from '../resource-pool.ts';
+import { WorkflowSuspendedError } from './types.ts';
+import { type ForeachStepContext, type StepContext } from '../workflow-state.ts';
 
 export type ExecuteStepCallback = (
   step: Step,
@@ -281,6 +281,16 @@ export class ForeachExecutor {
                 release?.();
               }
             } catch (error) {
+              if (error instanceof WorkflowSuspendedError) {
+                itemResults[i] = {
+                  status: StepStatus.SUSPENDED,
+                  output: null,
+                  outputs: {},
+                  error: error.message,
+                };
+                aborted = true;
+                return;
+              }
               aborted = true;
               throw error;
             }
@@ -293,8 +303,10 @@ export class ForeachExecutor {
       const firstError = workerResults.find((r) => r.status === 'rejected') as
         | PromiseRejectedResult
         | undefined;
-      if (firstError) {
-        throw firstError.reason;
+      const error = firstError?.reason;
+
+      if (error && !(error instanceof WorkflowSuspendedError)) {
+        throw error;
       }
 
       // Aggregate results

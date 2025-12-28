@@ -61,14 +61,30 @@ export class WorkflowScheduler {
 
     private isStepReady(step: Step): boolean {
         if (step.type === 'join') {
-            // Fix: Join depends on ALL dependencies being finished (success or handled failure)
-            // before checking the specific join condition (any/all/number).
-            // This prevents premature execution and missing inputs.
-            const needs = step.needs ?? [];
-            const allFinished = needs.every((dep: string) => this.completedSteps.has(dep));
-            if (!allFinished) return false;
+            const joinStep = step as JoinStep;
+            const needs = joinStep.needs ?? [];
+            if (needs.length === 0) return true;
 
-            return this.isJoinConditionMet(step as JoinStep);
+            // Check if condition is already met by completed steps
+            if (this.isJoinConditionMet(joinStep)) {
+                return true;
+            }
+
+            // If condition NOT met yet, check if it's even POSSIBLE to meet it
+            // (i.e. still waiting on deps that haven't failed/skipped)
+            const finished = needs.filter((dep) => this.completedSteps.has(dep));
+            const allFinished = finished.length === needs.length;
+
+            // For 'all', we must wait for everyone anyway
+            if (joinStep.condition === 'all' || !joinStep.condition) {
+                return allFinished;
+            }
+
+            // For 'any' or quorum, if not met and all finished, it will never be met (failed)
+            // but the executor will handle that error. 
+            // The scheduler should only schedule if met OR if it's the only way to progress
+            // (but here we want to enable early execution).
+            return false;
         }
         const needs = step.needs ?? [];
         return needs.every((dep: string) => this.completedSteps.has(dep));
@@ -81,16 +97,18 @@ export class WorkflowScheduler {
 
         const successCount = needs.filter((dep) => this.completedSteps.has(dep)).length;
 
-        if (step.condition === 'all') {
-            return successCount === total;
-        }
-        if (step.condition === 'any') {
-            return successCount > 0;
-        }
-        if (typeof step.condition === 'number') {
-            return successCount >= step.condition;
+        if (step.condition === 'any' && successCount > 0) {
+            return true;
         }
 
-        return successCount === total;
+        if (typeof step.condition === 'number' && successCount >= step.condition) {
+            return true;
+        }
+
+        if (step.condition === 'all' || !step.condition) {
+            return successCount === total;
+        }
+
+        return false;
     }
 }

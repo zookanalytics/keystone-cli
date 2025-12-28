@@ -477,14 +477,14 @@ describe('WorkflowRunner', () => {
         {
           id: 's1',
           type: 'sleep',
-          duration: 50,
+          duration: '50ms',
           needs: [],
           idempotencyKey: '"same-key"',
         },
         {
           id: 's2',
           type: 'sleep',
-          duration: 50,
+          duration: '50ms',
           needs: [],
           idempotencyKey: '"same-key"',
         },
@@ -580,8 +580,8 @@ describe('WorkflowRunner', () => {
     const parallelWorkflow: Workflow = {
       name: 'parallel-wf',
       steps: [
-        { id: 's1', type: 'sleep', duration: 100, needs: [] },
-        { id: 's2', type: 'sleep', duration: 100, needs: [] },
+        { id: 's1', type: 'sleep', duration: '100ms', needs: [] },
+        { id: 's2', type: 'sleep', duration: '100ms', needs: [] },
       ],
       outputs: {
         done: 'true',
@@ -1095,8 +1095,8 @@ describe('WorkflowRunner', () => {
     const workflow: Workflow = {
       name: 'cancel-wf',
       steps: [
-        { id: 's1', type: 'sleep', duration: 10, needs: [] },
-        { id: 's2', type: 'sleep', duration: 10, needs: ['s1'] },
+        { id: 's1', type: 'sleep', duration: '10ms', needs: [] },
+        { id: 's2', type: 'sleep', duration: '10ms', needs: ['s1'] },
       ],
     } as unknown as Workflow;
 

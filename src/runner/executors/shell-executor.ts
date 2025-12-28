@@ -25,11 +25,76 @@
  * See SECURITY.md for more details.
  */
 
-import type { ExpressionContext } from '../expression/evaluator.ts';
-import { ExpressionEvaluator } from '../expression/evaluator.ts';
-import type { ShellStep } from '../parser/schema.ts';
-import { LIMITS } from '../utils/constants.ts';
-import { ConsoleLogger, type Logger } from '../utils/logger.ts';
+import type { ExpressionContext } from '../../expression/evaluator.ts';
+import { ExpressionEvaluator } from '../../expression/evaluator.ts';
+import type { ShellStep } from '../../parser/schema.ts';
+import { LIMITS } from '../../utils/constants.ts';
+import { ConsoleLogger, type Logger } from '../../utils/logger.ts';
+import type { StepResult } from './types.ts';
+
+/**
+ * Execute a shell step
+ */
+export async function executeShellStep(
+  step: ShellStep,
+  context: ExpressionContext,
+  logger: Logger,
+  dryRun?: boolean,
+  abortSignal?: AbortSignal
+): Promise<StepResult> {
+  if (abortSignal?.aborted) {
+    throw new Error('Step canceled');
+  }
+  if (dryRun) {
+    const command = ExpressionEvaluator.evaluateString(step.run, context);
+    logger.log(`[DRY RUN] Would execute shell command: ${command}`);
+    return {
+      output: { stdout: '[DRY RUN] Success', stderr: '', exitCode: 0 },
+      status: 'success',
+    };
+  }
+  // Check for risk and prompt if TTY
+  const command = ExpressionEvaluator.evaluateString(step.run, context);
+  const isRisky = detectShellInjectionRisk(command);
+
+  if (isRisky && !step.allowInsecure) {
+    throw new Error(
+      `Security Error: Command contains shell metacharacters that may indicate injection risk.\n   Command: ${command.substring(0, 100)}${command.length > 100 ? '...' : ''}\n   To execute this command, set 'allowInsecure: true' on the step definition.`
+    );
+  }
+
+  const result = await executeShell(step, context, logger, abortSignal);
+
+  if (result.stdout) {
+    logger.log(result.stdout.trim());
+  }
+
+  if (result.exitCode !== 0) {
+    return {
+      output: {
+        stdout: result.stdout,
+        stderr: result.stderr,
+        exitCode: result.exitCode,
+        stdoutTruncated: result.stdoutTruncated,
+        stderrTruncated: result.stderrTruncated,
+      },
+      status: 'failed',
+      error: `Shell command exited with code ${result.exitCode}: ${result.stderr}`,
+    };
+  }
+
+  return {
+    output: {
+      stdout: result.stdout,
+      stderr: result.stderr,
+      exitCode: result.exitCode,
+      stdoutTruncated: result.stdoutTruncated,
+      stderrTruncated: result.stderrTruncated,
+    },
+    status: 'success',
+  };
+}
+
 
 /**
  * Escape a shell argument for safe use in shell commands

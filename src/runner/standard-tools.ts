@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import { Lang, parse } from '@ast-grep/napi';
 import type { AgentTool } from '../parser/schema';
 import { LIMITS, TIMEOUTS } from '../utils/constants';
-import { detectShellInjectionRisk } from './shell-executor';
+import { detectShellInjectionRisk } from './executors/shell-executor';
 
 export const STANDARD_TOOLS: AgentTool[] = [
   {

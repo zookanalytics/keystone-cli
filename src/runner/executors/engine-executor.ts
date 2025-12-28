@@ -3,13 +3,14 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
 import * as path from 'node:path';
 import yaml from 'js-yaml';
-import type { ExpressionContext } from '../expression/evaluator';
-import { ExpressionEvaluator } from '../expression/evaluator';
-import type { EngineStep } from '../parser/schema';
-import { ConfigLoader } from '../utils/config-loader';
-import { LIMITS } from '../utils/constants';
-import { extractJson } from '../utils/json-parser';
-import { ConsoleLogger, type Logger } from '../utils/logger';
+import type { ExpressionContext } from '../../expression/evaluator';
+import { ExpressionEvaluator } from '../../expression/evaluator';
+import type { EngineStep } from '../../parser/schema';
+import { ConfigLoader } from '../../utils/config-loader';
+import { LIMITS } from '../../utils/constants';
+import { extractJson } from '../../utils/json-parser';
+import { ConsoleLogger, type Logger } from '../../utils/logger';
+import type { StepResult } from './types.ts';
 
 /**
  * Simple LRU cache with maximum size to prevent memory leaks.
@@ -17,7 +18,7 @@ import { ConsoleLogger, type Logger } from '../utils/logger';
 class LRUCache<K, V> {
   private cache = new Map<K, V>();
 
-  constructor(private maxSize: number) {}
+  constructor(private maxSize: number) { }
 
   get(key: K): V | undefined {
     const value = this.cache.get(key);
@@ -487,3 +488,51 @@ export async function executeEngineStep(
     summaryError,
   };
 }
+
+export async function executeEngineStepWrapper(
+  step: EngineStep,
+  context: ExpressionContext,
+  logger: Logger,
+  options: {
+    abortSignal?: AbortSignal;
+    runId?: string;
+    stepExecutionId?: string;
+    artifactRoot?: string;
+    redactForStorage?: (value: unknown) => unknown;
+  }
+): Promise<StepResult> {
+  const engineResult = await executeEngineStep(step, context, {
+    logger,
+    abortSignal: options.abortSignal,
+    runId: options.runId,
+    stepExecutionId: options.stepExecutionId,
+    artifactRoot: options.artifactRoot,
+    redactForStorage: options.redactForStorage,
+  });
+
+  const output = {
+    summary: engineResult.summary ?? null,
+    stdout: engineResult.stdout,
+    stderr: engineResult.stderr,
+    exitCode: engineResult.exitCode,
+    stdoutTruncated: engineResult.stdoutTruncated,
+    stderrTruncated: engineResult.stderrTruncated,
+    summarySource: engineResult.summarySource,
+    summaryFormat: engineResult.summaryFormat,
+    artifactPath: engineResult.artifactPath,
+  };
+
+  if (engineResult.exitCode !== 0) {
+    return {
+      output,
+      status: 'failed',
+      error: `Engine exited with code ${engineResult.exitCode}${engineResult.summaryError ? `: ${engineResult.summaryError}` : ''}`,
+    };
+  }
+
+  return {
+    output,
+    status: 'success',
+  };
+}
+
