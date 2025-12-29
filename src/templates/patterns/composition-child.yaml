@@ -11,4 +11,4 @@ outputs:
 steps:
   - id: echo_step
     type: shell
-    run: echo "Processing ${{ inputs.name }}"
+    run: echo "Processing ${{ escape(inputs.name) }}"

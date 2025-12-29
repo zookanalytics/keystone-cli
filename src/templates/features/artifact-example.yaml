@@ -7,27 +7,27 @@ steps:
     type: shell
     allowInsecure: true
     run: |
-      mkdir -p ./output
-      echo "Hello from step 1" > ./output/file1.txt
-      echo "Hello from step 1 (second file)" > ./output/file2.txt
+      mkdir -p src/templates/features/test-output
+      echo "Hello from step 1" > src/templates/features/test-output/file1.txt
+      echo "Hello from step 1 (second file)" > src/templates/features/test-output/file2.txt
 
   - id: upload_files
     type: artifact
     op: upload
     name: build-outputs
-    paths: ["./output/*.txt"]
+    paths: ["test-output/*.txt"]
     needs: [create_content]
 
   - id: clean_local
     type: shell
     needs: [upload_files]
-    run: rm -rf ./output
+    run: rm -rf src/templates/features/test-output
 
   - id: download_files
     type: artifact
     op: download
     name: build-outputs
-    path: ./downloaded
+    path: src/templates/features/downloaded
     needs: [clean_local]
 
   - id: verify
@@ -35,5 +35,6 @@ steps:
     needs: [download_files]
     allowInsecure: true
     run: |
-      ls -R ./downloaded
-      cat ./downloaded/file1.txt
+      ls -R src/templates/features/downloaded
+      cat src/templates/features/downloaded/file1.txt
+      rm -rf src/templates/features/downloaded
