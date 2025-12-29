@@ -3,7 +3,7 @@ import { ExpressionEvaluator } from '../../expression/evaluator';
 import { parseAgent, resolveAgentPath } from '../../parser/agent-parser';
 import type { Agent, LlmStep, Step } from '../../parser/schema';
 import { ConfigLoader } from '../../utils/config-loader';
-import { LIMITS } from '../../utils/constants';
+import { LIMITS, LLM } from '../../utils/constants';
 import { ContextInjector } from '../../utils/context-injector';
 import { extractJson } from '../../utils/json-parser';
 import { ConsoleLogger, type Logger } from '../../utils/logger.ts';
@@ -15,22 +15,18 @@ import type { MCPManager, MCPServerConfig } from '../mcp-manager';
 import { STANDARD_TOOLS, validateStandardToolSecurity } from '../standard-tools';
 import type { StepResult } from './types.ts';
 
-const SUMMARY_MESSAGE_NAME = 'context_summary';
-const SUMMARY_MESSAGE_MAX_BYTES = 4000;
-const SUMMARY_INPUT_MESSAGE_MAX_BYTES = 2000;
-const SUMMARY_INPUT_TOTAL_MAX_BYTES = 64 * 1024;
-const SUMMARY_MODEL_BY_PROVIDER_TYPE: Record<string, string> = {
-  openai: 'gpt-4o-mini',
-  'openai-chatgpt': 'gpt-4o-mini',
-  copilot: 'gpt-4o-mini',
-  anthropic: 'claude-3-haiku-20240307',
-  'anthropic-claude': 'claude-3-haiku-20240307',
-  'google-gemini': 'gemini-1.5-flash',
-};
-const THINKING_OPEN_TAG = '<thinking>';
-const THINKING_CLOSE_TAG = '</thinking>';
-const TRANSFER_TOOL_NAME = 'transfer_to_agent';
-const CONTEXT_UPDATE_KEY = '__keystone_context';
+// Re-export for local use with shorter names
+const {
+  SUMMARY_MESSAGE_NAME,
+  SUMMARY_MESSAGE_MAX_BYTES,
+  SUMMARY_INPUT_MESSAGE_MAX_BYTES,
+  SUMMARY_INPUT_TOTAL_MAX_BYTES,
+  SUMMARY_MODEL_BY_PROVIDER_TYPE,
+  THINKING_OPEN_TAG,
+  THINKING_CLOSE_TAG,
+  TRANSFER_TOOL_NAME,
+  CONTEXT_UPDATE_KEY,
+} = LLM;
 
 type LlmEventContext = {
   runId?: string;
@@ -789,9 +785,9 @@ export async function executeLlmStep(
               typeof val === 'string'
                 ? val
                 : (() => {
-                    const json = safeJsonStringify(val);
-                    return typeof json === 'string' ? json : String(val);
-                  })();
+                  const json = safeJsonStringify(val);
+                  return typeof json === 'string' ? json : String(val);
+                })();
             context.env[key] = stringValue;
             context.envOverrides[key] = stringValue;
           }

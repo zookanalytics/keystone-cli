@@ -21,8 +21,6 @@
  *
  * The escape() function wraps arguments in single quotes and escapes any
  * single quotes within, preventing command injection attacks.
- *
- * See SECURITY.md for more details.
  */
 
 import type { ExpressionContext } from '../../expression/evaluator.ts';
