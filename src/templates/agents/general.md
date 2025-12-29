@@ -1,4 +1,5 @@
 ---
+$schema: https://raw.githubusercontent.com/mhingston/keystone-cli/main/schemas/agent.json
 name: general
 description: "A general-purpose assistant for various tasks"
 model: gpt-4o

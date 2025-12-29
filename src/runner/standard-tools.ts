@@ -496,6 +496,23 @@ export const STANDARD_TOOLS: AgentTool[] = [
       allowInsecure: true,
     },
   },
+  {
+    name: 'fetch',
+    description: 'Fetch content from a URL (GET request)',
+    parameters: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'URL to fetch' },
+      },
+      required: ['url'],
+    },
+    execution: {
+      id: 'std_fetch',
+      type: 'request',
+      url: '${{ args.url }}',
+      method: 'GET',
+    },
+  },
 ];
 
 /**

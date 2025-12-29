@@ -28,6 +28,7 @@ import { ExpressionEvaluator } from '../../expression/evaluator.ts';
 import type { ShellStep } from '../../parser/schema.ts';
 import { LIMITS } from '../../utils/constants.ts';
 import { ConsoleLogger, type Logger } from '../../utils/logger.ts';
+import { PathResolver } from '../../utils/paths.ts';
 import type { StepResult } from './types.ts';
 
 /**
@@ -149,6 +150,31 @@ export interface ShellResult {
   exitCode: number;
   stdoutTruncated?: boolean;
   stderrTruncated?: boolean;
+}
+
+/**
+ * Filter sensitive environment variables from host environment
+ * to prevent accidental leak of local secrets to shell processes.
+ */
+function filterSensitiveEnv(env: Record<string, string | undefined>): Record<string, string> {
+  const sensitivePatterns = [
+    /^.*_(API_KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL|PRIVATE_KEY)(_.*)?$/i,
+    /^(API_KEY|AUTH_TOKEN|SECRET_KEY|PRIVATE_KEY|PASSWORD|CREDENTIALS?)(_.*)?$/i,
+    /^(AWS_SECRET|GITHUB_TOKEN|NPM_TOKEN|SSH_KEY|PGP_PASSPHRASE)(_.*)?$/i,
+    /^.*_AUTH_(TOKEN|KEY|SECRET)(_.*)?$/i,
+    /^(COOKIE|SESSION_ID|SESSION_SECRET)(_.*)?$/i,
+  ];
+
+  const filtered: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (value === undefined) continue;
+
+    const isSensitive = sensitivePatterns.some(pattern => pattern.test(key));
+    if (!isSensitive) {
+      filtered[key] = value;
+    }
+  }
+  return filtered;
 }
 
 /**
@@ -332,7 +358,12 @@ export async function executeShell(
 
   // Set working directory if specified
   const cwd = step.dir ? ExpressionEvaluator.evaluateString(step.dir, context) : undefined;
-  const mergedEnv = Object.keys(env).length > 0 ? { ...Bun.env, ...env } : Bun.env;
+  if (cwd) {
+    PathResolver.assertWithinCwd(cwd, step.allowOutsideCwd, 'Directory');
+  }
+
+  const hostEnv = filterSensitiveEnv(Bun.env);
+  const mergedEnv = Object.keys(env).length > 0 ? { ...hostEnv, ...env } : hostEnv;
 
   // Shell metacharacters that require a real shell (including newlines, globs, env vars)
   // Added: * ? [ ] = (for env vars)

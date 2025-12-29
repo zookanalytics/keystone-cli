@@ -927,6 +927,7 @@ Keystone comes with a set of **Standard Tools** that can be enabled for any agen
 - `run_command`: Run a shell command (arguments: `command`, `dir`). Risky commands require `allowInsecure: true` on the LLM step.
 - `ast_grep_search`: Search for structural code patterns using AST matching (arguments: `pattern`, `language`, `paths`). More precise than regex for code refactoring.
 - `ast_grep_replace`: Replace structural code patterns using AST-aware rewriting (arguments: `pattern`, `rewrite`, `language`, `paths`). Safer than regex for code refactoring.
+- `fetch`: Fetch content from a URL via GET request (arguments: `url`).
 
 #### Standard Tool Examples
 

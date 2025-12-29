@@ -1,3 +1,4 @@
+$schema: https://raw.githubusercontent.com/mhingston/keystone-cli/main/schemas/workflow.json
 name: loop-parallel
 description: "Test the foreach race condition fix and .every() support"
 

@@ -150,6 +150,7 @@ const ShellStepSchema = BaseStepSchema.extend({
   args: z.array(z.string()).optional(),
   dir: z.string().optional(),
   env: z.record(z.string()).optional(),
+  allowOutsideCwd: z.boolean().optional(),
   allowInsecure: z.boolean().optional(),
 });
 
@@ -320,6 +321,7 @@ const SleepStepSchema = BaseStepSchema.extend({
 const ScriptStepSchema = BaseStepSchema.extend({
   type: z.literal('script'),
   run: z.string(),
+  allowOutsideCwd: z.boolean().optional(),
   allowInsecure: z.boolean().optional().default(false),
 });
 

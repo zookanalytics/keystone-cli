@@ -1,3 +1,4 @@
+$schema: https://raw.githubusercontent.com/mhingston/keystone-cli/main/schemas/workflow.json
 name: full-feature-demo
 description: "A comprehensive workflow demonstrating multiple feature types"
 

@@ -1,3 +1,4 @@
+$schema: https://raw.githubusercontent.com/mhingston/keystone-cli/main/schemas/workflow.json
 name: retry-policy
 description: "Test retry and timeout features"
 

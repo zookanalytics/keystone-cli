@@ -1,3 +1,4 @@
+$schema: https://raw.githubusercontent.com/mhingston/keystone-cli/main/schemas/workflow.json
 name: data-pipeline
 description: "A workflow that demonstrates file operations and cleanup with 'finally'"
 

@@ -1,4 +1,5 @@
 ---
+$schema: https://raw.githubusercontent.com/mhingston/keystone-cli/main/schemas/agent.json
 name: handoff-router
 description: "Routes work to specialists when needed."
 model: gpt-4o

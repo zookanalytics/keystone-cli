@@ -1,3 +1,4 @@
+$schema: https://raw.githubusercontent.com/mhingston/keystone-cli/main/schemas/workflow.json
 name: fan-out-fan-in-example
 description: Demonstrates dynamic join conditions and nested compensations
 

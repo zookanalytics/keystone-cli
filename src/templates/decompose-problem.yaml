@@ -1,3 +1,4 @@
+$schema: https://raw.githubusercontent.com/mhingston/keystone-cli/main/schemas/workflow.json
 name: decompose-problem
 description: "Decompose a complex problem into research, implementation, and review sub-workflows"
 

@@ -1,5 +1,6 @@
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, resolve, isAbsolute } from 'node:path';
+import { realpathSync } from 'node:fs';
 
 export class PathResolver {
   /**
@@ -66,5 +67,58 @@ export class PathResolver {
       return join(PathResolver.getUserDataDir(), 'state.db');
     }
     return join(PathResolver.getProjectDir(), 'state.db');
+  }
+
+  /**
+   * Normalize a path by trimming whitespace and defaulting to '.' if empty
+   */
+  static normalizePath(rawPath: string): string {
+    const trimmed = rawPath.trim();
+    return trimmed.length > 0 ? trimmed : '.';
+  }
+
+  /**
+   * Assert that a path is within the current working directory
+   * @throws Error if path is outside CWD and allowOutsideCwd is false
+   */
+  static assertWithinCwd(
+    targetPath: string,
+    allowOutsideCwd?: boolean,
+    label = 'Path'
+  ): void {
+    if (allowOutsideCwd) return;
+    const cwd = process.cwd();
+    const realCwd = realpathSync(cwd);
+    const normalizedPath = PathResolver.normalizePath(targetPath);
+    const resolvedPath = resolve(cwd, normalizedPath);
+
+    // Iterate up the directory tree until we find an existing directory
+    let current = resolvedPath;
+    while (true) {
+      try {
+        const real = realpathSync(current);
+        if (!real.startsWith(realCwd)) {
+          throw new Error(
+            `${label} "${targetPath}" is outside the project directory. ` +
+            `Use 'allowOutsideCwd: true' if this is intended.`
+          );
+        }
+        break; // Successfully validated against an existing ancestor
+      } catch (e: any) {
+        if (e.message?.includes('outside the project directory')) {
+          throw e;
+        }
+
+        const parent = join(current, '..');
+        if (parent === current) {
+          // We reached the root and still couldn't validate
+          throw new Error(
+            `${label} "${targetPath}" is outside the project directory. ` +
+            `Use 'allowOutsideCwd: true' if this is intended.`
+          );
+        }
+        current = parent;
+      }
+    }
   }
 }

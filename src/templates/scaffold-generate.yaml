@@ -1,3 +1,4 @@
+$schema: https://raw.githubusercontent.com/mhingston/keystone-cli/main/schemas/workflow.json
 name: scaffold-generate
 description: "Generate file contents from a file plan"
 

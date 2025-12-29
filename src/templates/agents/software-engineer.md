@@ -1,4 +1,5 @@
 ---
+$schema: https://raw.githubusercontent.com/mhingston/keystone-cli/main/schemas/agent.json
 name: software-engineer
 description: "Expert at writing and debugging code"
 model: gpt-4o

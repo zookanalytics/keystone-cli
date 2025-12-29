@@ -1,4 +1,5 @@
 ---
+$schema: https://raw.githubusercontent.com/mhingston/keystone-cli/main/schemas/agent.json
 name: test-agent
 model: gpt-4
 tools:

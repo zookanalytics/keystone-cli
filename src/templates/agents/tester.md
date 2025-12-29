@@ -1,4 +1,5 @@
 ---
+$schema: https://raw.githubusercontent.com/mhingston/keystone-cli/main/schemas/agent.json
 name: tester
 description: "Expert at writing and running tests for Keystone CLI"
 model: gpt-4o

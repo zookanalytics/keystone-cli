@@ -1,3 +1,4 @@
+$schema: https://raw.githubusercontent.com/mhingston/keystone-cli/main/schemas/workflow.json
 name: dev
 description: "Self-bootstrapping DevMode workflow for Keystone CLI"
 

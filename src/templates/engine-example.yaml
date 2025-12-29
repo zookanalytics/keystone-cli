@@ -1,3 +1,4 @@
+$schema: https://raw.githubusercontent.com/mhingston/keystone-cli/main/schemas/workflow.json
 name: engine-example
 description: "Run an allowlisted external CLI and capture a structured summary"
 

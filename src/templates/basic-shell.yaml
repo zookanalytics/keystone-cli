@@ -1,3 +1,4 @@
+$schema: https://raw.githubusercontent.com/mhingston/keystone-cli/main/schemas/workflow.json
 name: basic-shell
 description: "A simple example workflow demonstrating basic features"
 

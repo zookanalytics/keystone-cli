@@ -1,3 +1,4 @@
+$schema: https://raw.githubusercontent.com/mhingston/keystone-cli/main/schemas/workflow.json
 name: agent-handoff
 description: "Demo of agent handoffs and tool-driven context updates."
 

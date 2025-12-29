@@ -1,3 +1,4 @@
+$schema: https://raw.githubusercontent.com/mhingston/keystone-cli/main/schemas/workflow.json
 name: stop-watch
 description: "A simple stopwatch workflow"
 steps:

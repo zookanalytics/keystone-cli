@@ -1,3 +1,4 @@
+$schema: https://raw.githubusercontent.com/mhingston/keystone-cli/main/schemas/workflow.json
 name: composition-parent
 description: "A parent workflow that calls a child workflow"
 

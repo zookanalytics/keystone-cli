@@ -1,3 +1,4 @@
+$schema: https://raw.githubusercontent.com/mhingston/keystone-cli/main/schemas/workflow.json
 name: human-interaction
 description: A workflow that prompts the user for input and uses it in another step.
 

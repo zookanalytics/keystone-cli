@@ -1,4 +1,5 @@
 ---
+$schema: https://raw.githubusercontent.com/mhingston/keystone-cli/main/schemas/agent.json
 name: handoff-specialist
 description: "Specialist agent for complex topics."
 model: gpt-4o

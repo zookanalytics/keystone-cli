@@ -1,4 +1,5 @@
 ---
+$schema: https://raw.githubusercontent.com/mhingston/keystone-cli/main/schemas/agent.json
 name: explore
 description: Agent for exploring and understanding codebases
 model: claude-sonnet-4.5
