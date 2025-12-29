@@ -198,9 +198,6 @@ const DANGEROUS_PATTERN_SOURCES: string[] = [
 // Combined pattern source for both native and RE2
 const COMBINED_PATTERN_SOURCE = DANGEROUS_PATTERN_SOURCES.join('|');
 
-// Maximum command length to check for injection (prevents DoS on very long commands)
-const MAX_COMMAND_CHECK_LENGTH = 10_000;
-
 // RE2 instance (lazy-loaded)
 let re2Pattern: { test: (s: string) => boolean } | null = null;
 let re2LoadAttempted = false;
@@ -294,9 +291,9 @@ async function readStreamWithLimit(
 
 export function detectShellInjectionRisk(command: string): boolean {
   // Limit command length to prevent DoS via very long strings
-  if (command.length > MAX_COMMAND_CHECK_LENGTH) {
+  if (command.length > LIMITS.MAX_SHELL_COMMAND_CHECK_LENGTH) {
     // Truncate for pattern matching, but this is conservative - long commands are suspicious
-    command = command.substring(0, MAX_COMMAND_CHECK_LENGTH);
+    command = command.substring(0, LIMITS.MAX_SHELL_COMMAND_CHECK_LENGTH);
   }
 
   // Use RE2 if available for ReDoS safety, otherwise fall back to native regex

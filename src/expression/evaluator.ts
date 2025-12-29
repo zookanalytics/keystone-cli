@@ -328,7 +328,7 @@ export class ExpressionEvaluator {
           ) {
             throw new TypeError(
               'Security: Cannot evaluate object with custom toString() method. ' +
-                'Pass a string template instead.'
+              'Pass a string template instead.'
             );
           }
         }
@@ -363,14 +363,19 @@ export class ExpressionEvaluator {
         ast = jsep(expr);
         // Only cache if maxCacheSize > 0 (caching enabled)
         if (ExpressionEvaluator.maxCacheSize > 0) {
-          // Manage cache size - evict BEFORE adding to maintain size limit
-          // This ensures cache never exceeds maxCacheSize
-          while (ExpressionEvaluator.jsepCache.size >= ExpressionEvaluator.maxCacheSize) {
-            const firstKey = ExpressionEvaluator.jsepCache.keys().next().value;
-            if (firstKey !== undefined) {
-              ExpressionEvaluator.jsepCache.delete(firstKey);
-            } else {
-              break; // Safety: avoid infinite loop if cache is corrupted
+          // Manage cache size - evict to 90% capacity when full to reduce eviction overhead
+          // This ensures cache never exceeds maxCacheSize while minimizing churn
+          if (ExpressionEvaluator.jsepCache.size >= ExpressionEvaluator.maxCacheSize) {
+            const targetSize = Math.floor(ExpressionEvaluator.maxCacheSize * 0.9);
+            const keysToDelete: string[] = [];
+            for (const key of ExpressionEvaluator.jsepCache.keys()) {
+              if (ExpressionEvaluator.jsepCache.size - keysToDelete.length <= targetSize) {
+                break;
+              }
+              keysToDelete.push(key);
+            }
+            for (const key of keysToDelete) {
+              ExpressionEvaluator.jsepCache.delete(key);
             }
           }
           ExpressionEvaluator.jsepCache.set(expr, ast);

@@ -1,28 +1,8 @@
 #!/usr/bin/env bun
-import { existsSync, mkdirSync, readFileSync, watch, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, watch, writeFileSync } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { Command } from 'commander';
-
-import agentHandoffWorkflow from './templates/agent-handoff.yaml' with { type: 'text' };
-import exploreAgent from './templates/agents/explore.md' with { type: 'text' };
-import generalAgent from './templates/agents/general.md' with { type: 'text' };
-import handoffRouterAgent from './templates/agents/handoff-router.md' with { type: 'text' };
-import handoffSpecialistAgent from './templates/agents/handoff-specialist.md' with { type: 'text' };
-import architectAgent from './templates/agents/keystone-architect.md' with { type: 'text' };
-import softwareEngineerAgent from './templates/agents/software-engineer.md' with { type: 'text' };
-import summarizerAgent from './templates/agents/summarizer.md' with { type: 'text' };
-import testerAgent from './templates/agents/tester.md' with { type: 'text' };
-import decomposeImplementWorkflow from './templates/decompose-implement.yaml' with { type: 'text' };
-import decomposeWorkflow from './templates/decompose-problem.yaml' with { type: 'text' };
-import decomposeResearchWorkflow from './templates/decompose-research.yaml' with { type: 'text' };
-import decomposeReviewWorkflow from './templates/decompose-review.yaml' with { type: 'text' };
-import devWorkflow from './templates/dev.yaml' with { type: 'text' };
-import reviewLoopWorkflow from './templates/review-loop.yaml' with { type: 'text' };
-// Default templates
-import scaffoldWorkflow from './templates/scaffold-feature.yaml' with { type: 'text' };
-import scaffoldGenerateWorkflow from './templates/scaffold-generate.yaml' with { type: 'text' };
-import scaffoldPlanWorkflow from './templates/scaffold-plan.yaml' with { type: 'text' };
 
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { MemoryDb } from './db/memory-db.ts';
@@ -37,174 +17,45 @@ import { ConfigLoader } from './utils/config-loader.ts';
 import { LIMITS } from './utils/constants.ts';
 import { container } from './utils/container.ts';
 import { ConsoleLogger, SilentLogger } from './utils/logger.ts';
-import { generateMermaidGraph, renderWorkflowAsAscii } from './utils/mermaid.ts';
 import { WorkflowRegistry } from './utils/workflow-registry.ts';
+
+// Import modular commands
+import {
+  parseInputs,
+  registerDocCommand,
+  registerEventCommand,
+  registerGraphCommand,
+  registerInitCommand,
+  registerRunCommand,
+  registerSchemaCommand,
+  registerValidateCommand,
+} from './commands/index.ts';
+
+import pkg from '../package.json' with { type: 'json' };
 
 // Bootstrap DI container with default services
 container.factory('logger', () => new ConsoleLogger());
 container.factory('db', () => new WorkflowDb());
 container.factory('memoryDb', () => new MemoryDb());
 
-import pkg from '../package.json' with { type: 'json' };
-
 const program = new Command();
 const defaultRetentionDays = ConfigLoader.load().storage?.retention_days ?? 30;
-const MAX_INPUT_STRING_LENGTH = LIMITS.MAX_INPUT_STRING_LENGTH;
 
 program
   .name('keystone')
   .description('A local-first, declarative, agentic workflow orchestrator')
   .version(pkg.version);
 
-/**
- * Parse CLI input pairs (key=value) into a record.
- * Attempts JSON parsing for complex types, falls back to string for simple values.
- *
- * @param pairs Array of key=value strings
- * @returns Record of parsed inputs
- */
-const parseInputs = (pairs?: string[]): Record<string, unknown> => {
-  const inputs: Record<string, unknown> = Object.create(null);
-  const blockedKeys = new Set(['__proto__', 'prototype', 'constructor']);
-  if (!pairs) return inputs;
-  for (const pair of pairs) {
-    const index = pair.indexOf('=');
-    if (index <= 0) {
-      console.warn(`⚠️  Invalid input format: "${pair}" (expected key=value)`);
-      continue;
-    }
-    const key = pair.slice(0, index);
-    const value = pair.slice(index + 1);
+// Register modular commands
+registerInitCommand(program);
+registerValidateCommand(program);
+registerGraphCommand(program);
+registerDocCommand(program);
+registerSchemaCommand(program);
+registerEventCommand(program);
+registerRunCommand(program);
 
-    // Validate key format (no special characters that could cause issues)
-    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) {
-      console.warn(`⚠️  Invalid input key: "${key}" (use alphanumeric and underscores only)`);
-      continue;
-    }
-    if (blockedKeys.has(key)) {
-      console.warn(`⚠️  Invalid input key: "${key}" (reserved keyword)`);
-      continue;
-    }
-
-    try {
-      // Attempt JSON parse for objects, arrays, booleans, numbers
-      const parsed = JSON.parse(value);
-      if (typeof parsed === 'string') {
-        if (parsed.length > MAX_INPUT_STRING_LENGTH) {
-          console.warn(
-            `⚠️  Input "${key}" exceeds maximum length of ${MAX_INPUT_STRING_LENGTH} characters`
-          );
-          continue;
-        }
-        if (parsed.includes('\u0000')) {
-          console.warn(`⚠️  Input "${key}" contains invalid null characters`);
-          continue;
-        }
-      }
-      inputs[key] = parsed;
-    } catch {
-      if (value.length > MAX_INPUT_STRING_LENGTH) {
-        console.warn(
-          `⚠️  Input "${key}" exceeds maximum length of ${MAX_INPUT_STRING_LENGTH} characters`
-        );
-        continue;
-      }
-      if (value.includes('\u0000')) {
-        console.warn(`⚠️  Input "${key}" contains invalid null characters`);
-        continue;
-      }
-      // Check if it looks like malformed JSON (starts with { or [)
-      if ((value.startsWith('{') || value.startsWith('[')) && value.length > 1) {
-        console.warn(
-          `⚠️  Input "${key}" looks like JSON but failed to parse. Check for syntax errors.`
-        );
-        console.warn(`   Value: ${value.slice(0, 50)}${value.length > 50 ? '...' : ''}`);
-      }
-      // Fall back to string value
-      inputs[key] = value;
-    }
-  }
-  return inputs;
-};
-
-const validateWorkflows = async (
-  pathArg: string | undefined,
-  options: { strict?: boolean; explain?: boolean }
-): Promise<void> => {
-  const path = pathArg || '.keystone/workflows/';
-
-  try {
-    let files: string[] = [];
-    if (existsSync(path) && (path.endsWith('.yaml') || path.endsWith('.yml'))) {
-      files = [path];
-    } else if (existsSync(path)) {
-      const glob = new Bun.Glob('**/*.{yaml,yml}');
-      for await (const file of glob.scan(path)) {
-        files.push(join(path, file));
-      }
-    } else {
-      try {
-        const resolved = WorkflowRegistry.resolvePath(path);
-        files = [resolved];
-      } catch {
-        console.error(`✗ Path not found: ${path}`);
-        process.exit(1);
-      }
-    }
-
-    if (files.length === 0) {
-      console.log('⊘ No workflow files found to validate.');
-      return;
-    }
-
-    console.log(`🔍 Validating ${files.length} workflow(s)...\n`);
-
-    let successCount = 0;
-    let failCount = 0;
-
-    for (const file of files) {
-      try {
-        const workflow = WorkflowParser.loadWorkflow(file);
-        if (options.strict) {
-          const source = readFileSync(file, 'utf-8');
-          WorkflowParser.validateStrict(workflow, source);
-        }
-        console.log(`  ✓ ${file.padEnd(40)} ${workflow.name} (${workflow.steps.length} steps)`);
-        successCount++;
-      } catch (error) {
-        if (options.explain) {
-          const { formatYamlError, renderError } = await import('./utils/error-renderer.ts');
-          try {
-            const source = readFileSync(file, 'utf-8');
-            const formatted = formatYamlError(error as Error, source, file);
-            console.error(renderError({ message: formatted.summary, source, filePath: file }));
-          } catch {
-            console.error(
-              renderError({
-                message: error instanceof Error ? error.message : String(error),
-                filePath: file,
-              })
-            );
-          }
-        } else {
-          console.error(
-            `  ✗ ${file.padEnd(40)} ${error instanceof Error ? error.message : String(error)}`
-          );
-        }
-        failCount++;
-      }
-    }
-
-    console.log(`\nSummary: ${successCount} passed, ${failCount} failed.`);
-    if (failCount > 0) {
-      process.exit(1);
-    }
-  } catch (error) {
-    console.error('✗ Validation failed:', error instanceof Error ? error.message : error);
-    process.exit(1);
-  }
-};
-
+// Helper function used by remaining commands (rerun)
 const collectDownstreamSteps = (workflow: Workflow, fromStepId: string): string[] => {
   const stepIds = new Set(workflow.steps.map((step) => step.id));
   if (!stepIds.has(fromStepId)) {
@@ -237,412 +88,6 @@ const collectDownstreamSteps = (workflow: Workflow, fromStepId: string): string[
   return Array.from(result);
 };
 
-// ===== keystone init =====
-program
-  .command('init')
-  .description('Initialize a new Keystone project')
-  .action(() => {
-    console.log('🏛️  Initializing Keystone project...\n');
-
-    // Create directories
-    const dirs = ['.keystone', '.keystone/workflows', '.keystone/workflows/agents'];
-    for (const dir of dirs) {
-      if (!existsSync(dir)) {
-        mkdirSync(dir, { recursive: true });
-        console.log(`✓ Created ${dir}/`);
-      } else {
-        console.log(`⊘ ${dir}/ already exists`);
-      }
-    }
-
-    // Create default config
-    const configPath = '.keystone/config.yaml';
-    if (!existsSync(configPath)) {
-      const defaultConfig = `# Keystone Configuration
-default_provider: openai
-
-providers:
-  openai:
-    type: openai
-    base_url: https://api.openai.com/v1
-    api_key_env: OPENAI_API_KEY
-    default_model: gpt-4o
-  anthropic:
-    type: anthropic
-    base_url: https://api.anthropic.com/v1
-    api_key_env: ANTHROPIC_API_KEY
-    default_model: claude-3-5-sonnet-20240620
-  groq:
-    type: openai
-    base_url: https://api.groq.com/openai/v1
-    api_key_env: GROQ_API_KEY
-    default_model: llama-3.3-70b-versatile
-
-model_mappings:
-  "gpt-*": openai
-  "claude-*": anthropic
-  "o1-*": openai
-  "llama-*": groq
-
-# mcp_servers:
-#   filesystem:
-#     command: npx
-#     args: ["-y", "@modelcontextprotocol/server-filesystem", "."]
-
-# engines:
-#   allowlist:
-#     codex:
-#       command: codex
-#       version: "1.2.3"
-#       versionArgs: ["--version"]
-
-storage:
-  retention_days: 30
-
-expression:
-  strict: false
-`;
-      writeFileSync(configPath, defaultConfig);
-      console.log(`✓ Created ${configPath}`);
-    } else {
-      console.log(`⊘ ${configPath} already exists`);
-    }
-
-    // Create example .env
-    const envPath = '.env';
-    if (!existsSync(envPath)) {
-      const envTemplate = `# API Keys and Secrets
-# OPENAI_API_KEY=sk-...
-# ANTHROPIC_API_KEY=sk-ant-...
-`;
-      writeFileSync(envPath, envTemplate);
-      console.log(`✓ Created ${envPath}`);
-    } else {
-      console.log(`⊘ ${envPath} already exists`);
-    }
-
-    // Seed default workflows and agents
-    const seeds = [
-      {
-        path: '.keystone/workflows/scaffold-feature.yaml',
-        content: scaffoldWorkflow,
-      },
-      {
-        path: '.keystone/workflows/scaffold-plan.yaml',
-        content: scaffoldPlanWorkflow,
-      },
-      {
-        path: '.keystone/workflows/scaffold-generate.yaml',
-        content: scaffoldGenerateWorkflow,
-      },
-      {
-        path: '.keystone/workflows/decompose-problem.yaml',
-        content: decomposeWorkflow,
-      },
-      {
-        path: '.keystone/workflows/decompose-research.yaml',
-        content: decomposeResearchWorkflow,
-      },
-      {
-        path: '.keystone/workflows/decompose-implement.yaml',
-        content: decomposeImplementWorkflow,
-      },
-      {
-        path: '.keystone/workflows/decompose-review.yaml',
-        content: decomposeReviewWorkflow,
-      },
-      {
-        path: '.keystone/workflows/review-loop.yaml',
-        content: reviewLoopWorkflow,
-      },
-      {
-        path: '.keystone/workflows/agent-handoff.yaml',
-        content: agentHandoffWorkflow,
-      },
-      {
-        path: '.keystone/workflows/agents/keystone-architect.md',
-        content: architectAgent,
-      },
-      {
-        path: '.keystone/workflows/agents/general.md',
-        content: generalAgent,
-      },
-      {
-        path: '.keystone/workflows/agents/explore.md',
-        content: exploreAgent,
-      },
-      {
-        path: '.keystone/workflows/agents/software-engineer.md',
-        content: softwareEngineerAgent,
-      },
-      {
-        path: '.keystone/workflows/agents/summarizer.md',
-        content: summarizerAgent,
-      },
-      {
-        path: '.keystone/workflows/agents/handoff-router.md',
-        content: handoffRouterAgent,
-      },
-      {
-        path: '.keystone/workflows/agents/handoff-specialist.md',
-        content: handoffSpecialistAgent,
-      },
-      {
-        path: '.keystone/workflows/dev.yaml',
-        content: devWorkflow,
-      },
-      {
-        path: '.keystone/workflows/agents/tester.md',
-        content: testerAgent,
-      },
-    ];
-
-    for (const seed of seeds) {
-      if (!existsSync(seed.path)) {
-        writeFileSync(seed.path, seed.content);
-        console.log(`✓ Seeded ${seed.path}`);
-      } else {
-        console.log(`⊘ ${seed.path} already exists`);
-      }
-    }
-
-    console.log('\n✨ Keystone project initialized!');
-    console.log('\nNext steps:');
-    console.log('  1. Add your API keys to .env');
-    console.log('  2. Create a workflow in .keystone/workflows/');
-    console.log('  3. Run: keystone run <workflow>');
-  });
-
-// ===== keystone validate =====
-program
-  .command('validate')
-  .description('Validate workflow files')
-  .argument('[path]', 'Workflow file or directory to validate (default: .keystone/workflows/)')
-  .option('--strict', 'Enable strict validation (schemas, enums)')
-  .option('--explain', 'Show detailed error context with suggestions')
-  .action(async (pathArg, options) => {
-    await validateWorkflows(pathArg, options);
-  });
-
-// ===== keystone lint =====
-program
-  .command('lint')
-  .description('Lint workflow files (alias of validate)')
-  .argument('[path]', 'Workflow file or directory to lint (default: .keystone/workflows/)')
-  .option('--strict', 'Enable strict validation (schemas, enums)')
-  .option('--explain', 'Show detailed error context with suggestions')
-  .action(async (pathArg, options) => {
-    await validateWorkflows(pathArg, options);
-  });
-
-// ===== keystone graph =====
-program
-  .command('graph')
-  .description('Visualize a workflow as a Mermaid.js graph')
-  .argument('<workflow>', 'Workflow name or path to workflow file')
-  .action(async (workflowPath) => {
-    try {
-      const resolvedPath = WorkflowRegistry.resolvePath(workflowPath);
-      const workflow = WorkflowParser.loadWorkflow(resolvedPath);
-      const ascii = renderWorkflowAsAscii(workflow);
-      if (ascii) {
-        console.log(`\n${ascii}\n`);
-      } else {
-        const mermaid = generateMermaidGraph(workflow);
-        console.log('\n```mermaid');
-        console.log(mermaid);
-        console.log('```\n');
-      }
-    } catch (error) {
-      console.error('✗ Failed to generate graph:', error instanceof Error ? error.message : error);
-      process.exit(1);
-    }
-  });
-
-// ===== keystone doc =====
-program
-  .command('doc')
-  .description('Generate Markdown documentation for a workflow')
-  .argument('<workflow>', 'Workflow name or path to workflow file')
-  .action(async (workflowPath) => {
-    try {
-      const resolvedPath = WorkflowRegistry.resolvePath(workflowPath);
-      const workflow = WorkflowParser.loadWorkflow(resolvedPath);
-      const { generateWorkflowDocs } = await import('./utils/doc-generator.ts');
-
-      const markdown = generateWorkflowDocs(workflow);
-      console.log(markdown);
-    } catch (error) {
-      console.error(
-        '✗ Failed to generate documentation:',
-        error instanceof Error ? error.message : error
-      );
-      process.exit(1);
-    }
-  });
-
-// ===== keystone schema =====
-program
-  .command('schema')
-  .description('Generate JSON Schema for workflow and agent definitions')
-  .option('-o, --output <dir>', 'Output directory for schema files', '.keystone/schemas')
-  .action(async (options) => {
-    const { zodToJsonSchema } = await import('zod-to-json-schema');
-    const { WorkflowSchema, AgentSchema } = await import('./parser/schema.ts');
-
-    const workflowJsonSchema = zodToJsonSchema(WorkflowSchema as any, 'KeystoneWorkflow');
-    (workflowJsonSchema as any).$schema = 'http://json-schema.org/draft-07/schema#';
-
-    const agentJsonSchema = zodToJsonSchema(AgentSchema as any, 'KeystoneAgent');
-    (agentJsonSchema as any).$schema = 'http://json-schema.org/draft-07/schema#';
-
-    const outputDir = resolve(options.output);
-    if (!existsSync(outputDir)) {
-      mkdirSync(outputDir, { recursive: true });
-    }
-
-    writeFileSync(
-      join(outputDir, 'workflow.schema.json'),
-      JSON.stringify(workflowJsonSchema, null, 2)
-    );
-    writeFileSync(join(outputDir, 'agent.schema.json'), JSON.stringify(agentJsonSchema, null, 2));
-
-    console.log(`✓ Generated JSON schemas in ${outputDir}/`);
-    console.log(`  - workflow.schema.json`);
-    console.log(`  - agent.schema.json`);
-  });
-
-// ===== keystone event =====
-program
-  .command('event')
-  .description('Trigger an event to resume waiting workflows')
-  .argument('<name>', 'Event name')
-  .argument('[data]', 'Event data (JSON)')
-  .action(async (name, dataStr) => {
-    const db = container.resolve('db') as WorkflowDb;
-    let data = null;
-    if (dataStr) {
-      try {
-        data = JSON.parse(dataStr);
-      } catch {
-        data = dataStr;
-      }
-    }
-    await db.storeEvent(name, data);
-    console.log(`✓ Event '${name}' triggered.`);
-  });
-
-// ===== keystone run =====
-program
-  .command('run')
-  .description('Execute a workflow')
-  .argument('<workflow>', 'Workflow name or path to workflow file')
-  .option('-i, --input <key=value...>', 'Input values')
-  .option('--dry-run', 'Show what would be executed without actually running it')
-  .option('--debug', 'Enable interactive debug mode on failure')
-  .option('--events', 'Emit structured JSON events (NDJSON) to stdout')
-  .option('--no-dedup', 'Disable idempotency/deduplication')
-  .option('--resume', 'Resume the last run of this workflow if it failed or was paused')
-  .option('--explain', 'Show detailed error context with suggestions on failure')
-  .action(async (workflowPathArg, options) => {
-    const inputs = parseInputs(options.input);
-    let resolvedPath: string | undefined;
-
-    // Load and validate workflow
-    try {
-      resolvedPath = WorkflowRegistry.resolvePath(workflowPathArg);
-      const workflow = WorkflowParser.loadWorkflow(resolvedPath);
-
-      // Import WorkflowRunner dynamically
-      const { WorkflowRunner } = await import('./runner/workflow-runner.ts');
-      const eventsEnabled = !!options.events;
-      const logger = eventsEnabled ? new SilentLogger() : new ConsoleLogger();
-      const onEvent = eventsEnabled
-        ? (event: unknown) => {
-            process.stdout.write(`${JSON.stringify(event)}\n`);
-          }
-        : undefined;
-
-      let resumeRunId: string | undefined;
-
-      // Handle auto-resume
-      if (options.resume) {
-        const db = new WorkflowDb();
-        const lastRun = await db.getLastRun(workflow.name);
-        db.close();
-
-        if (lastRun) {
-          if (
-            lastRun.status === 'failed' ||
-            lastRun.status === 'paused' ||
-            lastRun.status === 'running'
-          ) {
-            resumeRunId = lastRun.id;
-            if (!eventsEnabled) {
-              console.log(
-                `Resuming run ${lastRun.id} (status: ${lastRun.status}) from ${new Date(
-                  lastRun.started_at
-                ).toLocaleString()}`
-              );
-            }
-          } else {
-            if (!eventsEnabled) {
-              console.log(`Last run ${lastRun.id} completed successfully. Starting new run.`);
-            }
-          }
-        } else {
-          if (!eventsEnabled) {
-            console.log('No previous run found. Starting new run.');
-          }
-        }
-      }
-
-      const runner = new WorkflowRunner(workflow, {
-        inputs: resumeRunId ? undefined : inputs,
-        resumeInputs: resumeRunId ? inputs : undefined,
-        workflowDir: dirname(resolvedPath),
-        dryRun: !!options.dryRun,
-        debug: !!options.debug,
-        dedup: options.dedup,
-        resumeRunId,
-        logger,
-        onEvent,
-      });
-
-      const outputs = await runner.run();
-
-      if (!eventsEnabled && Object.keys(outputs).length > 0) {
-        console.log('Outputs:');
-        console.log(JSON.stringify(runner.redact(outputs), null, 2));
-      }
-      process.exit(0);
-    } catch (error) {
-      if (options.explain) {
-        const message = error instanceof Error ? error.message : String(error);
-        try {
-          const { readFileSync } = await import('node:fs');
-          const { renderError } = await import('./utils/error-renderer.ts');
-          const source = resolvedPath ? readFileSync(resolvedPath, 'utf-8') : undefined;
-          console.error(
-            renderError({
-              message,
-              source,
-              filePath: resolvedPath,
-            })
-          );
-        } catch {
-          console.error('✗ Failed to execute workflow:', message);
-        }
-      } else {
-        console.error(
-          '✗ Failed to execute workflow:',
-          error instanceof Error ? error.message : error
-        );
-      }
-      process.exit(1);
-    }
-  });
-
 // ===== keystone watch =====
 program
   .command('watch')
@@ -658,8 +103,8 @@ program
     const logger = eventsEnabled ? new SilentLogger() : new ConsoleLogger();
     const onEvent = eventsEnabled
       ? (event: unknown) => {
-          process.stdout.write(`${JSON.stringify(event)}\n`);
-        }
+        process.stdout.write(`${JSON.stringify(event)}\n`);
+      }
       : undefined;
     const debounceMs = Number.parseInt(options.debounce, 10);
 
@@ -795,8 +240,7 @@ program
             if (!warned.has(warningKey)) {
               warned.add(warningKey);
               logWarn(
-                `⚠️  Failed to load sub-workflow for step "${step.id}": ${
-                  error instanceof Error ? error.message : String(error)
+                `⚠️  Failed to load sub-workflow for step "${step.id}": ${error instanceof Error ? error.message : String(error)
                 }`
               );
             }
@@ -1052,8 +496,8 @@ program
       const logger = eventsEnabled ? new SilentLogger() : new ConsoleLogger();
       const onEvent = eventsEnabled
         ? (event: unknown) => {
-            process.stdout.write(`${JSON.stringify(event)}\n`);
-          }
+          process.stdout.write(`${JSON.stringify(event)}\n`);
+        }
         : undefined;
       const inputs = parseInputs(options.input);
       const runner = new WorkflowRunner(workflow, {
@@ -1138,8 +582,8 @@ program
       const logger = eventsEnabled ? new SilentLogger() : new ConsoleLogger();
       const onEvent = eventsEnabled
         ? (event: unknown) => {
-            process.stdout.write(`${JSON.stringify(event)}\n`);
-          }
+          process.stdout.write(`${JSON.stringify(event)}\n`);
+        }
         : undefined;
       const runner = new WorkflowRunner(workflow, {
         resumeRunId: runId,
