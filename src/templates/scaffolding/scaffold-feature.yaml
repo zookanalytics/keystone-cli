@@ -48,6 +48,7 @@ steps:
   - id: summary
     type: shell
     needs: [write_files]
+    allowInsecure: true
     run: |
       echo "Scaffolding complete. Files created:"
       echo "${{ steps.generate.outputs && steps.generate.outputs.files ? steps.generate.outputs.files.map(f => f.path).join('\n') : '(dry run: no files generated)' }}"

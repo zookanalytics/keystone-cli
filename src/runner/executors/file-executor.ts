@@ -20,7 +20,7 @@ interface UnifiedDiff {
   hunks: DiffHunk[];
 }
 
-interface SearchReplaceBlock {
+export interface SearchReplaceBlock {
   search: string;
   replace: string;
 }
@@ -191,13 +191,19 @@ export function applySearchReplaceBlocks(content: string, blocks: SearchReplaceB
   let result = content;
 
   for (const block of blocks) {
-    if (!result.includes(block.search)) {
+    const parts = result.split(block.search);
+    if (parts.length === 1) {
       throw new Error(
-        `Search block not found in file. Ensure exact match including whitespace:\n${block.search.substring(0, 100)}...`
+        `Search block not found in file. Ensure exact match including whitespace:\n${block.search.substring(0, 100)}${block.search.length > 100 ? '...' : ''}`
       );
     }
-    // Replace all occurrences using split/join to avoid regex escaping issues
-    result = result.split(block.search).join(block.replace);
+    if (parts.length > 2) {
+      throw new Error(
+        `Search block matched ${parts.length - 1} times. It must be unique to avoid ambiguity.\nSearch block:\n${block.search.substring(0, 100)}${block.search.length > 100 ? '...' : ''}`
+      );
+    }
+    // Safe to replace the single occurrence
+    result = parts.join(block.replace);
   }
 
   return result;

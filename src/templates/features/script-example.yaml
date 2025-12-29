@@ -21,6 +21,7 @@ steps:
   - id: print_result
     type: shell
     needs: [process_data]
+    allowInsecure: true
     run: |
       echo "Sum: ${{ steps.process_data.output.sum }}"
       echo "Average: ${{ steps.process_data.output.avg }}"

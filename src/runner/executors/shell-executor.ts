@@ -82,11 +82,9 @@ export async function executeShellStep(
   }
 
   const command = ExpressionEvaluator.evaluateString(step.run, context);
-  const isRisky = detectShellInjectionRisk(command);
-
-  if (isRisky && !step.allowInsecure) {
+  if (!step.allowInsecure && detectShellInjectionRisk(command)) {
     throw new Error(
-      `Security Error: Evaluated command contains shell metacharacters that may indicate injection risk.\n   Command: ${command.substring(0, 100)}${command.length > 100 ? '...' : ''}\n   To execute this command, use \${{ escape(...) }} for inputs or set 'allowInsecure: true'.`
+      `Security Error: Evaluated command contains shell metacharacters that require 'allowInsecure: true'.\n   Command: ${command.substring(0, 100)}${command.length > 100 ? '...' : ''}\n   Metacharacters detected. Please use 'allowInsecure: true' if this is intended.`
     );
   }
 
@@ -185,100 +183,12 @@ function filterSensitiveEnv(env: Record<string, string | undefined>): Record<str
  * Check if a command contains potentially dangerous shell metacharacters
  * Returns true if the command looks like it might contain unescaped user input
  */
-// Pre-compiled dangerous patterns for performance
-// These patterns are designed to detect likely injection attempts while minimizing false positives
-const DANGEROUS_PATTERN_SOURCES: string[] = [
-  ';\\s*(?:rm|chmod|chown|mkfs|dd)\\b', // Command chaining with destructive commands
-  '\\|\\s*(?:sh|bash|zsh|ksh|dash|csh|python|python[23]?|node|ruby|perl|php|lua)\\b', // Piping to shell/interpreter (download-and-execute pattern)
-  '\\|\\s*(?:sudo|su)\\b', // Piping to privilege escalation
-  '&&\\s*(?:rm|chmod|chown|mkfs|dd)\\b', // AND chaining with destructive commands
-  '\\|\\|\\s*(?:rm|chmod|chown|mkfs|dd)\\b', // OR chaining with destructive commands
-  '`[^`]+`', // Command substitution with backticks
-  '\\$\\([^)]+\\)', // Command substitution with $()
-  '>\\s*/dev/null\\s*2>&1\\s*&', // Backgrounding with hidden output (often malicious)
-  'rm\\s+(-rf?|--recursive)\\s+[/~]', // Dangerous recursive deletion
-  '>\\s*/etc/', // Writing to /etc
-  'curl\\s+.*\\|\\s*(?:sh|bash)', // Download and execute pattern
-  'wget\\s+.*\\|\\s*(?:sh|bash)', // Download and execute pattern
-  // Additional patterns for more comprehensive detection
-  'base64\\s+(-d|--decode)\\s*\\|', // Base64 decode piped to another command
-  '\\beval\\s+["\'\\$]', // eval with variable/string (likely injection)
-  '\\bexec\\s+\\d+[<>]', // exec with file descriptor redirection
-  'python[23]?\\s+-c\\s*["\']', // Python one-liner with quoted code
-  'node\\s+(-e|--eval)\\s*["\']', // Node.js one-liner with quoted code
-  'perl\\s+-e\\s*["\']', // Perl one-liner with quoted code
-  'ruby\\s+-e\\s*["\']', // Ruby one-liner with quoted code
-  '\\bdd\\s+.*\\bof=/', // dd write operation to root paths
-  'chmod\\s+[0-7]{3,4}\\s+/(?!tmp)', // chmod on root paths (except /tmp)
-  'mkfs\\.', // Filesystem formatting commands
-  // Targeted parameter expansion patterns (not all ${} usage)
-  '\\$\\{IFS[}:]', // IFS manipulation (common injection technique)
-  '\\$\\{[^}]*\\$\\([^}]*\\}', // Command substitution inside parameter expansion
-  '\\$\\{[^}]*:-[^}]*\\$\\(', // Default value with command substitution
-  '\\$\\{[^}]*[`][^}]*\\}', // Backtick inside parameter expansion
-  '\\\\x[0-9a-fA-F]{2}', // Hex escaping attempts
-  '\\\\[0-7]{3}', // Octal escaping attempts
-  '<<<\\s*', // Here-strings (can be used for injection)
-  '\\d*<&\\s*\\d*', // File descriptor duplication
-  '\\d*>&-\\s*', // Closing file descriptors
-];
-
-// Combined pattern source for both native and RE2
-const COMBINED_PATTERN_SOURCE = DANGEROUS_PATTERN_SOURCES.join('|');
-
-// RE2 instance (lazy-loaded)
-let re2Pattern: { test: (s: string) => boolean } | null = null;
-let re2LoadAttempted = false;
-let usingRe2 = false;
-
 /**
- * Get the pattern for shell injection detection.
- * Uses RE2 if available for ReDoS safety, falls back to native regex.
+ * Strict validation of shell metacharacters to prevent injection.
+ * Any character here triggers a security error if allowInsecure is false.
+ * Note: We allow single and double quotes, as safe args parsing handles them.
  */
-function getDetectionPattern(): { test: (s: string) => boolean } {
-  if (re2Pattern) return re2Pattern;
-
-  if (!re2LoadAttempted) {
-    re2LoadAttempted = true;
-    try {
-      // Try to dynamically require RE2 (optional dependency)
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const RE2 = require('re2');
-      re2Pattern = new RE2(COMBINED_PATTERN_SOURCE);
-      usingRe2 = true;
-    } catch {
-      // RE2 not available, use native regex
-      re2Pattern = new RegExp(COMBINED_PATTERN_SOURCE);
-      usingRe2 = false;
-    }
-  }
-
-  if (!re2Pattern) {
-    re2Pattern = new RegExp(COMBINED_PATTERN_SOURCE);
-  }
-
-  return re2Pattern;
-}
-
-/**
- * Check if the module is using RE2 (for testing purposes)
- */
-export function isUsingRe2(): boolean {
-  getDetectionPattern(); // Ensure pattern is loaded
-  return usingRe2;
-}
-
-/**
- * Reset the RE2 loading state (for testing purposes)
- */
-export function resetRe2State(): void {
-  re2Pattern = null;
-  re2LoadAttempted = false;
-  usingRe2 = false;
-}
-
-// Note: Pattern is lazily created in getDetectionPattern() to avoid
-// creating a duplicate RegExp when RE2 is successfully loaded
+const SHELL_METACHARS = /[|&;<>\`$!\n*?=]/;
 
 const TRUNCATED_SUFFIX = '... [truncated output]';
 
@@ -290,7 +200,7 @@ async function readStreamWithLimit(
   if (maxBytes <= 0) {
     try {
       await stream.cancel?.();
-    } catch {}
+    } catch { }
     return { text: TRUNCATED_SUFFIX, truncated: true };
   }
 
@@ -312,7 +222,7 @@ async function readStreamWithLimit(
       text += decoder.decode();
       try {
         await reader.cancel();
-      } catch {}
+      } catch { }
       return { text: `${text}${TRUNCATED_SUFFIX}`, truncated: true };
     }
 
@@ -325,16 +235,9 @@ async function readStreamWithLimit(
 }
 
 export function detectShellInjectionRisk(rawCommand: string): boolean {
-  let command = rawCommand;
-  // Limit command length to prevent DoS via very long strings
-  if (command.length > LIMITS.MAX_SHELL_COMMAND_CHECK_LENGTH) {
-    // Truncate for pattern matching, but this is conservative - long commands are suspicious
-    command = command.substring(0, LIMITS.MAX_SHELL_COMMAND_CHECK_LENGTH);
-  }
-
-  // Use RE2 if available for ReDoS safety, otherwise fall back to native regex
-  const pattern = getDetectionPattern();
-  return pattern.test(command);
+  // Legacy function for backward compatibility or future heuristic use
+  // Now simply acts as a proxy for the metacharacter check
+  return SHELL_METACHARS.test(rawCommand);
 }
 
 /**
@@ -353,10 +256,11 @@ export async function executeShell(
   // Evaluate the command string
   const command = commandOverride ?? ExpressionEvaluator.evaluateString(step.run, context);
 
-  // Check for potential shell injection risks
+  // Check for potential shell injection risks (Early Check)
+  // We double check here, though executeShellStep does it too, to catch direct calls
   if (!step.allowInsecure && detectShellInjectionRisk(command)) {
     throw new Error(
-      `Security Error: Command contains shell metacharacters that may indicate injection risk:\n   Command: ${command.substring(0, 100)}${command.length > 100 ? '...' : ''}\n   To execute this command safely, ensure all user inputs are wrapped in \${{ escape(input) }}.\n\n   If you trust this workflow and its inputs, you may need to refactor the step to avoid complex shell chains or use a stricter input validation.\n   Or, if you really trust this command, you can set 'allowInsecure: true' in the step definition.`
+      `Security Error: Command contains shell metacharacters.\nCommand: "${command.substring(0, 100)}..."\nFix: Set 'allowInsecure: true' to enable shell features.`
     );
   }
 
@@ -378,11 +282,7 @@ export async function executeShell(
   const mergedEnv = Object.keys(env).length > 0 ? { ...hostEnv, ...env } : hostEnv;
 
   // Shell metacharacters that require a real shell (including newlines, globs, env vars)
-  // Added: * ? [ ] = (for env vars)
-  // Note: '=' is common in args (--foo=bar), so strict check might be needed,
-  // but to support `VAR=val cmd`, we should detect it.
-  // Actually, standard `sh -c` is safer if we see *any* of these.
-  const hasShellMetas = /[|&;<>`$!\n*?=\[\]]/.test(command);
+  const hasShellMetas = SHELL_METACHARS.test(command);
 
   // Common shell builtins that must run in a shell
   const firstWord = command.trim().split(/\s+/)[0];
@@ -400,6 +300,18 @@ export async function executeShell(
     'true',
     'false',
   ].includes(firstWord);
+
+  // Security Check: Enforce whitelist
+  // If we haven't enabled insecure mode, we MUST be able to use spawn (no shell)
+  if (!step.allowInsecure) {
+    if (hasShellMetas || isBuiltin) {
+      throw new Error(
+        `Security Error: Command execution blocked.\nCommand: "${command.substring(0, 100)}${command.length > 100 ? '...' : ''
+        }"\nReason: Contains shell metacharacters or builtin commands.\n` +
+        `Fix: To use shell features (pipes, redirects, variables, etc.), you must set 'allowInsecure: true' in your step definition.`
+      );
+    }
+  }
 
   const canUseSpawn = !hasShellMetas && !isBuiltin;
 
@@ -480,7 +392,7 @@ export async function executeShell(
       abortHandler = () => {
         try {
           proc.kill();
-        } catch {}
+        } catch { }
       };
       if (abortSignal) {
         abortSignal.addEventListener('abort', abortHandler, { once: true });
@@ -510,7 +422,7 @@ export async function executeShell(
       abortHandler = () => {
         try {
           proc.kill();
-        } catch {}
+        } catch { }
       };
       if (abortSignal) {
         abortSignal.addEventListener('abort', abortHandler, { once: true });
@@ -598,7 +510,7 @@ export async function executeShellArgs(
   const abortHandler = () => {
     try {
       proc.kill();
-    } catch {}
+    } catch { }
   };
 
   if (abortSignal) {

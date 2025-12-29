@@ -14,6 +14,7 @@ inputs:
 steps:
   - id: hello
     type: shell
+    allowInsecure: true
     run: |
       for i in $(seq 1 ${{ inputs.count }}); do
         echo "Hello, ${{ escape(inputs.user_name) }}! (Attempt $i)"

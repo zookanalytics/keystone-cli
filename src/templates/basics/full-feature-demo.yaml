@@ -42,6 +42,7 @@ steps:
   - id: count_files
     type: shell
     needs: [write_file]
+    allowInsecure: true
     run: ls ./tmp/keystone-*.txt | wc -l
     transform: parseInt(stdout.trim())
 

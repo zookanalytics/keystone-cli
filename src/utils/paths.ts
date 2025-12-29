@@ -74,7 +74,10 @@ export class PathResolver {
    */
   static normalizePath(rawPath: string): string {
     const trimmed = rawPath.trim();
-    return trimmed.length > 0 ? trimmed : '.';
+    if (trimmed.length === 0) {
+      throw new Error('Path cannot be empty');
+    }
+    return trimmed;
   }
 
   /**

@@ -6,6 +6,7 @@ steps:
   # Test retry with a command that fails first few times
   - id: flaky_command
     type: shell
+    allowInsecure: true
     run: |
       if [ ! -f /tmp/keystone-retry-test ]; then
         echo "1" > /tmp/keystone-retry-test
@@ -26,6 +27,7 @@ steps:
   # Test timeout (should complete before timeout)
   - id: quick_task
     type: shell
+    allowInsecure: true
     run: sleep 0.1 && echo "Completed"
     timeout: 5000
     needs: [flaky_command]

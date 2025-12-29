@@ -680,6 +680,8 @@ When a step fails, the specified agent is invoked with the error details. The ag
 ```yaml
 - id: list_files
   type: shell
+  # Globbing (*) requires allowInsecure: true
+  allowInsecure: true
   run: ls *.txt
   # Post-process stdout into an array of filenames
   transform: ${{ stdout.trim().split('\n') }}
@@ -705,6 +707,7 @@ Until `strategy.matrix` is wired end-to-end, use explicit `foreach` with an arra
     { node: 22, os: "ubuntu" },
     { node: 22, os: "macos" }
   ] }}
+  allowInsecure: true # Required for '=' in arguments
   run: echo "node=${{ item.node }} os=${{ item.os }}"
 ```
 

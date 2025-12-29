@@ -18,6 +18,7 @@ steps:
 
   - id: parallel_1
     type: shell
+    allowInsecure: true
     run: sleep 2 && echo "Parallel 1 done"
     needs: [prepare]
     compensate:
@@ -27,6 +28,7 @@ steps:
 
   - id: parallel_2
     type: shell
+    allowInsecure: true
     run: |
       echo "Parallel 2 failing intentionally..."
       exit 1
