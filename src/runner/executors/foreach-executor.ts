@@ -16,7 +16,6 @@ export type ExecuteStepCallback = (
 ) => Promise<StepContext>;
 
 export class ForeachExecutor {
-  private static readonly MEMORY_WARNING_THRESHOLD = 1000;
   private hasWarnedMemory = false;
 
   constructor(
@@ -105,7 +104,7 @@ export class ForeachExecutor {
 
     this.logger.log(`  ⤷ Executing step ${step.id} for ${items.length} items`);
 
-    if (items.length > ForeachExecutor.MEMORY_WARNING_THRESHOLD && !this.hasWarnedMemory) {
+    if (items.length > LIMITS.FOREACH_MEMORY_WARNING_THRESHOLD && !this.hasWarnedMemory) {
       this.logger.warn(
         `  ⚠️  Warning: Large foreach loop detected (${items.length} items). This may consume significant memory and lead to instability.`
       );

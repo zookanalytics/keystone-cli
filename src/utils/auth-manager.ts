@@ -46,16 +46,15 @@ export const COPILOT_HEADERS = {
 };
 
 // OAuth Client IDs - configurable via environment variables for different deployment environments
-const GITHUB_CLIENT_ID = process.env.KEYSTONE_GITHUB_CLIENT_ID ?? '013444988716b5155f4c';
+const GITHUB_CLIENT_ID: string = process.env.KEYSTONE_GITHUB_CLIENT_ID ?? '013444988716b5155f4c';
 const TOKEN_REFRESH_BUFFER_SECONDS = 300;
-const OPENAI_CHATGPT_CLIENT_ID =
+const OPENAI_CHATGPT_CLIENT_ID: string =
   process.env.KEYSTONE_OPENAI_CLIENT_ID ?? 'app_EMoamEEZ73f0CkXaXp7hrann';
-const OPENAI_CHATGPT_REDIRECT_URI = 'http://localhost:1455/auth/callback';
-const ANTHROPIC_OAUTH_CLIENT_ID =
+const ANTHROPIC_OAUTH_CLIENT_ID: string =
   process.env.KEYSTONE_ANTHROPIC_CLIENT_ID ?? '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 const ANTHROPIC_OAUTH_REDIRECT_URI = 'https://console.anthropic.com/oauth/code/callback';
 const ANTHROPIC_OAUTH_SCOPE = 'org:create_api_key user:profile user:inference';
-const GOOGLE_GEMINI_OAUTH_CLIENT_ID =
+const GOOGLE_GEMINI_OAUTH_CLIENT_ID: string =
   process.env.KEYSTONE_GOOGLE_CLIENT_ID ??
   '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com';
 // Redirect URI is dynamically constructed based on the ephemeral port
@@ -82,8 +81,9 @@ export class AuthManager {
       const command = platform === 'win32' ? 'start' : platform === 'darwin' ? 'open' : 'xdg-open';
       const { spawn } = require('node:child_process');
       spawn(command, [url]);
-    } catch {
-      // Ignore if we can't open the browser automatically
+    } catch (e) {
+      // Silently ignore - browser open is best-effort, user can manually open URL
+      AuthManager.logger.debug?.(`Browser open failed: ${e}`);
     }
   }
 
@@ -99,13 +99,17 @@ export class AuthManager {
     try {
       const fs = require('node:fs');
       fs.chmodSync(dir, 0o700);
-    } catch {}
+    } catch (e) {
+      AuthManager.logger.debug?.(`Failed to set directory permissions: ${e}`);
+    }
 
     const authPath = join(dir, 'auth.json');
     if (existsSync(authPath)) {
       try {
         require('node:fs').chmodSync(authPath, 0o600);
-      } catch {}
+      } catch (e) {
+        AuthManager.logger.debug?.(`Failed to set auth file permissions: ${e}`);
+      }
     }
     return authPath;
   }
@@ -370,7 +374,8 @@ export class AuthManager {
     verifier: string
   ): Promise<{ access_token: string; refresh_token: string; expires_in: number }> {
     const [authCode, stateFromCode] = code.split('#');
-    if (stateFromCode && stateFromCode !== verifier) {
+    // Validate state is present and matches verifier for security
+    if (!stateFromCode || stateFromCode !== verifier) {
       throw new Error('Invalid OAuth state');
     }
     const response = await fetch('https://console.anthropic.com/v1/oauth/token', {
@@ -617,8 +622,9 @@ export class AuthManager {
         reject(new Error('Login timed out after 5 minutes'));
       }, TIMEOUTS.OAUTH_LOGIN_TIMEOUT_MS);
 
+      // Use ephemeral port (0) like Google OAuth - dynamically construct redirect URI
       serverRef.current = Bun.serve({
-        port: 1455,
+        port: 0, // Ephemeral port to avoid conflicts
         async fetch(req) {
           const url = new URL(req.url);
           if (url.pathname === '/auth/callback') {
@@ -632,6 +638,10 @@ export class AuthManager {
             }
             if (code) {
               try {
+                // Construct redirect URI from actual server port
+                const actualPort = serverRef.current?.port ?? 0;
+                const redirectUri = `http://localhost:${actualPort}/auth/callback`;
+
                 const response = await fetch('https://auth.openai.com/oauth/token', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -639,7 +649,7 @@ export class AuthManager {
                     client_id: OPENAI_CHATGPT_CLIENT_ID,
                     grant_type: 'authorization_code',
                     code,
-                    redirect_uri: OPENAI_CHATGPT_REDIRECT_URI,
+                    redirect_uri: redirectUri,
                     code_verifier: verifier,
                   }),
                   signal: AbortSignal.timeout(30000),
@@ -687,11 +697,15 @@ export class AuthManager {
         },
       });
 
+      // Construct redirect URI from dynamically assigned port
+      const actualPort = serverRef.current.port;
+      const redirectUri = `http://localhost:${actualPort}/auth/callback`;
+
       const authUrl = `https://auth.openai.com/oauth/authorize?${new URLSearchParams({
         client_id: OPENAI_CHATGPT_CLIENT_ID,
         code_challenge: challenge,
         code_challenge_method: 'S256',
-        redirect_uri: OPENAI_CHATGPT_REDIRECT_URI,
+        redirect_uri: redirectUri,
         response_type: 'code',
         scope: 'openid profile email offline_access',
         state,

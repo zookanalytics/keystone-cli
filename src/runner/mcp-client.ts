@@ -4,6 +4,7 @@ import { isIP } from 'node:net';
 import { type Interface, createInterface } from 'node:readline';
 import pkg from '../../package.json' with { type: 'json' };
 import { MCP, TIMEOUTS } from '../utils/constants.ts';
+import { filterSensitiveEnv } from '../utils/env-filter.ts';
 import { ConsoleLogger, type Logger } from '../utils/logger.ts';
 
 // Re-export for backwards compatibility
@@ -211,21 +212,7 @@ class StdConfigTransport implements MCPTransport {
   constructor(command: string, args: string[] = [], env: Record<string, string> = {}) {
     // Filter out sensitive environment variables from the host process
     // unless they are explicitly provided in the 'env' argument.
-    // Uses specific patterns to avoid false positives with legitimate variables.
-    const safeEnv: Record<string, string> = {};
-    const sensitivePatterns = [
-      /^.*_(API_KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL|PRIVATE_KEY)(_.*)?$/i,
-      /^(API_KEY|AUTH_TOKEN|SECRET_KEY|PRIVATE_KEY|PASSWORD|CREDENTIALS?)(_.*)?$/i,
-      /^(AWS_SECRET|GITHUB_TOKEN|NPM_TOKEN|SSH_KEY|PGP_PASSPHRASE)(_.*)?$/i,
-      /^.*_AUTH_(TOKEN|KEY|SECRET)(_.*)?$/i,
-      /^(COOKIE|SESSION_ID|SESSION_SECRET)(_.*)?$/i,
-    ];
-
-    for (const [key, value] of Object.entries(process.env)) {
-      if (value && !sensitivePatterns.some((p) => p.test(key))) {
-        safeEnv[key] = value;
-      }
-    }
+    const safeEnv = filterSensitiveEnv(process.env);
 
     this.process = spawn(command, args, {
       env: { ...safeEnv, ...env },

@@ -79,6 +79,8 @@ export const LIMITS = {
   ERROR_MESSAGE_TRUNCATE_LENGTH: 500,
   /** Maximum iterations for foreach loops to prevent memory exhaustion */
   MAX_FOREACH_ITERATIONS: 10_000,
+  /** Threshold for warning about large foreach iteration count */
+  FOREACH_MEMORY_WARNING_THRESHOLD: 1000,
   /** Maximum bytes for accumulated foreach results (100MB) */
   MAX_FOREACH_RESULTS_BYTES: 100 * 1024 * 1024,
   /** Default maximum retries for database operations */
