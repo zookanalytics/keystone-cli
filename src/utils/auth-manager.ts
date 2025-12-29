@@ -50,7 +50,7 @@ const GITHUB_CLIENT_ID = process.env.KEYSTONE_GITHUB_CLIENT_ID ?? '013444988716b
 const TOKEN_REFRESH_BUFFER_SECONDS = 300;
 const OPENAI_CHATGPT_CLIENT_ID =
   process.env.KEYSTONE_OPENAI_CLIENT_ID ?? 'app_EMoamEEZ73f0CkXaXp7hrann';
-const OPENAI_CHATGPT_REDIRECT_URI = 'http://localhost:1455/callback';
+const OPENAI_CHATGPT_REDIRECT_URI = 'http://localhost:1455/auth/callback';
 const ANTHROPIC_OAUTH_CLIENT_ID =
   process.env.KEYSTONE_ANTHROPIC_CLIENT_ID ?? '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 const ANTHROPIC_OAUTH_REDIRECT_URI = 'https://console.anthropic.com/oauth/code/callback';
@@ -77,6 +77,19 @@ const GOOGLE_GEMINI_METADATA_HEADER =
 export class AuthManager {
   private static logger: Logger = new ConsoleLogger();
 
+  // Mockable browser opener for testing
+  static openBrowser(url: string): void {
+    try {
+      const { platform } = process;
+      const command =
+        platform === 'win32' ? 'start' : platform === 'darwin' ? 'open' : 'xdg-open';
+      const { spawn } = require('node:child_process');
+      spawn(command, [url]);
+    } catch {
+      // Ignore if we can't open the browser automatically
+    }
+  }
+
   private static getAuthPath(): string {
     if (process.env.KEYSTONE_AUTH_PATH) {
       return process.env.KEYSTONE_AUTH_PATH;
@@ -89,13 +102,13 @@ export class AuthManager {
     try {
       const fs = require('node:fs');
       fs.chmodSync(dir, 0o700);
-    } catch {}
+    } catch { }
 
     const authPath = join(dir, 'auth.json');
     if (existsSync(authPath)) {
       try {
         require('node:fs').chmodSync(authPath, 0o600);
-      } catch {}
+      } catch { }
     }
     return authPath;
   }
@@ -432,7 +445,7 @@ export class AuthManager {
         ) {
           return data.cloudaicompanionProject.id;
         }
-      } catch {}
+      } catch { }
     }
 
     return undefined;
@@ -588,15 +601,7 @@ export class AuthManager {
       AuthManager.logger.log(`   ${authUrl}\n`);
       AuthManager.logger.log('Waiting for authorization...');
 
-      try {
-        const { platform } = process;
-        const command =
-          platform === 'win32' ? 'start' : platform === 'darwin' ? 'open' : 'xdg-open';
-        const { spawn } = require('node:child_process');
-        spawn(command, [authUrl]);
-      } catch {
-        // Ignore if we can't open the browser automatically
-      }
+      AuthManager.openBrowser(authUrl);
     });
   }
 
@@ -619,7 +624,7 @@ export class AuthManager {
         port: 1455,
         async fetch(req) {
           const url = new URL(req.url);
-          if (url.pathname === '/callback') {
+          if (url.pathname === '/auth/callback') {
             const code = url.searchParams.get('code');
             const returnedState = url.searchParams.get('state');
             if (!returnedState || returnedState !== state) {
@@ -630,7 +635,7 @@ export class AuthManager {
             }
             if (code) {
               try {
-                const response = await fetch('https://chatgpt.com/oauth/token', {
+                const response = await fetch('https://auth.openai.com/oauth/token', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                   body: new URLSearchParams({
@@ -685,7 +690,7 @@ export class AuthManager {
         },
       });
 
-      const authUrl = `https://chatgpt.com/oauth/authorize?${new URLSearchParams({
+      const authUrl = `https://auth.openai.com/oauth/authorize?${new URLSearchParams({
         client_id: OPENAI_CHATGPT_CLIENT_ID,
         code_challenge: challenge,
         code_challenge_method: 'S256',
@@ -701,15 +706,7 @@ export class AuthManager {
       AuthManager.logger.log('Waiting for authorization...');
 
       // Attempt to open the browser
-      try {
-        const { platform } = process;
-        const command =
-          platform === 'win32' ? 'start' : platform === 'darwin' ? 'open' : 'xdg-open';
-        const { spawn } = require('node:child_process');
-        spawn(command, [authUrl]);
-      } catch (e) {
-        // Ignore if we can't open the browser automatically
-      }
+      AuthManager.openBrowser(authUrl);
     });
   }
 
@@ -726,7 +723,7 @@ export class AuthManager {
 
     // Refresh
     try {
-      const response = await fetch('https://chatgpt.com/oauth/token', {
+      const response = await fetch('https://auth.openai.com/oauth/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({

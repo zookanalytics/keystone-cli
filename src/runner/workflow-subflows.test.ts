@@ -162,7 +162,7 @@ describe('WorkflowRunner - Subflows & Compensations', () => {
     const workflow: Workflow = {
       name: 'delayed-join',
       steps: [
-        { id: 'slow', type: 'shell', run: 'sleep 0.1 && echo "slow"', needs: [] },
+        { id: 'slow', type: 'shell', run: 'sleep 0.1 && echo "slow"', allowInsecure: true, needs: [] },
         { id: 'fast', type: 'shell', run: 'echo "fast"', needs: [] },
         {
           id: 'early_join',

@@ -116,7 +116,7 @@ export const BaseStepSchema = z.object({
   id: z.string(),
   type: z.string(),
   needs: z.array(z.string()).optional().default([]),
-  if: z.string().optional(),
+  if: z.union([z.string(), z.boolean()]).optional(),
   timeout: z.number().int().positive().optional(),
   retry: RetrySchema.optional(),
   auto_heal: AutoHealSchema.optional(),
@@ -451,6 +451,23 @@ export const WorkflowSchema = z.object({
   finally: z.array(StepSchema).optional(),
   compensate: z.lazy(() => StepSchema).optional(), // Top-level compensation for the entire workflow
   eval: EvalSchema.optional(),
+}).superRefine((data, ctx) => {
+  const checkShellSteps = (steps: Step[] | undefined, pathPrefix: (string | number)[]) => {
+    if (!steps) return;
+    steps.forEach((step, index) => {
+      if (step.type === 'shell' && !step.run && !step.args) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Shell step must have either "run" or "args"',
+          path: [...pathPrefix, index],
+        });
+      }
+    });
+  };
+
+  checkShellSteps(data.steps, ['steps']);
+  checkShellSteps(data.errors, ['errors']);
+  checkShellSteps(data.finally, ['finally']);
 });
 
 // ===== Agent Schema =====

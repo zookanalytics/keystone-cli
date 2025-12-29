@@ -18,4 +18,4 @@ steps:
   - id: print_message
     type: shell
     needs: [create_message]
-    run: echo "Generated message - ${{ steps.create_message.output }}"
+    run: echo "Generated message - ${{ escape(steps.create_message.output) }}"

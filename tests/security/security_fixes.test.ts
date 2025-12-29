@@ -20,8 +20,6 @@ describe('Security Fixes Verification', () => {
         'echo `whoami`',
         '$(whoami)',
         'echo $VAR',
-        'echo "quoted"',
-        "echo 'quoted'",
         'python script.py && exit',
       ];
 

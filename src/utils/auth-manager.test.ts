@@ -76,10 +76,11 @@ describe('AuthManager', () => {
   describe('setLogger()', () => {
     it('should set the static logger', () => {
       const mockLogger = {
-        log: mock(() => {}),
-        warn: mock(() => {}),
-        error: mock(() => {}),
-        info: mock(() => {}),
+        log: mock(() => { }),
+        warn: mock(() => { }),
+        error: mock(() => { }),
+        info: mock(() => { }),
+        debug: mock(() => { }),
       };
       AuthManager.setLogger(mockLogger);
       // Trigger a log through save failure to verify
@@ -163,7 +164,7 @@ describe('AuthManager', () => {
         )
       );
 
-      const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
+      const consoleSpy = spyOn(console, 'error').mockImplementation(() => { });
       const token = await AuthManager.getCopilotToken();
 
       expect(token).toBeUndefined();
@@ -465,7 +466,8 @@ describe('AuthManager', () => {
 
       let fetchHandler: any;
       const mockServer = {
-        stop: mock(() => {}),
+        port: 51121,
+        stop: mock(() => { }),
       };
 
       // @ts-ignore - mock Bun.serve
@@ -474,15 +476,8 @@ describe('AuthManager', () => {
         return mockServer;
       });
 
-      // @ts-ignore - mock require for child_process
-      const originalRequire = global.require;
-      // @ts-ignore
-      global.require = (name: string) => {
-        if (name === 'node:child_process') {
-          return { spawn: () => ({ on: () => {} }) };
-        }
-        return originalRequire ? originalRequire(name) : {};
-      };
+      // Mock openBrowser to prevent browser opening
+      const openBrowserSpy = spyOn(AuthManager, 'openBrowser').mockImplementation(() => { });
 
       try {
         const loginPromise = AuthManager.loginGoogleGemini('test-project');
@@ -491,7 +486,7 @@ describe('AuthManager', () => {
         expect(serveSpy).toHaveBeenCalled();
         expect(fetchHandler).toBeDefined();
 
-        // Simulating the fetch handler call
+        // Simulating the fetch handler call with the mock server
         const req = new Request('http://localhost:51121/oauth-callback?code=test-code');
         // @ts-ignore
         global.fetch = mock(() =>
@@ -507,7 +502,7 @@ describe('AuthManager', () => {
           )
         );
 
-        const response = await fetchHandler(req);
+        const response = await fetchHandler(req, mockServer);
         expect(response.status).toBe(200);
 
         await loginPromise;
@@ -515,8 +510,7 @@ describe('AuthManager', () => {
         expect(auth.google_gemini?.access_token).toBe('access');
       } finally {
         serveSpy.mockRestore();
-        // @ts-ignore
-        global.require = originalRequire;
+        openBrowserSpy.mockRestore();
       }
     });
   });
@@ -525,7 +519,7 @@ describe('AuthManager', () => {
     it('loginOpenAIChatGPT should handle OAuth callback', async () => {
       let fetchHandler: any;
       const mockServer = {
-        stop: mock(() => {}),
+        stop: mock(() => { }),
       };
 
       // @ts-ignore - mock Bun.serve
@@ -534,15 +528,8 @@ describe('AuthManager', () => {
         return mockServer;
       });
 
-      // @ts-ignore - mock require for child_process
-      const originalRequire = global.require;
-      // @ts-ignore
-      global.require = (name: string) => {
-        if (name === 'node:child_process') {
-          return { spawn: () => ({ on: () => {} }) };
-        }
-        return originalRequire ? originalRequire(name) : {};
-      };
+      // Mock openBrowser to prevent browser opening
+      const openBrowserSpy = spyOn(AuthManager, 'openBrowser').mockImplementation(() => { });
 
       try {
         const loginPromise = AuthManager.loginOpenAIChatGPT();
@@ -551,7 +538,7 @@ describe('AuthManager', () => {
         expect(fetchHandler).toBeDefined();
 
         // Simulate callback
-        const req = new Request('http://localhost:1455/callback?code=test-code&state=xyz');
+        const req = new Request('http://localhost:1455/auth/callback?code=test-code&state=xyz');
         // The code expects the state to match. We can't easily get the random state,
         // but since we are mocking, we can just ensure the branch is covered.
         // Actually, let's just test that the handler exists and can be called.
@@ -582,8 +569,7 @@ describe('AuthManager', () => {
         await expect(loginPromise).rejects.toThrow('Invalid OAuth state');
       } finally {
         serveSpy.mockRestore();
-        // @ts-ignore
-        global.require = originalRequire;
+        openBrowserSpy.mockRestore();
       }
     });
   });

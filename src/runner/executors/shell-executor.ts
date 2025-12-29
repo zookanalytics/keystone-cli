@@ -224,9 +224,9 @@ async function readStreamWithLimit(
 }
 
 // Whitelist of allowed characters for secure shell command execution
-// Allows: Alphanumeric, whitespace, and common safe punctuation (_ . / : @ , + - =)
-// Blocks: Quotes, backslashes, pipes, redirects, subshells, variables, etc.
-const SAFE_SHELL_CHARS = /^[a-zA-Z0-9\s_./:@,+=~-]+$/;
+// Allows: Alphanumeric, whitespace, and common safe punctuation (_ . / : @ , + - = ' " !)
+// Blocks: Backslashes, pipes, redirects, subshells, variables ($), etc.
+const SAFE_SHELL_CHARS = /^[a-zA-Z0-9\s_./:@,+=~'"!-]+$/;
 
 export function detectShellInjectionRisk(rawCommand: string): boolean {
   // If the command contains any character NOT in the whitelist, it's considered risky

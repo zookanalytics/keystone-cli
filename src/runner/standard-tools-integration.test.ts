@@ -140,7 +140,7 @@ System prompt`,
             {
               id: 'c2',
               type: 'function',
-              function: { name: 'run_command', arguments: '{"command":"rm -rf /"}' },
+              function: { name: 'run_command', arguments: '{"command":"echo $HOME"}' },
             },
           ],
         },
