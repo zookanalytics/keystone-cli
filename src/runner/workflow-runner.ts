@@ -771,10 +771,9 @@ export class WorkflowRunner {
     try {
       return !this.evaluateCondition(step.if, context);
     } catch (error) {
-      this.logger.error(
-        `Warning: Failed to evaluate condition for step ${step.id}: ${error instanceof Error ? error.message : String(error)}`
+      throw new Error(
+        `Failed to evaluate condition for step "${step.id}": ${error instanceof Error ? error.message : String(error)}`
       );
-      return true; // Skip on error
     }
   }
 

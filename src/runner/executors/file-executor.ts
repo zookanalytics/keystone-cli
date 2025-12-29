@@ -218,13 +218,12 @@ export function applySearchReplaceBlocks(content: string, blocks: SearchReplaceB
 
   for (const block of blocks) {
     if (!result.includes(block.search)) {
-      // Try with different line endings or slight whitespace variations?
-      // For now, strict match
       throw new Error(
         `Search block not found in file. Ensure exact match including whitespace:\n${block.search.substring(0, 100)}...`
       );
     }
-    result = result.replace(block.search, block.replace);
+    // Replace all occurrences using split/join to avoid regex escaping issues
+    result = result.split(block.search).join(block.replace);
   }
 
   return result;

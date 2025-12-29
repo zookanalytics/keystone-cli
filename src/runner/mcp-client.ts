@@ -472,12 +472,14 @@ class SSETransport implements MCPTransport {
                   reject(new Error('SSE stream ended before connection established'));
                 }
               }
-            } catch (err) {
-              if ((err as Error).name !== 'AbortError' && !isResolved) {
-                clearTimeout(timeoutId);
-                reject(err);
-              }
             } finally {
+              if (reader) {
+                try {
+                  await reader.cancel();
+                } catch (e) {
+                  // Ignore
+                }
+              }
               this.activeReaders.delete(reader);
             }
           })();
@@ -723,25 +725,55 @@ export class MCPClient {
       }, this.timeout);
 
       this.pendingRequests.set(id, { resolve, reject, timeoutId });
+      let aborted = false;
 
       const onAbort = () => {
+        if (aborted) return;
+        aborted = true;
         clearTimeout(timeoutId);
         this.pendingRequests.delete(id);
         reject(new Error('MCP request aborted'));
       };
+
       if (signal?.aborted) {
         onAbort();
         return;
       }
+
       signal?.addEventListener('abort', onAbort, { once: true });
 
-      this.transport.send(message, signal).catch((err) => {
-        signal?.removeEventListener('abort', onAbort);
-        clearTimeout(timeoutId);
-        this.pendingRequests.delete(id);
-        this._isHealthy = false;
-        reject(err);
-      });
+      const cleanup = () => {
+        if (signal) {
+          signal.removeEventListener('abort', onAbort);
+        }
+      };
+
+      this.transport
+        .send(message, signal)
+        .then(() => {
+          // Promise will be resolved by onMessage handler
+          const original = this.pendingRequests.get(id);
+          if (original) {
+            this.pendingRequests.set(id, {
+              ...original,
+              resolve: (res) => {
+                cleanup();
+                original.resolve(res);
+              },
+              reject: (err) => {
+                cleanup();
+                original.reject(err);
+              },
+            });
+          }
+        })
+        .catch((err) => {
+          cleanup();
+          clearTimeout(timeoutId);
+          this.pendingRequests.delete(id);
+          this._isHealthy = false;
+          reject(err);
+        });
     });
   }
 

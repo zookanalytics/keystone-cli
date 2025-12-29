@@ -140,6 +140,17 @@ export class WorkflowDb {
   private createThoughtStmt!: Statement;
   private listThoughtEventsStmt!: Statement;
   private listThoughtEventsByRunStmt!: Statement;
+  private listIdempotencyRecordsByRunStmt!: Statement;
+  private getStepCacheByWorkflowStmt!: Statement;
+  private clearStepCacheByWorkflowStmt!: Statement;
+  private getPendingTimersStmt!: Statement;
+  private getPendingTimersByTypeStmt!: Statement;
+  private listTimersByRunStmt!: Statement;
+  private listTimersStmt!: Statement;
+  private clearTimersByRunStmt!: Statement;
+  private clearAllTimersStmt!: Statement;
+  private clearAllStepCacheStmt!: Statement;
+  private isClosed = false;
 
   constructor(public readonly dbPath = PathResolver.resolveDbPath()) {
     const dir = dirname(dbPath);
@@ -333,6 +344,46 @@ export class WorkflowDb {
       ORDER BY created_at DESC
       LIMIT ?
     `);
+    this.listIdempotencyRecordsByRunStmt = this.db.prepare(`
+      SELECT * FROM idempotency_records
+      WHERE run_id = ?
+      ORDER BY created_at DESC
+    `);
+    this.getStepCacheByWorkflowStmt = this.db.prepare(`
+      SELECT * FROM step_cache
+      WHERE workflow_name = ?
+      ORDER BY created_at DESC
+    `);
+    this.clearStepCacheByWorkflowStmt = this.db.prepare(
+      'DELETE FROM step_cache WHERE workflow_name = ?'
+    );
+    this.getPendingTimersStmt = this.db.prepare(`
+      SELECT * FROM durable_timers
+      WHERE completed_at IS NULL
+      AND (wake_at IS NULL OR wake_at <= ?)
+      ORDER BY wake_at ASC
+    `);
+    this.getPendingTimersByTypeStmt = this.db.prepare(`
+      SELECT * FROM durable_timers
+      WHERE completed_at IS NULL
+      AND (wake_at IS NULL OR wake_at <= ?)
+      AND timer_type = ?
+      ORDER BY wake_at ASC
+    `);
+    this.listTimersByRunStmt = this.db.prepare(`
+      SELECT * FROM durable_timers
+      WHERE run_id = ?
+      ORDER BY created_at DESC
+      LIMIT ?
+    `);
+    this.listTimersStmt = this.db.prepare(`
+      SELECT * FROM durable_timers
+      ORDER BY created_at DESC
+      LIMIT ?
+    `);
+    this.clearTimersByRunStmt = this.db.prepare('DELETE FROM durable_timers WHERE run_id = ?');
+    this.clearAllTimersStmt = this.db.prepare('DELETE FROM durable_timers');
+    this.clearAllStepCacheStmt = this.db.prepare('DELETE FROM step_cache');
   }
 
   /**
@@ -1012,15 +1063,7 @@ export class WorkflowDb {
   async listIdempotencyRecords(runId?: string): Promise<IdempotencyRecord[]> {
     return this.withRetry(() => {
       if (runId) {
-        return this.db
-          .prepare(
-            `
-          SELECT * FROM idempotency_records
-          WHERE run_id = ?
-          ORDER BY created_at DESC
-        `
-          )
-          .all(runId) as IdempotencyRecord[];
+        return this.listIdempotencyRecordsByRunStmt.all(runId) as IdempotencyRecord[];
       }
       return this.listIdempotencyRecordsStmt.all() as IdempotencyRecord[];
     });
@@ -1081,15 +1124,10 @@ export class WorkflowDb {
   ): Promise<DurableTimer[]> {
     return this.withRetry(() => {
       const cutoff = (before || new Date()).toISOString();
-      const filterType = timerType !== 'all';
-      const stmt = this.db.prepare(`
-        SELECT * FROM durable_timers
-        WHERE completed_at IS NULL
-        AND (wake_at IS NULL OR wake_at <= ?)
-        ${filterType ? 'AND timer_type = ?' : ''}
-        ORDER BY wake_at ASC
-      `);
-      return (filterType ? stmt.all(cutoff, timerType) : stmt.all(cutoff)) as DurableTimer[];
+      if (timerType === 'all') {
+        return this.getPendingTimersStmt.all(cutoff) as DurableTimer[];
+      }
+      return this.getPendingTimersByTypeStmt.all(cutoff, timerType) as DurableTimer[];
     });
   }
 
@@ -1108,20 +1146,9 @@ export class WorkflowDb {
   async listTimers(runId?: string, limit = 50): Promise<DurableTimer[]> {
     return this.withRetry(() => {
       if (runId) {
-        const stmt = this.db.prepare(`
-          SELECT * FROM durable_timers
-          WHERE run_id = ?
-          ORDER BY created_at DESC
-          LIMIT ?
-        `);
-        return stmt.all(runId, limit) as DurableTimer[];
+        return this.listTimersByRunStmt.all(runId, limit) as DurableTimer[];
       }
-      const stmt = this.db.prepare(`
-        SELECT * FROM durable_timers
-        ORDER BY created_at DESC
-        LIMIT ?
-      `);
-      return stmt.all(limit) as DurableTimer[];
+      return this.listTimersStmt.all(limit) as DurableTimer[];
     });
   }
 
@@ -1131,12 +1158,10 @@ export class WorkflowDb {
   async clearTimers(runId?: string): Promise<number> {
     return await this.withRetry(() => {
       if (runId) {
-        const stmt = this.db.prepare('DELETE FROM durable_timers WHERE run_id = ?');
-        const result = stmt.run(runId);
+        const result = this.clearTimersByRunStmt.run(runId);
         return result.changes;
       }
-      const stmt = this.db.prepare('DELETE FROM durable_timers');
-      const result = stmt.run();
+      const result = this.clearAllTimersStmt.run();
       return result.changes;
     });
   }
@@ -1215,49 +1240,78 @@ export class WorkflowDb {
    * Call this when the database is no longer needed to free resources.
    */
   close(): void {
+    if (this.isClosed) return;
+    this.isClosed = true;
+
     // Finalize all prepared statements
-    this.createRunStmt.finalize();
-    this.updateRunStatusStmt.finalize();
-    this.getRunStmt.finalize();
-    this.listRunsStmt.finalize();
-    this.pruneRunsStmt.finalize();
-    this.createStepStmt.finalize();
-    this.startStepStmt.finalize();
-    this.completeStepStmt.finalize();
-    this.incrementRetryStmt.finalize();
-    this.getStepByIterationStmt.finalize();
-    this.getMainStepStmt.finalize();
-    this.getStepsByRunStmt.finalize();
-    this.getSuccessfulRunsStmt.finalize();
-    this.getLastRunStmt.finalize();
-    this.getIdempotencyRecordStmt.finalize();
-    this.clearExpiredIdempotencyRecordStmt.finalize();
-    this.insertIdempotencyRecordIfAbsentStmt.finalize();
-    this.markIdempotencyRecordRunningStmt.finalize();
-    this.storeIdempotencyRecordStmt.finalize();
-    this.pruneIdempotencyRecordsStmt.finalize();
-    this.clearIdempotencyRecordsStmt.finalize();
-    this.listIdempotencyRecordsStmt.finalize();
-    this.clearAllIdempotencyRecordsStmt.finalize();
-    this.createTimerStmt.finalize();
-    this.getTimerStmt.finalize();
-    this.getTimerByStepStmt.finalize();
-    this.completeTimerStmt.finalize();
-    this.registerCompensationStmt.finalize();
-    this.updateCompensationStatusStmt.finalize();
-    this.getPendingCompensationsStmt.finalize();
-    this.getAllCompensationsStmt.finalize();
-    this.getStepCacheStmt.finalize();
-    this.storeStepCacheStmt.finalize();
-    this.getEventStmt.finalize();
-    this.storeEventStmt.finalize();
-    this.deleteEventStmt.finalize();
-    this.createThoughtStmt.finalize();
-    this.listThoughtEventsStmt.finalize();
-    this.listThoughtEventsByRunStmt.finalize();
+    const stmts = [
+      this.createRunStmt,
+      this.updateRunStatusStmt,
+      this.getRunStmt,
+      this.listRunsStmt,
+      this.pruneRunsStmt,
+      this.createStepStmt,
+      this.startStepStmt,
+      this.completeStepStmt,
+      this.incrementRetryStmt,
+      this.getStepByIterationStmt,
+      this.getMainStepStmt,
+      this.getStepsByRunStmt,
+      this.getSuccessfulRunsStmt,
+      this.getLastRunStmt,
+      this.getIdempotencyRecordStmt,
+      this.clearExpiredIdempotencyRecordStmt,
+      this.insertIdempotencyRecordIfAbsentStmt,
+      this.markIdempotencyRecordRunningStmt,
+      this.storeIdempotencyRecordStmt,
+      this.pruneIdempotencyRecordsStmt,
+      this.clearIdempotencyRecordsStmt,
+      this.listIdempotencyRecordsStmt,
+      this.clearAllIdempotencyRecordsStmt,
+      this.createTimerStmt,
+      this.getTimerStmt,
+      this.getTimerByStepStmt,
+      this.completeTimerStmt,
+      this.registerCompensationStmt,
+      this.updateCompensationStatusStmt,
+      this.getPendingCompensationsStmt,
+      this.getAllCompensationsStmt,
+      this.getStepCacheStmt,
+      this.storeStepCacheStmt,
+      this.getEventStmt,
+      this.storeEventStmt,
+      this.deleteEventStmt,
+      this.createThoughtStmt,
+      this.listThoughtEventsStmt,
+      this.listThoughtEventsByRunStmt,
+      this.listIdempotencyRecordsByRunStmt,
+      this.getStepCacheByWorkflowStmt,
+      this.clearStepCacheByWorkflowStmt,
+      this.getPendingTimersStmt,
+      this.getPendingTimersByTypeStmt,
+      this.listTimersByRunStmt,
+      this.listTimersStmt,
+      this.clearTimersByRunStmt,
+      this.clearAllTimersStmt,
+      this.clearAllStepCacheStmt,
+    ];
+
+    for (const stmt of stmts) {
+      if (stmt) {
+        try {
+          stmt.finalize();
+        } catch (e) {
+          // Ignore finalization errors
+        }
+      }
+    }
 
     // Close the database connection
-    this.db.close();
+    try {
+      this.db.close();
+    } catch (e) {
+      // Ignore close errors
+    }
   }
 
   // ===== Step Cache =====
@@ -1284,12 +1338,10 @@ export class WorkflowDb {
   async clearStepCache(workflowName?: string): Promise<number> {
     return await this.withRetry(() => {
       if (workflowName) {
-        const stmt = this.db.prepare('DELETE FROM step_cache WHERE workflow_name = ?');
-        const result = stmt.run(workflowName);
+        const result = this.clearStepCacheByWorkflowStmt.run(workflowName);
         return result.changes;
       }
-      const stmt = this.db.prepare('DELETE FROM step_cache');
-      const result = stmt.run();
+      const result = this.clearAllStepCacheStmt.run();
       return result.changes;
     });
   }

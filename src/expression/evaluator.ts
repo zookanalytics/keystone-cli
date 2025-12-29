@@ -523,8 +523,9 @@ export class ExpressionEvaluator {
           if (
             ExpressionEvaluator.FORBIDDEN_PROPERTIES.has(property) ||
             ExpressionEvaluator.FORBIDDEN_PROPERTIES.has(propertyLower) ||
-            normalizedProperty.includes('proto') ||
-            normalizedProperty.includes('constructor')
+            normalizedProperty === '__proto__' ||
+            normalizedProperty === 'constructor' ||
+            normalizedProperty === 'prototype'
           ) {
             throw new Error(`Access to property "${property}" is forbidden for security reasons`);
           }
