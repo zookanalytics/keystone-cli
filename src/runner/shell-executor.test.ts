@@ -27,6 +27,7 @@ describe('shell-executor', () => {
         type: 'shell',
         needs: [],
         run: 'echo "hello world"',
+        allowInsecure: true,
       };
 
       const result = await executeShell(step, context);
@@ -40,6 +41,7 @@ describe('shell-executor', () => {
         type: 'shell',
         needs: [],
         run: 'echo "${{ inputs.name }}"',
+        allowInsecure: true,
       };
       const customContext: ExpressionContext = {
         ...context,
@@ -143,14 +145,14 @@ describe('shell-executor', () => {
       await expect(executeShell(step, context)).rejects.toThrow(/Security Error/);
     });
 
-    it('should allow braces and quotes for JSON usage without allowInsecure', async () => {
-      // {} and quotes are safe for spawn and common in arguments
-      // [] are also safe (literal in spawn, glob in shell)
+    it('should allow braces and quotes for JSON usage with allowInsecure', async () => {
+      // {} and quotes now require allowInsecure due to strict whitelist
       const step: ShellStep = {
         id: 'test',
         type: 'shell',
         needs: [],
         run: 'echo \'{"values": [1, 2, 3]}\'',
+        allowInsecure: true,
       };
 
       const result = await executeShell(step, context);

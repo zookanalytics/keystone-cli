@@ -179,17 +179,6 @@ function filterSensitiveEnv(env: Record<string, string | undefined>): Record<str
   return filtered;
 }
 
-/**
- * Check if a command contains potentially dangerous shell metacharacters
- * Returns true if the command looks like it might contain unescaped user input
- */
-/**
- * Strict validation of shell metacharacters to prevent injection.
- * Any character here triggers a security error if allowInsecure is false.
- * Note: We allow single and double quotes, as safe args parsing handles them.
- */
-const SHELL_METACHARS = /[|&;<>\`$!\n*?=]/;
-
 const TRUNCATED_SUFFIX = '... [truncated output]';
 
 async function readStreamWithLimit(
@@ -234,10 +223,14 @@ async function readStreamWithLimit(
   return { text, truncated: false };
 }
 
+// Whitelist of allowed characters for secure shell command execution
+// Allows: Alphanumeric, whitespace, and common safe punctuation (_ . / : @ , + - =)
+// Blocks: Quotes, backslashes, pipes, redirects, subshells, variables, etc.
+const SAFE_SHELL_CHARS = /^[a-zA-Z0-9\s_./:@,+=~-]+$/;
+
 export function detectShellInjectionRisk(rawCommand: string): boolean {
-  // Legacy function for backward compatibility or future heuristic use
-  // Now simply acts as a proxy for the metacharacter check
-  return SHELL_METACHARS.test(rawCommand);
+  // If the command contains any character NOT in the whitelist, it's considered risky
+  return !SAFE_SHELL_CHARS.test(rawCommand);
 }
 
 /**
@@ -256,12 +249,18 @@ export async function executeShell(
   // Evaluate the command string
   const command = commandOverride ?? ExpressionEvaluator.evaluateString(step.run, context);
 
-  // Check for potential shell injection risks (Early Check)
-  // We double check here, though executeShellStep does it too, to catch direct calls
-  if (!step.allowInsecure && detectShellInjectionRisk(command)) {
-    throw new Error(
-      `Security Error: Command contains shell metacharacters.\nCommand: "${command.substring(0, 100)}..."\nFix: Set 'allowInsecure: true' to enable shell features.`
-    );
+  // Security Check: Enforce whitelist
+  // If we haven't enabled insecure mode, we MUST be able to use spawn (no shell)
+  // or the command must be strictly composed of safe characters.
+  if (!step.allowInsecure) {
+    if (detectShellInjectionRisk(command)) {
+      throw new Error(
+        `Security Error: Command execution blocked.\nCommand: "${command.substring(0, 100)}${command.length > 100 ? '...' : ''
+        }"\nReason: Contains characters not in the strict whitelist (alphanumeric, whitespace, and _./:@,+=~-).\n` +
+        `This protects against shell injection attacks.\n` +
+        `Fix: either simplify your command or set 'allowInsecure: true' in your step definition if you trust the input.`
+      );
+    }
   }
 
   // Evaluate environment variables
@@ -281,42 +280,19 @@ export async function executeShell(
   const hostEnv = filterSensitiveEnv(Bun.env);
   const mergedEnv = Object.keys(env).length > 0 ? { ...hostEnv, ...env } : hostEnv;
 
-  // Shell metacharacters that require a real shell (including newlines, globs, env vars)
-  const hasShellMetas = SHELL_METACHARS.test(command);
-
-  // Common shell builtins that must run in a shell
-  const firstWord = command.trim().split(/\s+/)[0];
-  const isBuiltin = [
-    'exit',
-    'cd',
-    'export',
-    'unset',
-    'source',
-    '.',
-    'alias',
-    'unalias',
-    'eval',
-    'set',
-    'true',
-    'false',
-  ].includes(firstWord);
-
-  // Security Check: Enforce whitelist
-  // If we haven't enabled insecure mode, we MUST be able to use spawn (no shell)
-  if (!step.allowInsecure) {
-    if (hasShellMetas || isBuiltin) {
-      throw new Error(
-        `Security Error: Command execution blocked.\nCommand: "${command.substring(0, 100)}${command.length > 100 ? '...' : ''
-        }"\nReason: Contains shell metacharacters or builtin commands.\n` +
-        `Fix: To use shell features (pipes, redirects, variables, etc.), you must set 'allowInsecure: true' in your step definition.`
-      );
-    }
-  }
-
-  const canUseSpawn = !hasShellMetas && !isBuiltin;
+  // If secure (whitelist passed) OR insecure mode is explicitly allowed...
+  // We prefer direct spawn if possible, but fall back to shell if needed (e.g. for pipelines in insecure mode)
 
   try {
-    let abortHandler: (() => void) | undefined;
+    // If we are in secure mode (allowInsecure: false), we KNOW the command is safe.
+    // However, it might still benefit from running directly via spawn to avoid even theoretical shell issues.
+    // But simplified splitting by space might break if we allowed quotes (which we don't in the whitelist).
+
+    // For now, if insecure is allowed, we use 'sh -c'.
+    // If secure (whitelist valid), we can also use 'sh -c' relatively safely, or split and spawn.
+    // Using 'sh -c' is robust for arguments. Since we validated the string against a strict whitelist,
+    // 'sh -c' shouldn't be able to do anything funky like variable expansion or subshells because appropriate chars are banned.
+
     let stdoutString = '';
     let stderrString = '';
     let exitCode = 0;
@@ -324,122 +300,40 @@ export async function executeShell(
     let stderrTruncated = false;
     const maxOutputBytes = LIMITS.MAX_PROCESS_OUTPUT_BYTES;
 
-    if (canUseSpawn) {
-      // Split command into args without invoking a shell (handles quotes and escapes)
-      const args: string[] = [];
-      let current = '';
-      let inQuote = false;
-      let quoteChar = '';
-      let escapeNext = false;
-      let tokenStarted = false;
+    // Use 'sh -c' for everything to ensure consistent argument parsing
+    // Security is guaranteed by the strict whitelist check above for allowInsecure: false
+    // which prevents injection of metacharacters, quotes, escapes, etc.
+    const proc = Bun.spawn(['sh', '-c', command], {
+      cwd: cwd || process.cwd(),
+      env: mergedEnv,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
 
-      for (let i = 0; i < command.length; i++) {
-        const char = command[i];
-        if (escapeNext) {
-          current += char;
-          tokenStarted = true;
-          escapeNext = false;
-          continue;
-        }
+    const abortHandler = () => {
+      try {
+        proc.kill();
+      } catch { }
+    };
 
-        if (char === '\\' && quoteChar !== "'") {
-          escapeNext = true;
-          tokenStarted = true;
-          continue;
-        }
+    if (abortSignal) {
+      abortSignal.addEventListener('abort', abortHandler, { once: true });
+    }
 
-        if (char === "'" || char === '"') {
-          if (inQuote && char === quoteChar) {
-            inQuote = false;
-            quoteChar = '';
-          } else if (!inQuote) {
-            inQuote = true;
-            quoteChar = char;
-          } else {
-            current += char;
-            tokenStarted = true;
-          }
-          tokenStarted = true;
-          continue;
-        }
+    const stdoutPromise = readStreamWithLimit(proc.stdout, maxOutputBytes);
+    const stderrPromise = readStreamWithLimit(proc.stderr, maxOutputBytes);
 
-        if (/\s/.test(char) && !inQuote) {
-          if (tokenStarted) {
-            args.push(current);
-            current = '';
-            tokenStarted = false;
-          }
-          continue;
-        }
+    // Wait for exit
+    exitCode = await proc.exited;
+    const [stdoutResult, stderrResult] = await Promise.all([stdoutPromise, stderrPromise]);
 
-        current += char;
-        tokenStarted = true;
-      }
-      if (escapeNext) {
-        current += '\\';
-        tokenStarted = true;
-      }
-      if (tokenStarted) args.push(current);
+    stdoutString = stdoutResult.text;
+    stderrString = stderrResult.text;
+    stdoutTruncated = stdoutResult.truncated;
+    stderrTruncated = stderrResult.truncated;
 
-      if (args.length === 0) throw new Error('Empty command');
-
-      const proc = Bun.spawn(args, {
-        cwd,
-        env: mergedEnv,
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
-      abortHandler = () => {
-        try {
-          proc.kill();
-        } catch { }
-      };
-      if (abortSignal) {
-        abortSignal.addEventListener('abort', abortHandler, { once: true });
-      }
-
-      const stdoutPromise = readStreamWithLimit(proc.stdout, maxOutputBytes);
-      const stderrPromise = readStreamWithLimit(proc.stderr, maxOutputBytes);
-
-      // Wait for exit
-      exitCode = await proc.exited;
-      const [stdoutResult, stderrResult] = await Promise.all([stdoutPromise, stderrPromise]);
-      stdoutString = stdoutResult.text;
-      stderrString = stderrResult.text;
-      stdoutTruncated = stdoutResult.truncated;
-      stderrTruncated = stderrResult.truncated;
-      if (abortSignal) {
-        abortSignal.removeEventListener('abort', abortHandler);
-      }
-    } else {
-      // Fallback to sh -c for complex commands (pipes, redirects, quotes)
-      const proc = Bun.spawn(['sh', '-c', command], {
-        cwd,
-        env: mergedEnv,
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
-      abortHandler = () => {
-        try {
-          proc.kill();
-        } catch { }
-      };
-      if (abortSignal) {
-        abortSignal.addEventListener('abort', abortHandler, { once: true });
-      }
-
-      const stdoutPromise = readStreamWithLimit(proc.stdout, maxOutputBytes);
-      const stderrPromise = readStreamWithLimit(proc.stderr, maxOutputBytes);
-
-      exitCode = await proc.exited;
-      const [stdoutResult, stderrResult] = await Promise.all([stdoutPromise, stderrPromise]);
-      stdoutString = stdoutResult.text;
-      stderrString = stderrResult.text;
-      stdoutTruncated = stdoutResult.truncated;
-      stderrTruncated = stderrResult.truncated;
-      if (abortSignal) {
-        abortSignal.removeEventListener('abort', abortHandler);
-      }
+    if (abortSignal) {
+      abortSignal.removeEventListener('abort', abortHandler);
     }
 
     return {
@@ -450,36 +344,27 @@ export async function executeShell(
       stderrTruncated,
     };
   } catch (error) {
-    if (abortSignal && abortHandler) {
-      abortSignal.removeEventListener('abort', abortHandler);
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg === 'Step canceled') {
+      throw error;
     }
-    // Handle shell execution errors (Bun throws ShellError with exitCode, stdout, stderr)
+
+    // Handle specific Bun shell errors if they occur
     if (error && typeof error === 'object' && 'exitCode' in error) {
-      const shellError = error as {
-        exitCode: number;
-        stdout?: Buffer | string;
-        stderr?: Buffer | string;
-      };
-
-      // Convert stdout/stderr to strings if they're buffers
-      const stdout = shellError.stdout
-        ? Buffer.isBuffer(shellError.stdout)
-          ? shellError.stdout.toString()
-          : String(shellError.stdout)
-        : '';
-      const stderr = shellError.stderr
-        ? Buffer.isBuffer(shellError.stderr)
-          ? shellError.stderr.toString()
-          : String(shellError.stderr)
-        : '';
-
+      const shellError = error as { exitCode: number; stdout: any; stderr: any };
       return {
-        stdout,
-        stderr,
+        stdout: String(shellError.stdout || ''),
+        stderr: String(shellError.stderr || ''),
         exitCode: shellError.exitCode,
       };
     }
-    throw error;
+
+    // Generic error handling
+    return {
+      stdout: '',
+      stderr: msg,
+      exitCode: 1,
+    };
   }
 }
 

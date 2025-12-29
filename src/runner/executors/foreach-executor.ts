@@ -25,7 +25,7 @@ export class ForeachExecutor {
     private executeStepFn: ExecuteStepCallback,
     private abortSignal?: AbortSignal,
     private resourcePool?: ResourcePoolManager
-  ) {}
+  ) { }
 
   /**
    * Aggregate outputs from multiple iterations of a foreach step
@@ -99,7 +99,7 @@ export class ForeachExecutor {
     if (items.length > LIMITS.MAX_FOREACH_ITERATIONS) {
       throw new Error(
         `Foreach step "${step.id}" exceeds maximum iteration limit of ${LIMITS.MAX_FOREACH_ITERATIONS}. ` +
-          `Got ${items.length} items. Consider batching or reducing the dataset.`
+        `Got ${items.length} items. Consider batching or reducing the dataset.`
       );
     }
 
@@ -113,21 +113,32 @@ export class ForeachExecutor {
     }
 
     // Evaluate concurrency
-    let concurrencyLimit = items.length;
+    // Default to a safe limit (50) to prevent resource exhaustion/DoS, unless explicitly overridden.
+    const DEFAULT_MAX_CONCURRENCY = 50;
+    let concurrencyLimit = Math.min(items.length, DEFAULT_MAX_CONCURRENCY);
+
     if (step.concurrency !== undefined) {
+      let explicitConcurrency: number;
+
       if (typeof step.concurrency === 'string') {
-        concurrencyLimit = Number(ExpressionEvaluator.evaluate(step.concurrency, baseContext));
-        if (!Number.isInteger(concurrencyLimit) || concurrencyLimit <= 0) {
-          throw new Error(
-            `concurrency must evaluate to a positive integer, got: ${concurrencyLimit}`
-          );
-        }
+        explicitConcurrency = Number(ExpressionEvaluator.evaluate(step.concurrency, baseContext));
       } else {
-        concurrencyLimit = step.concurrency;
-        if (!Number.isInteger(concurrencyLimit) || concurrencyLimit <= 0) {
-          throw new Error(`concurrency must be a positive integer, got: ${concurrencyLimit}`);
-        }
+        explicitConcurrency = step.concurrency;
       }
+
+      if (!Number.isInteger(explicitConcurrency) || explicitConcurrency <= 0) {
+        throw new Error(
+          `concurrency must evaluate to a positive integer, got: ${explicitConcurrency}`
+        );
+      }
+
+      // If user explicitly sets a higher concurrency, we respect it but log a debug message
+      if (explicitConcurrency > DEFAULT_MAX_CONCURRENCY) {
+        this.logger.debug(
+          `Step ${step.id} has explicit concurrency ${explicitConcurrency} > default ${DEFAULT_MAX_CONCURRENCY}. Proceeding.`
+        );
+      }
+      concurrencyLimit = explicitConcurrency;
     }
 
     // Create parent step record in DB
@@ -296,7 +307,7 @@ export class ForeachExecutor {
                   if (estimatedResultsBytes > LIMITS.MAX_FOREACH_RESULTS_BYTES) {
                     throw new Error(
                       `Foreach step "${step.id}" accumulated results exceed maximum size of ` +
-                        `${LIMITS.MAX_FOREACH_RESULTS_BYTES} bytes. Consider reducing output size or batching.`
+                      `${LIMITS.MAX_FOREACH_RESULTS_BYTES} bytes. Consider reducing output size or batching.`
                     );
                   }
                 }

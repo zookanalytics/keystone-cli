@@ -150,7 +150,12 @@ export async function validateRemoteUrl(
     throw new Error(`SSRF Protection: Cannot connect to cloud metadata endpoint: ${hostname}`);
   }
 
-  // Resolve DNS to prevent hostnames that map to private IPs (DNS rebinding)
+  // Resolve DNS to prevent hostnames that map to private IPs (DNS rebinding checks)
+  // WARNING: This check is vulnerable to Time-of-Check Time-of-Use (TOCTOU) DNS Rebinding attacks.
+  // A malicious DNS server could return a public IP here, then switch to a private IP for the actual fetch.
+  // In a nodejs environment using standard fetch/native DNS, this is hard to fully prevent without
+  // a custom agent that pins the IP or low-level socket inspection.
+  // For now, this check provides "defense in depth" against accidental internal access.
   if (!isIP(hostname)) {
     try {
       const resolved = await lookup(hostname, { all: true });
@@ -163,8 +168,7 @@ export async function validateRemoteUrl(
       }
     } catch (error) {
       throw new Error(
-        `SSRF Protection: Failed to resolve hostname "${hostname}": ${
-          error instanceof Error ? error.message : String(error)
+        `SSRF Protection: Failed to resolve hostname "${hostname}": ${error instanceof Error ? error.message : String(error)
         }`
       );
     }
@@ -517,8 +521,7 @@ class SSETransport implements MCPTransport {
     if (!response.ok) {
       const text = await response.text();
       throw new Error(
-        `Failed to send message to MCP server: ${response.status} ${response.statusText}${
-          text ? ` - ${text}` : ''
+        `Failed to send message to MCP server: ${response.status} ${response.statusText}${text ? ` - ${text}` : ''
         }`
       );
     }
@@ -610,7 +613,7 @@ class SSETransport implements MCPTransport {
   close(): void {
     // Cancel all active readers to prevent memory leaks
     for (const reader of this.activeReaders) {
-      reader.cancel().catch(() => {});
+      reader.cancel().catch(() => { });
     }
     this.activeReaders.clear();
     this.abortController?.abort();
