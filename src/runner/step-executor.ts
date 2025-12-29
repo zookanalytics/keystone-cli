@@ -8,6 +8,7 @@ import { executeArtifactStep } from './executors/artifact-executor.ts';
 import { executeBlueprintStep } from './executors/blueprint-executor.ts';
 import { executeEngineStepWrapper } from './executors/engine-executor.ts';
 import { executeFileStep } from './executors/file-executor.ts';
+import { executeGitStep } from './executors/git-executor.ts';
 import { executeHumanStep, executeSleepStep } from './executors/human-executor.ts';
 import { executeJoinStep } from './executors/join-executor.ts';
 import { executeLlmStep } from './executors/llm-executor.ts';
@@ -16,7 +17,6 @@ import { executePlanStep } from './executors/plan-executor.ts';
 import { executeRequestStep } from './executors/request-executor.ts';
 import { executeScriptStep } from './executors/script-executor.ts';
 import { executeShellStep } from './executors/shell-executor.ts';
-import { executeGitStep } from './executors/git-executor.ts';
 import {
   type StepExecutorOptions,
   type StepResult,

@@ -1,4 +1,5 @@
-import { RedactionBuffer, Redactor } from '../../utils/redactor';
+import { AUTO_LOAD_SECRET_PREFIXES } from '../../utils/env-constants.ts';
+import { RedactionBuffer, Redactor } from '../../utils/redactor.ts';
 
 export class SecretManager {
   private secretValues: string[] = [];
@@ -49,12 +50,17 @@ export class SecretManager {
       }
     }
 
-    // Include pattern-matched secrets from Bun.env (safe-ish way to get common secrets)
-    const secretPatterns = [/token/i, /key/i, /secret/i, /password/i, /auth/i, /api/i];
+    // Include pattern-matched secrets from Bun.env (safe way using prefix whitelist)
     for (const [key, value] of Object.entries(Bun.env)) {
-      if (value && secretPatterns.some((p) => p.test(key))) {
-        // Skip common system non-secret variables that might match patterns
-        if (safeSystemVars.includes(key)) continue;
+      if (!value) continue;
+
+      // Skip common system non-secret variables
+      if (safeSystemVars.includes(key)) continue;
+
+      // Check against allowed prefixes
+      const isSecret = AUTO_LOAD_SECRET_PREFIXES.some((prefix) => key.startsWith(prefix));
+
+      if (isSecret) {
         secrets[key] = value;
       }
     }

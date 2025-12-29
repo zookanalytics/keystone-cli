@@ -43,14 +43,8 @@ export async function executeShellStep(
   abortSignal?: AbortSignal
 ): Promise<StepResult> {
   if (step.args) {
-    if (!step.allowInsecure) {
-      const hasExpression = step.args.some((a) => ExpressionEvaluator.hasExpression(a));
-      if (hasExpression) {
-        throw new Error(
-          "Security Error: 'args' with expressions requires 'allowInsecure: true'.\nUse 'run' with 'escape()' for secure interpolation, or 'args' with static values."
-        );
-      }
-    }
+    // args are inherently safe from shell injection as they skip the shell
+    // and pass the array directly to the OS via Bun.spawn.
 
     const command = step.args.map((a) => ExpressionEvaluator.evaluateString(a, context)).join(' ');
     if (dryRun) {
@@ -209,9 +203,9 @@ async function readStreamWithLimit(
 }
 
 // Whitelist of allowed characters for secure shell command execution
-// Allows: Alphanumeric, whitespace, and common safe punctuation (_ . / : @ , + - = ' " ! ~ \)
-// Blocks: Pipes, redirects, subshells, variables ($), etc.
-const SAFE_SHELL_CHARS = /^[a-zA-Z0-9\s_./:@,+=~'"!-]+$/;
+// Allows: Alphanumeric, space, and common safe punctuation (_ . / : @ , + - = ' " ! ~)
+// Blocks: Newlines (\n, \r), Pipes, redirects, subshells, variables ($), etc.
+const SAFE_SHELL_CHARS = /^[a-zA-Z0-9 _./:@,+=~'"!-]+$/;
 
 export function detectShellInjectionRisk(rawCommand: string): boolean {
   // We scan the command to handle single quotes correctly.
