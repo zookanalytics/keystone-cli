@@ -77,9 +77,7 @@ export async function executeShellStep(
 
   if (!step.allowInsecure && hasUnescapedExpr(step.run)) {
     throw new Error(
-      `Security Error: Shell command contains unescaped expressions which are vulnerable to injection.\n` +
-      `Use \${{ escape(...) }} to safely interpolate values, or set 'allowInsecure: true' if you trust the source.\n` +
-      `Command template: ${step.run}`
+      `Security Error: Shell command contains unescaped expressions which are vulnerable to injection.\nUse \${{ escape(...) }} to safely interpolate values, or set 'allowInsecure: true' if you trust the source.\nCommand template: ${step.run}`
     );
   }
 
@@ -88,9 +86,7 @@ export async function executeShellStep(
 
   if (isRisky && !step.allowInsecure) {
     throw new Error(
-      `Security Error: Evaluated command contains shell metacharacters that may indicate injection risk.\n` +
-      `   Command: ${command.substring(0, 100)}${command.length > 100 ? '...' : ''}\n` +
-      `   To execute this command, use \${{ escape(...) }} for inputs or set 'allowInsecure: true'.`
+      `Security Error: Evaluated command contains shell metacharacters that may indicate injection risk.\n   Command: ${command.substring(0, 100)}${command.length > 100 ? '...' : ''}\n   To execute this command, use \${{ escape(...) }} for inputs or set 'allowInsecure: true'.`
     );
   }
 
@@ -177,7 +173,7 @@ function filterSensitiveEnv(env: Record<string, string | undefined>): Record<str
   for (const [key, value] of Object.entries(env)) {
     if (value === undefined) continue;
 
-    const isSensitive = sensitivePatterns.some(pattern => pattern.test(key));
+    const isSensitive = sensitivePatterns.some((pattern) => pattern.test(key));
     if (!isSensitive) {
       filtered[key] = value;
     }
@@ -287,7 +283,7 @@ async function readStreamWithLimit(
   if (maxBytes <= 0) {
     try {
       await stream.cancel?.();
-    } catch { }
+    } catch {}
     return { text: TRUNCATED_SUFFIX, truncated: true };
   }
 
@@ -309,7 +305,7 @@ async function readStreamWithLimit(
       text += decoder.decode();
       try {
         await reader.cancel();
-      } catch { }
+      } catch {}
       return { text: `${text}${TRUNCATED_SUFFIX}`, truncated: true };
     }
 
@@ -476,7 +472,7 @@ export async function executeShell(
       abortHandler = () => {
         try {
           proc.kill();
-        } catch { }
+        } catch {}
       };
       if (abortSignal) {
         abortSignal.addEventListener('abort', abortHandler, { once: true });
@@ -506,7 +502,7 @@ export async function executeShell(
       abortHandler = () => {
         try {
           proc.kill();
-        } catch { }
+        } catch {}
       };
       if (abortSignal) {
         abortSignal.addEventListener('abort', abortHandler, { once: true });
@@ -594,7 +590,7 @@ export async function executeShellArgs(
   const abortHandler = () => {
     try {
       proc.kill();
-    } catch { }
+    } catch {}
   };
 
   if (abortSignal) {

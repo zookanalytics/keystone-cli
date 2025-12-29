@@ -168,13 +168,13 @@ export class Redactor {
 
   /**
    * Redact secrets from any value (string, object, array), preserving the original type.
-   * 
+   *
    * Unlike {@link redact}, this method preserves the structure and type of the input:
    * - Strings are passed through `redact()` and returned as strings
    * - Arrays are recursively processed, maintaining array structure
    * - Objects are recursively processed, maintaining object structure
    * - Primitives (numbers, booleans, null, undefined) are returned unchanged
-   * 
+   *
    * This is the recommended method for redacting complex data structures like
    * step outputs before storage, as it preserves JSON serializability.
    */

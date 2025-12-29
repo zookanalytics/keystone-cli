@@ -102,8 +102,7 @@ export class ResourcePoolManager {
     // Check queue size limit
     if (pool.queue.length >= this.maxQueueSize) {
       throw new Error(
-        `Resource pool "${poolName}" queue is full (${this.maxQueueSize}). ` +
-          `Consider increasing concurrency limits or reducing parallel work.`
+        `Resource pool "${poolName}" queue is full (${this.maxQueueSize}). Consider increasing concurrency limits or reducing parallel work.`
       );
     }
 

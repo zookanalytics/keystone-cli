@@ -1,6 +1,6 @@
 /**
  * Command module exports
- * 
+ *
  * This file re-exports all command registration functions for a cleaner import.
  */
 

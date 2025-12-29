@@ -90,7 +90,7 @@ export async function executeSleepStep(
   ) {
     wakeAt = previousOutput.wakeAt as string;
     const untilDate = new Date(wakeAt);
-    if (!isNaN(untilDate.getTime())) {
+    if (!Number.isNaN(untilDate.getTime())) {
       durationMs = untilDate.getTime() - Date.now();
     }
   }
@@ -100,7 +100,7 @@ export async function executeSleepStep(
   } else if (step.until) {
     const untilStr = ExpressionEvaluator.evaluateString(step.until, context);
     const untilDate = new Date(untilStr);
-    if (isNaN(untilDate.getTime())) {
+    if (Number.isNaN(untilDate.getTime())) {
       throw new Error(`Invalid 'until' date format: ${untilStr}`);
     }
     wakeAt = untilDate.toISOString();

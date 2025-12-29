@@ -1,4 +1,4 @@
-import { randomUUID, createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { dirname, join } from 'node:path';
@@ -18,6 +18,7 @@ import { formatSchemaErrors, validateJsonSchema } from '../utils/schema-validato
 import { WorkflowRegistry } from '../utils/workflow-registry.ts';
 import type { EventHandler, StepPhase, WorkflowEvent } from './events.ts';
 import { ForeachExecutor } from './executors/foreach-executor.ts';
+import { type RunnerFactory, executeSubWorkflow } from './executors/subworkflow-executor.ts';
 import { type LLMMessage, getAdapter } from './llm-adapter.ts';
 import { MCPManager } from './mcp-manager.ts';
 import { ResourcePoolManager } from './resource-pool.ts';
@@ -34,7 +35,6 @@ import {
 import { withTimeout } from './timeout.ts';
 import { WorkflowScheduler } from './workflow-scheduler.ts';
 import { type ForeachStepContext, type StepContext, WorkflowState } from './workflow-state.ts';
-import { executeSubWorkflow, type RunnerFactory } from './executors/subworkflow-executor.ts';
 
 /**
  * A logger wrapper that redacts secrets from all log messages
@@ -43,7 +43,7 @@ class RedactingLogger implements Logger {
   constructor(
     private inner: Logger,
     private redactor: Redactor
-  ) { }
+  ) {}
 
   log(msg: string): void {
     this.inner.log(this.redactor.redact(msg));
@@ -187,7 +187,7 @@ export class WorkflowRunner {
 
     if (parentSignal.aborted) {
       controller.abort();
-      return { controller, cleanup: () => { } };
+      return { controller, cleanup: () => {} };
     }
 
     parentSignal.addEventListener('abort', onAbort, { once: true });
@@ -242,7 +242,9 @@ export class WorkflowRunner {
       if (options.signal.aborted) {
         this.abortController.abort();
       } else {
-        options.signal.addEventListener('abort', () => this.abortController.abort(), { once: true });
+        options.signal.addEventListener('abort', () => this.abortController.abort(), {
+          once: true,
+        });
       }
     }
 
@@ -433,7 +435,11 @@ export class WorkflowRunner {
 
           if (result.status === StepStatus.SUCCESS) {
             this.logger.log(`  ✓ Compensation ${stepDef.id} succeeded`);
-            await this.db.updateCompensationStatus(compRecord.id, StepStatus.SUCCESS, result.output);
+            await this.db.updateCompensationStatus(
+              compRecord.id,
+              StepStatus.SUCCESS,
+              result.output
+            );
           } else {
             this.logger.error(`  ✗ Compensation ${stepDef.id} failed: ${result.error}`);
             await this.db.updateCompensationStatus(
@@ -544,9 +550,10 @@ export class WorkflowRunner {
 
     // Use runtime-agnostic hashing
     // @ts-ignore - Check for Bun environment
-    const hash = typeof Bun !== 'undefined'
-      ? Bun.hash(JSON.stringify(data)).toString(16)
-      : createHash('sha256').update(JSON.stringify(data)).digest('hex');
+    const hash =
+      typeof Bun !== 'undefined'
+        ? Bun.hash(JSON.stringify(data)).toString(16)
+        : createHash('sha256').update(JSON.stringify(data)).digest('hex');
     return hash;
   }
 
@@ -615,9 +622,9 @@ export class WorkflowRunner {
           content:
             (step as import('../parser/schema.ts').FileStep).content !== undefined
               ? ExpressionEvaluator.evaluateString(
-                (step as import('../parser/schema.ts').FileStep).content as string,
-                context
-              )
+                  (step as import('../parser/schema.ts').FileStep).content as string,
+                  context
+                )
               : undefined,
           op: step.op,
           allowOutsideCwd: step.allowOutsideCwd,
@@ -634,9 +641,9 @@ export class WorkflowRunner {
           ),
           path: (step as import('../parser/schema.ts').ArtifactStep).path
             ? ExpressionEvaluator.evaluateString(
-              (step as import('../parser/schema.ts').ArtifactStep).path as string,
-              context
-            )
+                (step as import('../parser/schema.ts').ArtifactStep).path as string,
+                context
+              )
             : undefined,
           allowOutsideCwd: step.allowOutsideCwd,
         });
@@ -719,9 +726,9 @@ export class WorkflowRunner {
           input:
             (step as import('../parser/schema.ts').EngineStep).input !== undefined
               ? ExpressionEvaluator.evaluateObject(
-                (step as import('../parser/schema.ts').EngineStep).input,
-                context
-              )
+                  (step as import('../parser/schema.ts').EngineStep).input,
+                  context
+                )
               : undefined,
           env,
           cwd: ExpressionEvaluator.evaluateString(
@@ -978,11 +985,11 @@ export class WorkflowRunner {
     const idempotencyContextForRetry =
       idempotencyClaimed && scopedIdempotencyKey
         ? {
-          rawKey: idempotencyKey || scopedIdempotencyKey,
-          scopedKey: scopedIdempotencyKey,
-          ttlSeconds: idempotencyTtlSeconds,
-          claimed: true,
-        }
+            rawKey: idempotencyKey || scopedIdempotencyKey,
+            scopedKey: scopedIdempotencyKey,
+            ttlSeconds: idempotencyTtlSeconds,
+            claimed: true,
+          }
         : undefined;
 
     let stepToExecute = step;
@@ -1095,9 +1102,9 @@ export class WorkflowRunner {
         try {
           const outputForValidation =
             stepToExecute.type === 'engine' &&
-              result.output &&
-              typeof result.output === 'object' &&
-              'summary' in result.output
+            result.output &&
+            typeof result.output === 'object' &&
+            'summary' in result.output
               ? (result.output as { summary?: unknown }).summary
               : result.output;
           this.validator.validateSchema(
@@ -2222,7 +2229,7 @@ Revise the output to address the feedback. Return only the corrected output.`;
     this.logger.log(`Run ID: ${this.runId}`);
     this.logger.log(
       '\n⚠️  Security Warning: Only run workflows from trusted sources.\n' +
-      '   Workflows can execute arbitrary shell commands and access your environment.\n'
+        '   Workflows can execute arbitrary shell commands and access your environment.\n'
     );
 
     this.secretManager.redactAtRest = ConfigLoader.load().storage?.redact_secrets_at_rest ?? true;
@@ -2389,7 +2396,7 @@ Revise the output to address the feedback. Return only the corrected output.`;
             const readySteps = this.scheduler.getRunnableSteps(0, Number.MAX_SAFE_INTEGER);
             if (readySteps.length === 0) {
               throw new Error(
-                `Deadlock detected in workflow execution. Steps remaining but none runnable (dependency cycles or missing inputs).`
+                'Deadlock detected in workflow execution. Steps remaining but none runnable (dependency cycles or missing inputs).'
               );
             }
           }

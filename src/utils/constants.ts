@@ -128,10 +128,9 @@ export const LLM = {
 
 /** MCP (Model Context Protocol) related constants */
 export const MCP = {
-  /** 
+  /**
    * MCP Protocol version - update when upgrading to newer MCP spec
    * @see https://modelcontextprotocol.io/
    */
   PROTOCOL_VERSION: '2024-11-05',
 } as const;
-

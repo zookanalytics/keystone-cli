@@ -328,7 +328,7 @@ export class ExpressionEvaluator {
           ) {
             throw new TypeError(
               'Security: Cannot evaluate object with custom toString() method. ' +
-              'Pass a string template instead.'
+                'Pass a string template instead.'
             );
           }
         }

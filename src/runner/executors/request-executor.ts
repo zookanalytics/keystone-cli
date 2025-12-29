@@ -32,7 +32,7 @@ async function readResponseTextWithLimit(
       text += decoder.decode();
       try {
         await reader.cancel();
-      } catch { }
+      } catch {}
       return { text, truncated: true };
     }
 
@@ -246,13 +246,15 @@ export async function executeRequestStep(
       status: response.ok ? 'success' : 'failed',
       error: response.ok
         ? undefined
-        : `HTTP ${response.status}: ${response.statusText}${responseText
-          ? `\nResponse Body: ${responseText.substring(0, 500)}${responseText.length > 500 ? '...' : ''}${truncated ? ' [truncated]' : ''
-          }`
-          : truncated
-            ? '\nResponse Body: [truncated]'
-            : ''
-        }`,
+        : `HTTP ${response.status}: ${response.statusText}${
+            responseText
+              ? `\nResponse Body: ${responseText.substring(0, 500)}${responseText.length > 500 ? '...' : ''}${
+                  truncated ? ' [truncated]' : ''
+                }`
+              : truncated
+                ? '\nResponse Body: [truncated]'
+                : ''
+          }`,
     };
   } finally {
     clearTimeout(timeoutId);

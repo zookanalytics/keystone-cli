@@ -4,8 +4,8 @@ import type { ExpressionContext } from '../../expression/evaluator.ts';
 import { ExpressionEvaluator } from '../../expression/evaluator.ts';
 import type { FileStep } from '../../parser/schema.ts';
 import { LIMITS } from '../../utils/constants.ts';
-import { PathResolver } from '../../utils/paths.ts';
 import type { Logger } from '../../utils/logger.ts';
+import { PathResolver } from '../../utils/paths.ts';
 import type { StepResult } from './types.ts';
 
 interface DiffHunk {
@@ -25,7 +25,6 @@ interface SearchReplaceBlock {
   replace: string;
 }
 
-
 function normalizeDiffPath(diffPath: string): string {
   const trimmed = diffPath.trim().replace(/^([ab]\/)/, '');
 
@@ -41,8 +40,7 @@ function normalizeDiffPath(diffPath: string): string {
     /^[a-zA-Z]:/.test(normalized)
   ) {
     throw new Error(
-      `Security Error: Diff path "${trimmed}" contains path traversal or absolute path. ` +
-      `Only relative paths without ".." are allowed.`
+      `Security Error: Diff path "${trimmed}" contains path traversal or absolute path. Only relative paths without ".." are allowed.`
     );
   }
 

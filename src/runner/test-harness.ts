@@ -123,9 +123,7 @@ export class TestHarness {
 
     if (!this.options.allowSideEffects && this.isSideEffectStep(step)) {
       throw new Error(
-        `🛑 Safety Violation: Step "${step.id}" of type "${step.type}" attempts to execute a side-effect.\n` +
-          `To allow this, set 'options.allowSideEffects: true' in your test file.\n` +
-          `Otherwise, provide a mock response in 'fixture.mocks'.`
+        `🛑 Safety Violation: Step "${step.id}" of type "${step.type}" attempts to execute a side-effect.\nTo allow this, set 'options.allowSideEffects: true' in your test file.\nOtherwise, provide a mock response in 'fixture.mocks'.`
       );
     }
 

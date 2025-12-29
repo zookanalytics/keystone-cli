@@ -53,11 +53,11 @@ export class SafeSandbox {
   } {
     if (!logger) {
       return {
-        log: () => { },
-        error: () => { },
-        warn: () => { },
-        info: () => { },
-        debug: () => { },
+        log: () => {},
+        error: () => {},
+        warn: () => {},
+        info: () => {},
+        debug: () => {},
       };
     }
 
@@ -112,8 +112,8 @@ export class SafeSandbox {
     if (!SafeSandbox.warned) {
       SafeSandbox.logger.warn(
         '\n⚠️  SECURITY WARNING: Using Bun/Node.js built-in VM for script execution.\n' +
-        '   This sandbox is NOT secure against malicious code.\n' +
-        '   Only run workflows from trusted sources.\n'
+          '   This sandbox is NOT secure against malicious code.\n' +
+          '   Only run workflows from trusted sources.\n'
       );
       SafeSandbox.warned = true;
     }

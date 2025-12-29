@@ -138,30 +138,29 @@ export async function executeArtifactStep(
       },
       status: 'success',
     };
-  } else {
-    // download
-    if (!step.path) {
-      throw new Error(`Artifact download requires a destination path for "${rawName}"`);
-    }
-    const dest = ExpressionEvaluator.evaluateString(step.path, context);
-    const destPath = path.isAbsolute(dest) ? dest : path.join(baseDir, dest);
-    assertWithinBaseDir(baseDir, destPath, step.allowOutsideCwd);
-
-    if (!fs.existsSync(artifactPath)) {
-      throw new Error(`Artifact not found for download: ${sanitizedName}`);
-    }
-
-    // ensure dest dir exists
-    const destDir = path.dirname(destPath);
-    if (!fs.existsSync(destDir)) {
-      fs.mkdirSync(destDir, { recursive: true });
-    }
-
-    await fs.promises.cp(artifactPath, destPath, { recursive: true, force: true });
-
-    return {
-      output: { name: sanitizedName, path: destPath, op: 'download', artifactPath },
-      status: 'success',
-    };
   }
+  // download
+  if (!step.path) {
+    throw new Error(`Artifact download requires a destination path for "${rawName}"`);
+  }
+  const dest = ExpressionEvaluator.evaluateString(step.path, context);
+  const destPath = path.isAbsolute(dest) ? dest : path.join(baseDir, dest);
+  assertWithinBaseDir(baseDir, destPath, step.allowOutsideCwd);
+
+  if (!fs.existsSync(artifactPath)) {
+    throw new Error(`Artifact not found for download: ${sanitizedName}`);
+  }
+
+  // ensure dest dir exists
+  const destDir = path.dirname(destPath);
+  if (!fs.existsSync(destDir)) {
+    fs.mkdirSync(destDir, { recursive: true });
+  }
+
+  await fs.promises.cp(artifactPath, destPath, { recursive: true, force: true });
+
+  return {
+    output: { name: sanitizedName, path: destPath, op: 'download', artifactPath },
+    status: 'success',
+  };
 }

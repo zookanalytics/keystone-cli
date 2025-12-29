@@ -45,7 +45,7 @@ describe('json-parser', () => {
 
   it('should throw if input text is too large', () => {
     // Generate a string larger than LIMITS.MAX_JSON_PARSE_LENGTH (1,000,000)
-    const text = '{"a": "' + 'x'.repeat(1_000_001) + '"}';
+    const text = `{"a": "${'x'.repeat(1_000_001)}"}`;
     expect(() => extractJson(text)).toThrow(/input too large/);
   });
 });

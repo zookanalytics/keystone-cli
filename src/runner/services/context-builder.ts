@@ -126,7 +126,7 @@ export class ContextBuilder {
           op: (step as any).op,
         });
       }
-      default:
+      default: {
         // For most steps, we just pass through properties which might contain expressions
         const inputs: Record<string, unknown> = {};
         for (const [key, value] of Object.entries(step)) {
@@ -138,6 +138,7 @@ export class ContextBuilder {
           }
         }
         return stripUndefined(inputs);
+      }
     }
   }
 }

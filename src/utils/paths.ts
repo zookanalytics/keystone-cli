@@ -1,6 +1,6 @@
-import { homedir } from 'node:os';
-import { join, resolve, isAbsolute, sep } from 'node:path';
 import { realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { isAbsolute, join, resolve, sep } from 'node:path';
 
 export class PathResolver {
   /**
@@ -81,11 +81,7 @@ export class PathResolver {
    * Assert that a path is within the current working directory
    * @throws Error if path is outside CWD and allowOutsideCwd is false
    */
-  static assertWithinCwd(
-    targetPath: string,
-    allowOutsideCwd?: boolean,
-    label = 'Path'
-  ): void {
+  static assertWithinCwd(targetPath: string, allowOutsideCwd?: boolean, label = 'Path'): void {
     if (allowOutsideCwd) return;
     const cwd = process.cwd();
     const realCwd = realpathSync(cwd);
@@ -99,8 +95,7 @@ export class PathResolver {
         const real = realpathSync(current);
         if (real !== realCwd && !real.startsWith(realCwd + sep)) {
           throw new Error(
-            `${label} "${targetPath}" is outside the project directory. ` +
-            `Use 'allowOutsideCwd: true' if this is intended.`
+            `${label} "${targetPath}" is outside the project directory. Use 'allowOutsideCwd: true' if this is intended.`
           );
         }
         break; // Successfully validated against an existing ancestor
@@ -113,8 +108,7 @@ export class PathResolver {
         if (parent === current) {
           // We reached the root and still couldn't validate
           throw new Error(
-            `${label} "${targetPath}" is outside the project directory. ` +
-            `Use 'allowOutsideCwd: true' if this is intended.`
+            `${label} "${targetPath}" is outside the project directory. Use 'allowOutsideCwd: true' if this is intended.`
           );
         }
         current = parent;

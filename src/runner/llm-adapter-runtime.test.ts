@@ -100,11 +100,11 @@ describe('LLM Adapter Runtime and Helpers', () => {
       process.env.TRANSFORMERS_CACHE = '/custom/cache';
       expect(resolveTransformersCacheDir()).toBe('/custom/cache');
 
-      delete process.env.TRANSFORMERS_CACHE;
+      process.env.TRANSFORMERS_CACHE = undefined;
       process.env.XDG_CACHE_HOME = '/xdg/cache';
       expect(resolveTransformersCacheDir()).toContain('/xdg/cache');
 
-      delete process.env.XDG_CACHE_HOME;
+      process.env.XDG_CACHE_HOME = undefined;
       process.env.HOME = '/home/user';
       expect(resolveTransformersCacheDir()).toContain('/home/user/.cache');
     });

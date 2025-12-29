@@ -785,9 +785,9 @@ export async function executeLlmStep(
               typeof val === 'string'
                 ? val
                 : (() => {
-                  const json = safeJsonStringify(val);
-                  return typeof json === 'string' ? json : String(val);
-                })();
+                    const json = safeJsonStringify(val);
+                    return typeof json === 'string' ? json : String(val);
+                  })();
             context.env[key] = stringValue;
             context.envOverrides[key] = stringValue;
           }

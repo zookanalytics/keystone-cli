@@ -134,8 +134,7 @@ export class ProcessSandbox {
       for (const key of Object.getOwnPropertyNames(obj)) {
         if (dangerousKeys.includes(key)) {
           throw new Error(
-            `Security Error: Context contains forbidden key "${key}"${path ? ` at path "${path}"` : ''}. ` +
-            `This may indicate a prototype pollution attack.`
+            `Security Error: Context contains forbidden key "${key}"${path ? ` at path "${path}"` : ''}. This may indicate a prototype pollution attack.`
           );
         }
         checkForDangerousKeys(

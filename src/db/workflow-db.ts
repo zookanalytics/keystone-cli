@@ -453,8 +453,7 @@ export class WorkflowDb {
           // Log warning after threshold to help diagnose contention issues
           if (attempt === DB.RETRY_WARN_THRESHOLD) {
             console.warn(
-              `[WorkflowDb] SQLite busy after ${DB.RETRY_WARN_THRESHOLD} retries. ` +
-              `High contention detected - consider reducing concurrency.`
+              `[WorkflowDb] SQLite busy after ${DB.RETRY_WARN_THRESHOLD} retries. High contention detected - consider reducing concurrency.`
             );
           }
 
@@ -462,7 +461,7 @@ export class WorkflowDb {
           const delayMs = Math.min(
             DB.RETRY_MAX_DELAY_MS,
             DB.RETRY_BASE_DELAY_MS * DB.RETRY_BACKOFF_MULTIPLIER ** attempt +
-            Math.random() * DB.RETRY_JITTER_MS
+              Math.random() * DB.RETRY_JITTER_MS
           );
           await Bun.sleep(delayMs);
           continue;
@@ -477,7 +476,11 @@ export class WorkflowDb {
 
     const msg = lastError instanceof Error ? lastError.message : String(lastError);
     const code = (lastError as any)?.code;
-    throw new DatabaseError(`SQLite operation failed after ${maxRetries} retries: ${msg}`, code, true);
+    throw new DatabaseError(
+      `SQLite operation failed after ${maxRetries} retries: ${msg}`,
+      code,
+      true
+    );
   }
 
   private formatExpiresAt(ttlSeconds?: number): string | null {

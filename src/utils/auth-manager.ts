@@ -48,12 +48,15 @@ export const COPILOT_HEADERS = {
 // OAuth Client IDs - configurable via environment variables for different deployment environments
 const GITHUB_CLIENT_ID = process.env.KEYSTONE_GITHUB_CLIENT_ID ?? '013444988716b5155f4c';
 const TOKEN_REFRESH_BUFFER_SECONDS = 300;
-const OPENAI_CHATGPT_CLIENT_ID = process.env.KEYSTONE_OPENAI_CLIENT_ID ?? 'app_EMoamEEZ73f0CkXaXp7hrann';
+const OPENAI_CHATGPT_CLIENT_ID =
+  process.env.KEYSTONE_OPENAI_CLIENT_ID ?? 'app_EMoamEEZ73f0CkXaXp7hrann';
 const OPENAI_CHATGPT_REDIRECT_URI = 'http://localhost:1455/callback';
-const ANTHROPIC_OAUTH_CLIENT_ID = process.env.KEYSTONE_ANTHROPIC_CLIENT_ID ?? '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
+const ANTHROPIC_OAUTH_CLIENT_ID =
+  process.env.KEYSTONE_ANTHROPIC_CLIENT_ID ?? '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 const ANTHROPIC_OAUTH_REDIRECT_URI = 'https://console.anthropic.com/oauth/code/callback';
 const ANTHROPIC_OAUTH_SCOPE = 'org:create_api_key user:profile user:inference';
-const GOOGLE_GEMINI_OAUTH_CLIENT_ID = process.env.KEYSTONE_GOOGLE_CLIENT_ID ??
+const GOOGLE_GEMINI_OAUTH_CLIENT_ID =
+  process.env.KEYSTONE_GOOGLE_CLIENT_ID ??
   '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com';
 const GOOGLE_GEMINI_OAUTH_REDIRECT_URI = 'http://localhost:51121/oauth-callback';
 const GOOGLE_GEMINI_OAUTH_SCOPES = [
@@ -86,13 +89,13 @@ export class AuthManager {
     try {
       const fs = require('node:fs');
       fs.chmodSync(dir, 0o700);
-    } catch { }
+    } catch {}
 
     const authPath = join(dir, 'auth.json');
     if (existsSync(authPath)) {
       try {
         require('node:fs').chmodSync(authPath, 0o600);
-      } catch { }
+      } catch {}
     }
     return authPath;
   }
@@ -114,43 +117,53 @@ export class AuthManager {
     // Limit message length to prevent DoS with very long inputs
     const MAX_SANITIZE_LENGTH = 10_000;
     if (message.length > MAX_SANITIZE_LENGTH) {
-      message = message.substring(0, MAX_SANITIZE_LENGTH) + '... [truncated]';
+      message = `${message.substring(0, MAX_SANITIZE_LENGTH)}... [truncated]`;
     }
 
     // Simple token-based redaction (avoids ReDoS-prone regex)
     const sensitiveKeywords = [
-      'token', 'key', 'secret', 'password', 'credential',
-      'auth', 'private', 'cookie', 'session', 'signature'
+      'token',
+      'key',
+      'secret',
+      'password',
+      'credential',
+      'auth',
+      'private',
+      'cookie',
+      'session',
+      'signature',
     ];
 
     // Split on common delimiters preserving them
     const parts = message.split(/([:\s="']+)/);
     let prevWasSensitive = false;
 
-    return parts.map((part) => {
-      const lower = part.toLowerCase();
+    return parts
+      .map((part) => {
+        const lower = part.toLowerCase();
 
-      // Check if current part is a sensitive keyword
-      if (sensitiveKeywords.some(kw => lower.includes(kw))) {
-        prevWasSensitive = true;
-        return part;
-      }
+        // Check if current part is a sensitive keyword
+        if (sensitiveKeywords.some((kw) => lower.includes(kw))) {
+          prevWasSensitive = true;
+          return part;
+        }
 
-      // If previous part was sensitive and this looks like a value, redact it
-      if (prevWasSensitive && /^[a-zA-Z0-9._~%=-]+$/.test(part) && part.length > 3) {
+        // If previous part was sensitive and this looks like a value, redact it
+        if (prevWasSensitive && /^[a-zA-Z0-9._~%=-]+$/.test(part) && part.length > 3) {
+          prevWasSensitive = false;
+          return '***REDACTED***';
+        }
+
+        // Delimiter parts reset the flag
+        if (/^[:\s="']+$/.test(part)) {
+          // Keep prevWasSensitive as is - it's just a delimiter
+          return part;
+        }
+
         prevWasSensitive = false;
-        return '***REDACTED***';
-      }
-
-      // Delimiter parts reset the flag
-      if (/^[:\s="']+$/.test(part)) {
-        // Keep prevWasSensitive as is - it's just a delimiter
         return part;
-      }
-
-      prevWasSensitive = false;
-      return part;
-    }).join('');
+      })
+      .join('');
   }
 
   static save(data: AuthData): void {
@@ -159,9 +172,7 @@ export class AuthManager {
     try {
       writeFileSync(path, JSON.stringify({ ...current, ...data }, null, 2), { mode: 0o600 });
     } catch (error) {
-      AuthManager.logger.error(
-        `Failed to save auth data: ${AuthManager.sanitizeError(error)}`
-      );
+      AuthManager.logger.error(`Failed to save auth data: ${AuthManager.sanitizeError(error)}`);
     }
   }
 
@@ -299,7 +310,9 @@ export class AuthManager {
 
       return data.token;
     } catch (error) {
-      AuthManager.logger.error(`Error refreshing Copilot token: ${AuthManager.sanitizeError(error)}`);
+      AuthManager.logger.error(
+        `Error refreshing Copilot token: ${AuthManager.sanitizeError(error)}`
+      );
       return undefined;
     }
   }
@@ -419,7 +432,7 @@ export class AuthManager {
         ) {
           return data.cloudaicompanionProject.id;
         }
-      } catch { }
+      } catch {}
     }
 
     return undefined;
@@ -733,7 +746,9 @@ export class AuthManager {
 
       return data.access_token;
     } catch (error) {
-      AuthManager.logger.error(`Error refreshing OpenAI ChatGPT token: ${AuthManager.sanitizeError(error)}`);
+      AuthManager.logger.error(
+        `Error refreshing OpenAI ChatGPT token: ${AuthManager.sanitizeError(error)}`
+      );
       return undefined;
     }
   }
@@ -786,7 +801,9 @@ export class AuthManager {
 
       return data.access_token;
     } catch (error) {
-      AuthManager.logger.error(`Error refreshing Google Gemini token: ${AuthManager.sanitizeError(error)}`);
+      AuthManager.logger.error(
+        `Error refreshing Google Gemini token: ${AuthManager.sanitizeError(error)}`
+      );
       return undefined;
     }
   }
@@ -833,7 +850,9 @@ export class AuthManager {
 
       return data.access_token;
     } catch (error) {
-      AuthManager.logger.error(`Error refreshing Anthropic Claude token: ${AuthManager.sanitizeError(error)}`);
+      AuthManager.logger.error(
+        `Error refreshing Anthropic Claude token: ${AuthManager.sanitizeError(error)}`
+      );
       return undefined;
     }
   }

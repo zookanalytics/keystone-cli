@@ -193,8 +193,8 @@ describe('WorkflowRunner', () => {
       },
       error: (msg: string) => console.error(msg),
       warn: (msg: string) => console.warn(msg),
-      info: (msg: string) => { },
-      debug: (msg: string) => { },
+      info: (msg: string) => {},
+      debug: (msg: string) => {},
     };
 
     const finallyWorkflow: Workflow = {
@@ -331,10 +331,10 @@ describe('WorkflowRunner', () => {
           errorsBlockExecuted = true;
         }
       },
-      error: () => { },
-      warn: () => { },
-      info: () => { },
-      debug: () => { },
+      error: () => {},
+      warn: () => {},
+      info: () => {},
+      debug: () => {},
     };
 
     const errorsWorkflow: Workflow = {
@@ -390,10 +390,10 @@ describe('WorkflowRunner', () => {
           idempotencyHitCount++;
         }
       },
-      error: () => { },
-      warn: () => { },
-      info: () => { },
-      debug: () => { },
+      error: () => {},
+      warn: () => {},
+      info: () => {},
+      debug: () => {},
     };
 
     const idempotencyWorkflow: Workflow = {
@@ -573,8 +573,8 @@ describe('WorkflowRunner', () => {
     ).toString(16);
     const cached = await db.getStepCache(cacheKey);
     expect(cached).not.toBeNull();
-    expect(cached!.output).not.toContain(secret);
-    expect(JSON.parse(cached!.output).stdout).toContain('***REDACTED***');
+    expect(cached?.output).not.toContain(secret);
+    expect(JSON.parse(cached?.output).stdout).toContain('***REDACTED***');
     db.close();
 
     if (existsSync(memoizeDbPath)) rmSync(memoizeDbPath);
@@ -609,7 +609,15 @@ describe('WorkflowRunner', () => {
       inputs: {
         val: { type: 'string' },
       },
-      steps: [{ id: 'cs1', type: 'shell', run: 'echo "child-${{ inputs.val }}"', allowInsecure: true, needs: [] }],
+      steps: [
+        {
+          id: 'cs1',
+          type: 'shell',
+          run: 'echo "child-${{ inputs.val }}"',
+          allowInsecure: true,
+          needs: [],
+        },
+      ],
       outputs: {
         out: '${{ steps.cs1.output.stdout.trim() }}',
       },
@@ -679,10 +687,10 @@ describe('WorkflowRunner', () => {
       log: (msg: string) => {
         if (msg.includes('Executing step: s1')) s1Executed = true;
       },
-      error: () => { },
-      warn: () => { },
-      info: () => { },
-      debug: () => { },
+      error: () => {},
+      warn: () => {},
+      info: () => {},
+      debug: () => {},
     };
 
     const runner2 = new WorkflowRunner(fixedWorkflow, {
@@ -811,15 +819,15 @@ describe('WorkflowRunner', () => {
   it('should continue even if finally step fails', async () => {
     let finallyFailedLogged = false;
     const runnerLogger = {
-      log: () => { },
+      log: () => {},
       error: (msg: string) => {
         if (msg.includes('Finally step fin failed')) {
           finallyFailedLogged = true;
         }
       },
-      warn: () => { },
-      info: () => { },
-      debug: () => { },
+      warn: () => {},
+      info: () => {},
+      debug: () => {},
     };
 
     const failFinallyWorkflow: Workflow = {
@@ -841,10 +849,10 @@ describe('WorkflowRunner', () => {
           retryLogged = true;
         }
       },
-      error: () => { },
-      warn: () => { },
-      info: () => { },
-      debug: () => { },
+      error: () => {},
+      warn: () => {},
+      info: () => {},
+      debug: () => {},
     };
 
     const retryWorkflow: Workflow = {
@@ -1040,15 +1048,15 @@ describe('WorkflowRunner', () => {
     // Verify warnings
     let warningLogged = false;
     const logger = {
-      log: () => { },
-      error: () => { },
+      log: () => {},
+      error: () => {},
       warn: (msg: string) => {
         if (msg.includes("Resuming a run marked as 'running'")) {
           warningLogged = true;
         }
       },
-      info: () => { },
-      debug: () => { },
+      info: () => {},
+      debug: () => {},
     };
 
     const runner = new WorkflowRunner(workflow, {
@@ -1153,9 +1161,9 @@ describe('WorkflowRunner', () => {
           loggedResume = true;
         }
       },
-      error: () => { },
-      warn: () => { },
-      info: () => { },
+      error: () => {},
+      warn: () => {},
+      info: () => {},
     };
 
     const runner = new WorkflowRunner(workflow, {

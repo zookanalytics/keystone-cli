@@ -48,7 +48,7 @@ export class ContextInjector {
    */
   static scanDirectoryContext(dir: string, depth = 3): Omit<ContextData, 'cursorRules'> {
     const result: Omit<ContextData, 'cursorRules'> = {};
-    const projectRoot = this.findProjectRoot(dir);
+    const projectRoot = ContextInjector.findProjectRoot(dir);
     let current = path.resolve(dir);
 
     // Walk from current dir up to project root, limited by depth
@@ -94,7 +94,7 @@ export class ContextInjector {
     const rulesDirs = ['.cursor/rules', '.claude/rules'];
     const projectRoot =
       filesAccessed.length > 0
-        ? this.findProjectRoot(path.dirname(filesAccessed[0]))
+        ? ContextInjector.findProjectRoot(path.dirname(filesAccessed[0]))
         : process.cwd();
 
     for (const rulesDir of rulesDirs) {
@@ -152,7 +152,7 @@ export class ContextInjector {
       // Truncate README to first 2000 chars to avoid overwhelming the context
       const truncatedReadme =
         context.readme.length > 2000
-          ? context.readme.slice(0, 2000) + '\n[... README truncated ...]'
+          ? `${context.readme.slice(0, 2000)}\n[... README truncated ...]`
           : context.readme;
       parts.push('=== README.md (Project Overview) ===');
       parts.push(truncatedReadme);
@@ -203,8 +203,8 @@ export class ContextInjector {
 
     // Check cache
     const cacheKey = dir;
-    const cached = this.contextCache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < this.CACHE_TTL_MS) {
+    const cached = ContextInjector.contextCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < ContextInjector.CACHE_TTL_MS) {
       return cached.context;
     }
 
@@ -212,7 +212,7 @@ export class ContextInjector {
     const context: ContextData = {};
 
     if (config.sources.includes('readme') || config.sources.includes('agents_md')) {
-      const dirContext = this.scanDirectoryContext(dir, config.search_depth);
+      const dirContext = ContextInjector.scanDirectoryContext(dir, config.search_depth);
       if (config.sources.includes('readme')) {
         context.readme = dirContext.readme;
       }
@@ -222,11 +222,11 @@ export class ContextInjector {
     }
 
     if (config.sources.includes('cursor_rules')) {
-      context.cursorRules = this.scanRules(filesAccessed);
+      context.cursorRules = ContextInjector.scanRules(filesAccessed);
     }
 
     // Cache the result
-    this.contextCache.set(cacheKey, { context, timestamp: Date.now() });
+    ContextInjector.contextCache.set(cacheKey, { context, timestamp: Date.now() });
 
     return context;
   }
@@ -235,6 +235,6 @@ export class ContextInjector {
    * Clear the context cache
    */
   static clearCache(): void {
-    this.contextCache.clear();
+    ContextInjector.contextCache.clear();
   }
 }

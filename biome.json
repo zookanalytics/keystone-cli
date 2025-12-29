@@ -23,7 +23,8 @@
         "noStaticOnlyClass": "off"
       },
       "suspicious": {
-        "noConsole": "error"
+        "noConsole": "error",
+        "noExplicitAny": "off"
       }
     }
   },
@@ -38,7 +39,7 @@
   },
   "overrides": [
     {
-      "include": ["src/cli.ts", "src/utils/logger.ts"],
+      "include": ["src/cli.ts", "src/commands/**", "src/db/workflow-db.ts", "src/utils/logger.ts"],
       "linter": {
         "rules": {
           "suspicious": {

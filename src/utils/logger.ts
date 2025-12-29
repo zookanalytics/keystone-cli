@@ -1,7 +1,7 @@
 /**
  * Standard logger interface for Keystone components.
- * 
- * Implementations should provide consistent formatting and respect 
+ *
+ * Implementations should provide consistent formatting and respect
  * global log levels where applicable.
  */
 export interface Logger {
@@ -42,9 +42,9 @@ export class ConsoleLogger implements Logger {
 }
 
 export class SilentLogger implements Logger {
-  log(_message: string): void { }
-  error(_message: string): void { }
-  warn(_message: string): void { }
-  info(_message: string): void { }
-  debug(_message: string): void { }
+  log(_message: string): void {}
+  error(_message: string): void {}
+  warn(_message: string): void {}
+  info(_message: string): void {}
+  debug(_message: string): void {}
 }

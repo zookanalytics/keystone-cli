@@ -4,9 +4,9 @@ export function generateWorkflowDocs(workflow: Workflow): string {
   const parts: string[] = [];
 
   // Title and Description
-  parts.push('# ' + workflow.name);
+  parts.push(`# ${workflow.name}`);
   if (workflow.description) {
-    parts.push('\n' + workflow.description);
+    parts.push(`\n${workflow.description}`);
   }
 
   // Inputs
@@ -16,25 +16,12 @@ export function generateWorkflowDocs(workflow: Workflow): string {
     parts.push('| :--- | :--- | :--- | :--- | :--- |');
 
     for (const [name, input] of Object.entries(workflow.inputs)) {
-      const typeStr = input.secret ? '**secret** (' + input.type + ')' : input.type;
-      const defaultStr =
-        input.default !== undefined ? '`' + JSON.stringify(input.default) + '`' : '-';
+      const typeStr = input.secret ? `**secret** (${input.type})` : input.type;
+      const defaultStr = input.default !== undefined ? `\`${JSON.stringify(input.default)}\`` : '-';
       const requiredStr = input.default === undefined ? 'Yes' : 'No';
       const descStr = input.description || '-';
 
-      parts.push(
-        '| `' +
-          name +
-          '` | ' +
-          typeStr +
-          ' | ' +
-          defaultStr +
-          ' | ' +
-          requiredStr +
-          ' | ' +
-          descStr +
-          ' |'
-      );
+      parts.push(`| \`${name}\` | ${typeStr} | ${defaultStr} | ${requiredStr} | ${descStr} |`);
     }
   }
 
@@ -45,7 +32,7 @@ export function generateWorkflowDocs(workflow: Workflow): string {
     parts.push('| :--- | :--- |');
 
     for (const [name, expr] of Object.entries(workflow.outputs)) {
-      parts.push('| `' + name + '` | `' + expr + '` |');
+      parts.push(`| \`${name}\` | \`${expr}\` |`);
     }
   }
 
@@ -56,20 +43,19 @@ export function generateWorkflowDocs(workflow: Workflow): string {
     // Simple list for now
     for (const step of workflow.steps) {
       const typeEmoji = getStepEmoji(step.type);
-      const needs =
-        step.needs && step.needs.length > 0 ? ' (needs: ' + step.needs.join(', ') + ')' : '';
-      parts.push('\n### ' + typeEmoji + ' ' + step.id + ' `' + step.type + '`' + needs);
+      const needs = step.needs && step.needs.length > 0 ? ` (needs: ${step.needs.join(', ')})` : '';
+      parts.push(`\n### ${typeEmoji} ${step.id} \`${step.type}\`${needs}`);
 
       if (step.if) {
-        parts.push('\n*Condition:* `' + step.if + '`');
+        parts.push(`\n*Condition:* \`${step.if}\``);
       }
 
       // Add specific step details
       if (step.type === 'shell' && 'run' in step) {
-        parts.push('\n```bash\n' + step.run + '\n```');
+        parts.push(`\n\`\`\`bash\n${step.run}\n\`\`\``);
       } else if (step.type === 'llm' && 'prompt' in step) {
-        parts.push('\n*Agent:* `' + step.agent + '`');
-        parts.push('\n> ' + step.prompt.replace(/\n/g, '\n> '));
+        parts.push(`\n*Agent:* \`${step.agent}\``);
+        parts.push(`\n> ${step.prompt.replace(/\n/g, '\n> ')}`);
       }
     }
   }

@@ -111,7 +111,7 @@ describe('AST-Grep Tools', () => {
       const tool = STANDARD_TOOLS.find((t) => t.name === 'ast_grep_search');
       expect(tool).toBeDefined();
 
-      const script = tool!.execution!.run as string;
+      const script = tool?.execution?.run as string;
       const sandbox = {
         args: { pattern: 'console.log($A)', language: 'javascript', paths: [] },
         require: (mod: string) => {
@@ -152,7 +152,7 @@ describe('AST-Grep Tools', () => {
       const tool = STANDARD_TOOLS.find((t) => t.name === 'ast_grep_replace');
       expect(tool).toBeDefined();
 
-      const script = tool!.execution!.run as string;
+      const script = tool?.execution?.run as string;
       const sandbox = {
         args: {
           pattern: 'console.log($A)',

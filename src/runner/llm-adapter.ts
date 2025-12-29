@@ -438,13 +438,13 @@ export class OpenAIAdapter implements LLMAdapter {
         stream: isStreaming,
         response_format: options?.responseSchema
           ? {
-            type: 'json_schema',
-            json_schema: {
-              name: 'output',
-              strict: true,
-              schema: options.responseSchema,
-            },
-          }
+              type: 'json_schema',
+              json_schema: {
+                name: 'output',
+                strict: true,
+                schema: options.responseSchema,
+              },
+            }
           : undefined,
       }),
       signal: options?.signal,
@@ -635,19 +635,19 @@ export class AnthropicAdapter implements LLMAdapter {
 
     const anthropicTools = options?.tools
       ? options.tools.map((t) => ({
-        name: t.function.name,
-        description: t.function.description,
-        input_schema: t.function.parameters,
-      }))
+          name: t.function.name,
+          description: t.function.description,
+          input_schema: t.function.parameters,
+        }))
       : undefined;
 
     // If responseSchema is provided, Anthropic requires using tool call to force output
     const responseTool = options?.responseSchema
       ? {
-        name: 'record_output',
-        description: 'Record the structured output matching the requested schema',
-        input_schema: options.responseSchema,
-      }
+          name: 'record_output',
+          description: 'Record the structured output matching the requested schema',
+          input_schema: options.responseSchema,
+        }
       : undefined;
 
     const combinedTools = [...(anthropicTools || []), ...(responseTool ? [responseTool] : [])];
@@ -926,13 +926,13 @@ export class OpenAIChatGPTAdapter implements LLMAdapter {
         include: ['reasoning.encrypted_content'],
         response_format: options?.responseSchema
           ? {
-            type: 'json_schema',
-            json_schema: {
-              name: 'output',
-              strict: true,
-              schema: options.responseSchema,
-            },
-          }
+              type: 'json_schema',
+              json_schema: {
+                name: 'output',
+                strict: true,
+                schema: options.responseSchema,
+              },
+            }
           : undefined,
       }),
       signal: options?.signal,
@@ -1108,8 +1108,8 @@ export class GoogleGeminiAdapter implements LLMAdapter {
     const systemInstruction =
       systemParts.length > 0
         ? {
-          parts: [{ text: systemParts.join('\n\n') }],
-        }
+            parts: [{ text: systemParts.join('\n\n') }],
+          }
         : undefined;
 
     return { contents, systemInstruction };
@@ -1428,8 +1428,8 @@ export class LocalEmbeddingAdapter implements LLMAdapter {
   ): Promise<LLMResponse> {
     throw new Error(
       'Local models in Keystone currently only support memory/embedding operations. ' +
-      'To use a local LLM for chat/generation, please use an OpenAI-compatible local server ' +
-      '(like Ollama, LM Studio, or LocalAI) and configure it as an OpenAI provider in your config.'
+        'To use a local LLM for chat/generation, please use an OpenAI-compatible local server ' +
+        '(like Ollama, LM Studio, or LocalAI) and configure it as an OpenAI provider in your config.'
     );
   }
 
