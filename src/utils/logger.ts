@@ -13,8 +13,8 @@ export interface Logger {
   warn(message: string): void;
   /** Log informational messages */
   info(message: string): void;
-  /** Log verbose debugging information. Optional to implement. */
-  debug?(message: string): void;
+  /** Log verbose debugging information */
+  debug(message: string): void;
 }
 
 export class ConsoleLogger implements Logger {

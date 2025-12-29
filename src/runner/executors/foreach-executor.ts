@@ -3,6 +3,7 @@ import type { WorkflowDb } from '../../db/workflow-db.ts';
 import { type ExpressionContext, ExpressionEvaluator } from '../../expression/evaluator.ts';
 import type { Step } from '../../parser/schema.ts';
 import { StepStatus, type StepStatusType, WorkflowStatus } from '../../types/status.ts';
+import { LIMITS } from '../../utils/constants.ts';
 import type { Logger } from '../../utils/logger.ts';
 import type { ResourcePoolManager } from '../resource-pool.ts';
 import type { ForeachStepContext, StepContext } from '../workflow-state.ts';
@@ -24,7 +25,7 @@ export class ForeachExecutor {
     private executeStepFn: ExecuteStepCallback,
     private abortSignal?: AbortSignal,
     private resourcePool?: ResourcePoolManager
-  ) {}
+  ) { }
 
   /**
    * Aggregate outputs from multiple iterations of a foreach step
@@ -92,6 +93,14 @@ export class ForeachExecutor {
         throw new Error(`foreach expression must evaluate to an array: ${step.foreach}`);
       }
       items = evaluatedItems;
+    }
+
+    // Validate iteration count to prevent memory exhaustion
+    if (items.length > LIMITS.MAX_FOREACH_ITERATIONS) {
+      throw new Error(
+        `Foreach step "${step.id}" exceeds maximum iteration limit of ${LIMITS.MAX_FOREACH_ITERATIONS}. ` +
+        `Got ${items.length} items. Consider batching or reducing the dataset.`
+      );
     }
 
     this.logger.log(`  ⤷ Executing step ${step.id} for ${items.length} items`);

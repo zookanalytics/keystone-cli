@@ -557,15 +557,19 @@ export class ExpressionEvaluator {
 
         switch (binaryNode.operator) {
           case '+':
-            return (left as number) + (right as number);
+            // Support both string concatenation and numeric addition
+            if (typeof left === 'string' || typeof right === 'string') {
+              return String(left ?? '') + String(right ?? '');
+            }
+            return Number(left) + Number(right);
           case '-':
-            return (left as number) - (right as number);
+            return Number(left) - Number(right);
           case '*':
-            return (left as number) * (right as number);
+            return Number(left) * Number(right);
           case '/':
-            return (left as number) / (right as number);
+            return Number(left) / Number(right);
           case '%':
-            return (left as number) % (right as number);
+            return Number(left) % Number(right);
           case '==':
             // Use loose equality to match non-programmer expectations (e.g. "5" == 5)
             // Strict equality is available via ===
@@ -579,13 +583,13 @@ export class ExpressionEvaluator {
           case '!==':
             return left !== right;
           case '<':
-            return (left as number) < (right as number);
+            return Number(left) < Number(right);
           case '<=':
-            return (left as number) <= (right as number);
+            return Number(left) <= Number(right);
           case '>':
-            return (left as number) > (right as number);
+            return Number(left) > Number(right);
           case '>=':
-            return (left as number) >= (right as number);
+            return Number(left) >= Number(right);
           default:
             throw new Error(`Unsupported binary operator: ${binaryNode.operator}`);
         }

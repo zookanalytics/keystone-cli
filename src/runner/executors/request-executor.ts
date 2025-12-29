@@ -32,7 +32,7 @@ async function readResponseTextWithLimit(
       text += decoder.decode();
       try {
         await reader.cancel();
-      } catch {}
+      } catch { }
       return { text, truncated: true };
     }
 
@@ -50,13 +50,14 @@ async function readResponseTextWithLimit(
 export async function executeRequestStep(
   step: RequestStep,
   context: ExpressionContext,
-  _logger: Logger,
+  logger: Logger,
   abortSignal?: AbortSignal
 ): Promise<StepResult> {
   if (abortSignal?.aborted) {
     throw new Error('Step canceled');
   }
   const url = ExpressionEvaluator.evaluateString(step.url, context);
+  logger.debug(`Request step: ${step.method} ${url}`);
   const requestTimeoutMs = step.timeout ?? TIMEOUTS.DEFAULT_HTTP_TIMEOUT_MS;
   const controller = new AbortController();
   const onAbort = () => controller.abort(new Error('Step canceled'));
@@ -245,15 +246,13 @@ export async function executeRequestStep(
       status: response.ok ? 'success' : 'failed',
       error: response.ok
         ? undefined
-        : `HTTP ${response.status}: ${response.statusText}${
-            responseText
-              ? `\nResponse Body: ${responseText.substring(0, 500)}${responseText.length > 500 ? '...' : ''}${
-                  truncated ? ' [truncated]' : ''
-                }`
-              : truncated
-                ? '\nResponse Body: [truncated]'
-                : ''
-          }`,
+        : `HTTP ${response.status}: ${response.statusText}${responseText
+          ? `\nResponse Body: ${responseText.substring(0, 500)}${responseText.length > 500 ? '...' : ''}${truncated ? ' [truncated]' : ''
+          }`
+          : truncated
+            ? '\nResponse Body: [truncated]'
+            : ''
+        }`,
     };
   } finally {
     clearTimeout(timeoutId);

@@ -12,6 +12,31 @@ export const MCP_PROTOCOL_VERSION = '2024-11-05';
 const MAX_BUFFER_SIZE = 10 * 1024 * 1024;
 
 /**
+ * Efficient line splitting without regex to prevent ReDoS attacks.
+ * Handles \r\n, \r, and \n line endings.
+ */
+function splitLines(str: string): string[] {
+  const lines: string[] = [];
+  let start = 0;
+  for (let i = 0; i < str.length; i++) {
+    if (str[i] === '\n') {
+      lines.push(str.substring(start, i));
+      start = i + 1;
+    } else if (str[i] === '\r') {
+      lines.push(str.substring(start, i));
+      // Skip \n if this is a \r\n sequence
+      if (str[i + 1] === '\n') i++;
+      start = i + 1;
+    }
+  }
+  // Return remaining content as incomplete line (will be buffered)
+  if (start < str.length) {
+    lines.push(str.substring(start));
+  }
+  return lines;
+}
+
+/**
  * Validate a URL to prevent SSRF attacks
  * Blocks private IP ranges, localhost, and other internal addresses
  * @param url The URL to validate
@@ -180,13 +205,19 @@ class StdConfigTransport implements MCPTransport {
 
   constructor(command: string, args: string[] = [], env: Record<string, string> = {}) {
     // Filter out sensitive environment variables from the host process
-    // unless they are explicitly provided in the 'env' argument
+    // unless they are explicitly provided in the 'env' argument.
+    // Uses specific patterns to avoid false positives with legitimate variables.
     const safeEnv: Record<string, string> = {};
-    const sensitivePattern =
-      /(?:key|token|secret|password|credential|auth|private|cookie|session|signature)/i;
+    const sensitivePatterns = [
+      /^.*_(API_KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL|PRIVATE_KEY)$/i,
+      /^(API_KEY|AUTH_TOKEN|SECRET_KEY|PRIVATE_KEY|PASSWORD|CREDENTIALS?)$/i,
+      /^(AWS_SECRET|GITHUB_TOKEN|NPM_TOKEN|SSH_KEY|PGP_PASSPHRASE)$/i,
+      /^.*_AUTH_(TOKEN|KEY|SECRET)$/i,
+      /^(COOKIE|SESSION_ID|SESSION_SECRET)$/i,
+    ];
 
     for (const [key, value] of Object.entries(process.env)) {
-      if (value && !sensitivePattern.test(key)) {
+      if (value && !sensitivePatterns.some((p) => p.test(key))) {
         safeEnv[key] = value;
       }
     }
@@ -402,7 +433,7 @@ class SSETransport implements MCPTransport {
                 }
                 buffer += decoded;
 
-                const lines = buffer.split(/\r\n|\r|\n/);
+                const lines = splitLines(buffer);
                 buffer = lines.pop() || '';
 
                 for (const line of lines) {
@@ -525,7 +556,7 @@ class SSETransport implements MCPTransport {
               }
               buffer += decoded;
 
-              const lines = buffer.split(/\r\n|\r|\n/);
+              const lines = splitLines(buffer);
               buffer = lines.pop() || '';
 
               for (const line of lines) {

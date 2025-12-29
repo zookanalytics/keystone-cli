@@ -9,7 +9,7 @@ import {
   WorkflowStatus as WorkflowStatusConst,
   type WorkflowStatusType,
 } from '../types/status';
-import { DB } from '../utils/constants';
+import { DB, LIMITS } from '../utils/constants';
 import { PathResolver } from '../utils/paths';
 
 export type RunStatus = WorkflowStatusType | 'pending';
@@ -374,9 +374,8 @@ export class WorkflowDb {
    * during high concurrency scenarios (e.g., foreach loops)
    *
    * Uses exponential backoff with jitter to reduce contention.
-   * Default maxRetries is 20 to handle high-contention scenarios.
    */
-  private async withRetry<T>(operation: () => T, maxRetries = 20): Promise<T> {
+  private async withRetry<T>(operation: () => T, maxRetries = LIMITS.MAX_DB_RETRIES): Promise<T> {
     let lastError: any;
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -1204,7 +1203,53 @@ export class WorkflowDb {
     });
   }
 
+  /**
+   * Close the database connection and finalize all prepared statements.
+   * Call this when the database is no longer needed to free resources.
+   */
   close(): void {
+    // Finalize all prepared statements
+    this.createRunStmt.finalize();
+    this.updateRunStatusStmt.finalize();
+    this.getRunStmt.finalize();
+    this.listRunsStmt.finalize();
+    this.pruneRunsStmt.finalize();
+    this.createStepStmt.finalize();
+    this.startStepStmt.finalize();
+    this.completeStepStmt.finalize();
+    this.incrementRetryStmt.finalize();
+    this.getStepByIterationStmt.finalize();
+    this.getMainStepStmt.finalize();
+    this.getStepsByRunStmt.finalize();
+    this.getSuccessfulRunsStmt.finalize();
+    this.getLastRunStmt.finalize();
+    this.getIdempotencyRecordStmt.finalize();
+    this.clearExpiredIdempotencyRecordStmt.finalize();
+    this.insertIdempotencyRecordIfAbsentStmt.finalize();
+    this.markIdempotencyRecordRunningStmt.finalize();
+    this.storeIdempotencyRecordStmt.finalize();
+    this.pruneIdempotencyRecordsStmt.finalize();
+    this.clearIdempotencyRecordsStmt.finalize();
+    this.listIdempotencyRecordsStmt.finalize();
+    this.clearAllIdempotencyRecordsStmt.finalize();
+    this.createTimerStmt.finalize();
+    this.getTimerStmt.finalize();
+    this.getTimerByStepStmt.finalize();
+    this.completeTimerStmt.finalize();
+    this.registerCompensationStmt.finalize();
+    this.updateCompensationStatusStmt.finalize();
+    this.getPendingCompensationsStmt.finalize();
+    this.getAllCompensationsStmt.finalize();
+    this.getStepCacheStmt.finalize();
+    this.storeStepCacheStmt.finalize();
+    this.getEventStmt.finalize();
+    this.storeEventStmt.finalize();
+    this.deleteEventStmt.finalize();
+    this.createThoughtStmt.finalize();
+    this.listThoughtEventsStmt.finalize();
+    this.listThoughtEventsByRunStmt.finalize();
+
+    // Close the database connection
     this.db.close();
   }
 

@@ -75,6 +75,10 @@ export const LIMITS = {
   MAX_SHELL_COMMAND_CHECK_LENGTH: 10_000,
   /** Standard length for error message truncation in logs */
   ERROR_MESSAGE_TRUNCATE_LENGTH: 500,
+  /** Maximum iterations for foreach loops to prevent memory exhaustion */
+  MAX_FOREACH_ITERATIONS: 10_000,
+  /** Default maximum retries for database operations */
+  MAX_DB_RETRIES: 20,
 } as const;
 
 /** File mode constants for secure filesystem operations */
