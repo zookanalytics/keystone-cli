@@ -93,6 +93,7 @@ describe('DynamicStateManager', () => {
         stepId: 'dynamic-step-1',
       });
 
+      if (!created.id) throw new Error('ID missing');
       const loaded = await stateManager.loadById(created.id);
 
       expect(loaded).not.toBeNull();
@@ -106,6 +107,7 @@ describe('DynamicStateManager', () => {
         runId: 'test-run-1',
         stepId: 'dynamic-step-1',
       });
+      if (!state.id) throw new Error('State ID missing');
 
       const plan: DynamicPlan = {
         steps: [
@@ -147,6 +149,7 @@ describe('DynamicStateManager', () => {
         runId: 'test-run-1',
         stepId: 'dynamic-step-1',
       });
+      if (!state.id) throw new Error('State ID missing');
 
       await stateManager.updateProgress(state.id, 3);
 
@@ -161,6 +164,7 @@ describe('DynamicStateManager', () => {
         runId: 'test-run-1',
         stepId: 'dynamic-step-1',
       });
+      if (!state.id) throw new Error('State ID missing');
 
       const plan: DynamicPlan = {
         steps: [{ id: 'step1', name: 'First step', type: 'shell', run: 'echo hello' }],
@@ -191,6 +195,7 @@ describe('DynamicStateManager', () => {
         runId: 'test-run-1',
         stepId: 'dynamic-step-1',
       });
+      if (!state.id) throw new Error('State ID missing');
 
       const plan: DynamicPlan = {
         steps: [{ id: 'step1', name: 'First step', type: 'shell', run: 'exit 1' }],
@@ -215,6 +220,7 @@ describe('DynamicStateManager', () => {
         runId: 'test-run-1',
         stepId: 'dynamic-step-1',
       });
+      if (!state.id) throw new Error('State ID missing');
 
       await stateManager.finish(state.id, 'completed');
 
@@ -228,6 +234,7 @@ describe('DynamicStateManager', () => {
         runId: 'test-run-1',
         stepId: 'dynamic-step-1',
       });
+      if (!state.id) throw new Error('State ID missing');
 
       await stateManager.finish(state.id, 'failed', 'Something went wrong');
 
@@ -243,6 +250,7 @@ describe('DynamicStateManager', () => {
         runId: 'test-run-1',
         stepId: 'dynamic-step-1',
       });
+      if (!state.id) throw new Error('State ID missing');
 
       const plan: DynamicPlan = {
         steps: [
@@ -284,6 +292,7 @@ describe('DynamicStateManager', () => {
       });
 
       // Complete one
+      if (!state2.id) throw new Error('State ID missing');
       await stateManager.finish(state2.id, 'completed');
 
       const active = await stateManager.listActive();

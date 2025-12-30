@@ -13,6 +13,8 @@ import type {
   DynamicStepState,
   GeneratedStep,
 } from '../runner/executors/dynamic-types.ts';
+
+export type { DynamicPlan, DynamicStepExecution, DynamicStepState, GeneratedStep };
 import type { WorkflowDb } from './workflow-db.ts';
 
 /**
