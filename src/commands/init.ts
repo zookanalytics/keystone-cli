@@ -21,6 +21,7 @@ import fullFeatureDemo from '../templates/basics/full-feature-demo.yaml' with { 
 import idempotencyExample from '../templates/control-flow/idempotency-example.yaml' with {
   type: 'text',
 };
+import dynamicDemo from '../templates/dynamic-demo.yaml' with { type: 'text' };
 import artifactExample from '../templates/features/artifact-example.yaml' with { type: 'text' };
 import scriptExample from '../templates/features/script-example.yaml' with { type: 'text' };
 // Import templates
@@ -38,6 +39,9 @@ import decomposeReviewWorkflow from '../templates/scaffolding/decompose-review.y
   type: 'text',
 };
 import devWorkflow from '../templates/scaffolding/dev.yaml' with { type: 'text' };
+import dynamicDecomposeWorkflow from '../templates/scaffolding/dynamic-decompose.yaml' with {
+  type: 'text',
+};
 import reviewLoopWorkflow from '../templates/scaffolding/review-loop.yaml' with { type: 'text' };
 import scaffoldWorkflow from '../templates/scaffolding/scaffold-feature.yaml' with { type: 'text' };
 import scaffoldGenerateWorkflow from '../templates/scaffolding/scaffold-generate.yaml' with {
@@ -102,6 +106,7 @@ const SEEDS = [
   { path: '.keystone/workflows/scaffold-plan.yaml', content: scaffoldPlanWorkflow },
   { path: '.keystone/workflows/scaffold-generate.yaml', content: scaffoldGenerateWorkflow },
   { path: '.keystone/workflows/decompose-problem.yaml', content: decomposeWorkflow },
+  { path: '.keystone/workflows/dynamic-decompose.yaml', content: dynamicDecomposeWorkflow },
   { path: '.keystone/workflows/decompose-research.yaml', content: decomposeResearchWorkflow },
   { path: '.keystone/workflows/decompose-implement.yaml', content: decomposeImplementWorkflow },
   { path: '.keystone/workflows/decompose-review.yaml', content: decomposeReviewWorkflow },
@@ -120,6 +125,7 @@ const SEEDS = [
   { path: '.keystone/workflows/artifact-example.yaml', content: artifactExample },
   { path: '.keystone/workflows/idempotency-example.yaml', content: idempotencyExample },
   { path: '.keystone/workflows/full-feature-demo.yaml', content: fullFeatureDemo },
+  { path: '.keystone/workflows/dynamic-demo.yaml', content: dynamicDemo },
 ];
 
 export function registerInitCommand(program: Command): void {

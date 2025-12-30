@@ -415,6 +415,35 @@ const WaitStepSchema = BaseStepSchema.extend({
   // timeout is already in BaseStepSchema, but let's make it explicit here if needed
 });
 
+const DynamicStepSchema = BaseStepSchema.extend({
+  type: z.literal('dynamic'),
+  goal: z.string(), // The high-level goal to accomplish
+  context: z.string().optional(), // Additional context for the supervisor
+  prompt: z.string().optional(), // Custom supervisor prompt (overrides default)
+  supervisor: z.string().optional(), // Supervisor agent (defaults to agent or keystone-architect)
+  agent: z.string().optional().default('keystone-architect'), // Default agent for generated steps
+  provider: z.string().optional(),
+  model: z.string().optional(),
+  templates: z.record(z.string()).optional(), // Role -> Agent mapping, e.g., { "planner": "@org-planner" }
+  maxSteps: z.number().int().positive().default(20), // Max steps the supervisor can generate
+  maxIterations: z.number().int().positive().default(5), // Max LLM iterations for planning
+  allowStepFailure: z.boolean().optional().default(false), // Continue on individual step failure
+  stateFile: z.string().optional(), // Path to persist workflow state (for external tools)
+  concurrency: z.union([z.number().int().positive(), z.string()]).optional().default(1), // Max parallel steps
+  library: z
+    .array(
+      z.object({
+        name: z.string(),
+        description: z.string(),
+        steps: z.array(z.any()), // Pre-defined steps in this pattern
+      })
+    )
+    .optional(), // Library of pre-defined step patterns
+  confirmPlan: z.boolean().optional().default(false), // Review and approve plan before execution
+  maxReplans: z.number().int().nonnegative().default(3), // Max automatic recovery attempts
+  allowInsecure: z.boolean().optional(), // Allow generated steps to use insecure commands (e.g. shell redirects)
+});
+
 // ===== Discriminated Union for Steps =====
 
 export const StepSchema: z.ZodType<any> = z.lazy(() =>
@@ -435,6 +464,7 @@ export const StepSchema: z.ZodType<any> = z.lazy(() =>
     ArtifactStepSchema as any,
     WaitStepSchema as any,
     GitStepSchema as any,
+    DynamicStepSchema as any,
   ])
 );
 
@@ -518,7 +548,8 @@ export type Step =
   | z.infer<typeof BlueprintStepSchema>
   | z.infer<typeof ArtifactStepSchema>
   | z.infer<typeof WaitStepSchema>
-  | z.infer<typeof GitStepSchema>;
+  | z.infer<typeof GitStepSchema>
+  | z.infer<typeof DynamicStepSchema>;
 
 export type ShellStep = z.infer<typeof ShellStepSchema>;
 export type LlmStep = z.infer<typeof LlmStepSchema>;
@@ -539,6 +570,7 @@ export type Blueprint = z.infer<typeof BlueprintSchema>;
 export type Workflow = z.infer<typeof WorkflowSchema>;
 export type AgentTool = z.infer<typeof AgentToolSchema>;
 export type WaitStep = z.infer<typeof WaitStepSchema>;
+export type DynamicStep = z.infer<typeof DynamicStepSchema>;
 
 // ===== Helper Schemas =====
 export {
@@ -565,5 +597,6 @@ export {
   MemoryStepSchema,
   ArtifactStepSchema,
   GitStepSchema,
+  DynamicStepSchema,
 };
 export type Agent = z.infer<typeof AgentSchema>;

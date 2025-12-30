@@ -97,7 +97,7 @@
                     "default": []
                   },
                   "if": {
-                    "type": "string"
+                    "type": ["string", "boolean"]
                   },
                   "timeout": {
                     "type": "integer",
@@ -235,6 +235,12 @@
                   "run": {
                     "type": "string"
                   },
+                  "args": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
                   "dir": {
                     "type": "string"
                   },
@@ -244,11 +250,14 @@
                       "type": "string"
                     }
                   },
+                  "allowOutsideCwd": {
+                    "type": "boolean"
+                  },
                   "allowInsecure": {
                     "type": "boolean"
                   }
                 },
-                "required": ["id", "type", "run"],
+                "required": ["id", "type"],
                 "additionalProperties": false
               },
               {
@@ -1331,6 +1340,9 @@
                   "run": {
                     "type": "string"
                   },
+                  "allowOutsideCwd": {
+                    "type": "boolean"
+                  },
                   "allowInsecure": {
                     "type": "boolean",
                     "default": false
@@ -1946,6 +1958,262 @@
                   }
                 },
                 "required": ["id", "type", "event"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/id"
+                  },
+                  "type": {
+                    "type": "string",
+                    "const": "git"
+                  },
+                  "needs": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/needs"
+                  },
+                  "if": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/if"
+                  },
+                  "timeout": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/timeout"
+                  },
+                  "retry": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/retry"
+                  },
+                  "auto_heal": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/auto_heal"
+                  },
+                  "reflexion": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/reflexion"
+                  },
+                  "allowFailure": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/allowFailure"
+                  },
+                  "idempotencyKey": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/idempotencyKey"
+                  },
+                  "idempotencyScope": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/idempotencyScope"
+                  },
+                  "idempotencyTtlSeconds": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/idempotencyTtlSeconds"
+                  },
+                  "foreach": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/foreach"
+                  },
+                  "concurrency": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/concurrency"
+                  },
+                  "pool": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/pool"
+                  },
+                  "breakpoint": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/breakpoint"
+                  },
+                  "strategy": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/strategy"
+                  },
+                  "transform": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/transform"
+                  },
+                  "learn": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/learn"
+                  },
+                  "memoize": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/memoize"
+                  },
+                  "memoizeTtlSeconds": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/memoizeTtlSeconds"
+                  },
+                  "inputSchema": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/inputSchema"
+                  },
+                  "outputSchema": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/outputSchema"
+                  },
+                  "outputRetries": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/outputRetries"
+                  },
+                  "repairStrategy": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/repairStrategy"
+                  },
+                  "compensate": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/compensate"
+                  },
+                  "op": {
+                    "type": "string",
+                    "enum": [
+                      "clone",
+                      "worktree_add",
+                      "worktree_remove",
+                      "checkout",
+                      "pull",
+                      "push",
+                      "commit"
+                    ]
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  },
+                  "branch": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "cwd": {
+                    "type": "string"
+                  },
+                  "env": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "allowOutsideCwd": {
+                    "type": "boolean"
+                  },
+                  "allowInsecure": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["id", "type", "op"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/id"
+                  },
+                  "type": {
+                    "type": "string",
+                    "const": "dynamic"
+                  },
+                  "needs": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/needs"
+                  },
+                  "if": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/if"
+                  },
+                  "timeout": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/timeout"
+                  },
+                  "retry": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/retry"
+                  },
+                  "auto_heal": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/auto_heal"
+                  },
+                  "reflexion": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/reflexion"
+                  },
+                  "allowFailure": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/allowFailure"
+                  },
+                  "idempotencyKey": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/idempotencyKey"
+                  },
+                  "idempotencyScope": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/idempotencyScope"
+                  },
+                  "idempotencyTtlSeconds": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/idempotencyTtlSeconds"
+                  },
+                  "foreach": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/foreach"
+                  },
+                  "concurrency": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/concurrency"
+                  },
+                  "pool": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/pool"
+                  },
+                  "breakpoint": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/breakpoint"
+                  },
+                  "strategy": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/strategy"
+                  },
+                  "transform": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/transform"
+                  },
+                  "learn": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/learn"
+                  },
+                  "memoize": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/memoize"
+                  },
+                  "memoizeTtlSeconds": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/memoizeTtlSeconds"
+                  },
+                  "inputSchema": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/inputSchema"
+                  },
+                  "outputSchema": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/outputSchema"
+                  },
+                  "outputRetries": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/outputRetries"
+                  },
+                  "repairStrategy": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/repairStrategy"
+                  },
+                  "compensate": {
+                    "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/0/properties/compensate"
+                  },
+                  "goal": {
+                    "type": "string"
+                  },
+                  "context": {
+                    "type": "string"
+                  },
+                  "prompt": {
+                    "type": "string"
+                  },
+                  "supervisor": {
+                    "type": "string"
+                  },
+                  "agent": {
+                    "type": "string",
+                    "default": "keystone-architect"
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "templates": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "maxSteps": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "default": 20
+                  },
+                  "maxIterations": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "default": 5
+                  },
+                  "allowStepFailure": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "stateFile": {
+                    "type": "string"
+                  }
+                },
+                "required": ["id", "type", "goal"],
                 "additionalProperties": false
               }
             ]

@@ -1,0 +1,31 @@
+name: dynamic-demo
+description: Demo of the dynamic step type for LLM-driven workflow orchestration
+
+inputs:
+  task:
+    type: string
+    description: The task to accomplish dynamically
+    default: "Set up a simple Node.js project with TypeScript"
+
+steps:
+  - id: supervisor
+    type: dynamic
+    goal: "${{ inputs.task }}"
+    context: |
+      This is a demo of dynamic workflow orchestration.
+      The supervisor will break down the task into steps and execute them.
+    agent: keystone-architect
+    templates:
+      planner: "keystone-architect"
+      developer: "software-engineer"
+      tester: "tester"
+    maxSteps: 10
+    concurrency: 2
+    confirmPlan: true
+    maxReplans: 3
+    allowStepFailure: false
+
+outputs:
+  plan: "${{ steps.supervisor.output.plan }}"
+  results: "${{ steps.supervisor.output.results }}"
+  summary: "${{ steps.supervisor.output.summary }}"

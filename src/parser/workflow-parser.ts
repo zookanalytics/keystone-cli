@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { ExpressionEvaluator } from '../expression/evaluator.ts';
 import { ResourceLoader } from '../utils/resource-loader.ts';
 import { validateJsonSchemaDefinition } from '../utils/schema-validator.ts';
+import { topologicalSort } from '../utils/topo-sort.ts';
 import { resolveAgentPath } from './agent-parser.ts';
 import { type Workflow, WorkflowSchema } from './schema.ts';
 
@@ -298,68 +299,8 @@ export class WorkflowParser {
    * Returns steps in execution order
    */
   static topologicalSort(workflow: Workflow): string[] {
-    const stepMap = new Map(workflow.steps.map((step) => [step.id, step.needs]));
-    const inDegree = new Map<string, number>();
-
-    // Validate all dependencies exist before sorting
-    for (const step of workflow.steps) {
-      const needs = step.needs || [];
-      for (const dep of needs) {
-        if (!stepMap.has(dep)) {
-          throw new Error(`Step "${step.id}" depends on non-existent step "${dep}"`);
-        }
-      }
-    }
-
-    // Calculate in-degree
-    // In-degree = number of dependencies a step has
-    for (const step of workflow.steps) {
-      const needs = step.needs || [];
-      inDegree.set(step.id, needs.length);
-    }
-
-    // Build reverse dependency map for O(1) lookups instead of O(n)
-    const dependents = new Map<string, string[]>();
-    for (const step of workflow.steps) {
-      const needs = step.needs || [];
-      for (const dep of needs) {
-        if (!dependents.has(dep)) dependents.set(dep, []);
-        dependents.get(dep)?.push(step.id);
-      }
-    }
-
-    // Kahn's algorithm
-    const queue: string[] = [];
-    const result: string[] = [];
-
-    // Add all nodes with in-degree 0
-    for (const [stepId, degree] of inDegree.entries()) {
-      if (degree === 0) {
-        queue.push(stepId);
-      }
-    }
-
-    let queueIndex = 0;
-    while (queueIndex < queue.length) {
-      const stepId = queue[queueIndex];
-      queueIndex += 1;
-      result.push(stepId);
-
-      // Find all steps that depend on this step (O(1) lookup)
-      for (const dependentId of dependents.get(stepId) || []) {
-        const newDegree = (inDegree.get(dependentId) || 0) - 1;
-        inDegree.set(dependentId, newDegree);
-        if (newDegree === 0) {
-          queue.push(dependentId);
-        }
-      }
-    }
-
-    if (result.length !== workflow.steps.length) {
-      throw new Error('Topological sort failed - circular dependency detected');
-    }
-
-    return result;
+    const sorted = topologicalSort(workflow.steps);
+    return sorted.map((s) => s.id);
   }
 
   /**

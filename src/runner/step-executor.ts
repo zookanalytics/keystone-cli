@@ -6,6 +6,7 @@ import { ConsoleLogger, type Logger } from '../utils/logger.ts';
 
 import { executeArtifactStep } from './executors/artifact-executor.ts';
 import { executeBlueprintStep } from './executors/blueprint-executor.ts';
+import { executeDynamicStep } from './executors/dynamic-executor.ts';
 import { executeEngineStepWrapper } from './executors/engine-executor.ts';
 import { executeFileStep } from './executors/file-executor.ts';
 import { executeGitStep } from './executors/git-executor.ts';
@@ -170,6 +171,25 @@ export async function executeStep(
         break;
       case 'git':
         result = await executeGitStep(step, context, logger, abortSignal);
+        break;
+      case 'dynamic':
+        result = await executeDynamicStep(
+          step,
+          context,
+          (s, c) => (injectedExecuteStep || executeStep)(s, c, logger, options),
+          logger,
+          {
+            mcpManager,
+            workflowDir,
+            abortSignal,
+            runId,
+            artifactRoot,
+            executeLlmStep: injectedExecuteLlmStep || executeLlmStep,
+            emitEvent: options.emitEvent,
+            workflowName: options.workflowName,
+            db: options.db,
+          }
+        );
         break;
       default:
         throw new Error(`Unknown step type: ${(step as Step).type}`);

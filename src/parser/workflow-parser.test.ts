@@ -56,13 +56,12 @@ describe('WorkflowParser', () => {
       expect(() => WorkflowParser.topologicalSort(workflow)).toThrow(/circular dependency/i);
     });
 
-    test('should throw on missing dependencies', () => {
+    test('should NOT throw on missing dependencies (leniency for partial execution)', () => {
       const workflow = {
         steps: [{ id: 'step1', type: 'shell', run: 'echo 1', needs: ['non-existent'] }],
       } as unknown as Workflow;
-      expect(() => WorkflowParser.topologicalSort(workflow)).toThrow(
-        /depends on non-existent step/
-      );
+      expect(() => WorkflowParser.topologicalSort(workflow)).not.toThrow();
+      expect(WorkflowParser.topologicalSort(workflow)).toEqual(['step1']);
     });
   });
 

@@ -1,0 +1,39 @@
+$schema: https://raw.githubusercontent.com/mhingston/keystone-cli/main/schemas/workflow.json
+name: dynamic-decompose
+description: "Agentic problem decomposition and execution using the dynamic step type"
+
+inputs:
+  goal:
+    type: string
+    description: "The high-level goal to accomplish"
+  context:
+    type: string
+    description: "Additional context for the supervisor"
+    default: ""
+  concurrency:
+    type: number
+    description: "Maximum parallel tasks"
+    default: 2
+
+steps:
+  - id: supervisor
+    type: dynamic
+    goal: "${{ inputs.goal }}"
+    context: "${{ inputs.context }}"
+    concurrency: "${{ inputs.concurrency }}"
+    agent: keystone-architect
+    templates:
+      planner: "keystone-architect"
+      developer: "software-engineer"
+      tester: "tester"
+      summarizer: "summarizer"
+    maxSteps: 15
+    concurrency: "${{ inputs.concurrency }}"
+    confirmPlan: true
+    maxReplans: 3
+    allowStepFailure: false
+
+outputs:
+  summary: "${{ steps.supervisor.output.summary }}"
+  results: "${{ steps.supervisor.output.results }}"
+  plan: "${{ steps.supervisor.output.plan }}"

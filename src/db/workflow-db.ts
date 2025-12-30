@@ -101,6 +101,14 @@ export class DatabaseError extends Error {
 export class WorkflowDb {
   private db: Database;
 
+  /**
+   * Access the underlying database instance.
+   * This is intended for internal extensions like DynamicStateManager.
+   */
+  public getDatabase(): Database {
+    return this.db;
+  }
+
   private createRunStmt!: Statement;
   private updateRunStatusStmt!: Statement;
   private getRunStmt!: Statement;
@@ -547,6 +555,62 @@ export class WorkflowDb {
         CREATE INDEX IF NOT EXISTS idx_thoughts_run ON thought_events(run_id);
         CREATE INDEX IF NOT EXISTS idx_thoughts_created ON thought_events(created_at);
         PRAGMA user_version = 4;
+      `);
+    }
+
+    // Version 5: Add dynamic workflow state tables
+    if (version < 5) {
+      this.db.exec(`
+        -- Table for tracking dynamic step execution state
+        CREATE TABLE IF NOT EXISTS dynamic_workflow_state (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL,
+          step_id TEXT NOT NULL,
+          workflow_id TEXT,
+          status TEXT NOT NULL DEFAULT 'planning',
+          generated_plan TEXT NOT NULL DEFAULT '{"steps":[]}',
+          current_step_index INTEGER DEFAULT 0,
+          started_at TEXT NOT NULL,
+          completed_at TEXT,
+          error TEXT,
+          metadata TEXT,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE,
+          UNIQUE (run_id, step_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_dynamic_state_run ON dynamic_workflow_state(run_id);
+        CREATE INDEX IF NOT EXISTS idx_dynamic_state_status ON dynamic_workflow_state(status);
+
+        -- Table for individual generated step executions
+        CREATE TABLE IF NOT EXISTS dynamic_step_executions (
+          id TEXT PRIMARY KEY,
+          state_id TEXT NOT NULL,
+          step_id TEXT NOT NULL,
+          step_name TEXT NOT NULL,
+          step_type TEXT NOT NULL,
+          step_definition TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          output TEXT,
+          error TEXT,
+          started_at TEXT,
+          completed_at TEXT,
+          execution_order INTEGER NOT NULL,
+          FOREIGN KEY (state_id) REFERENCES dynamic_workflow_state(id) ON DELETE CASCADE,
+          UNIQUE (state_id, step_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_dynamic_exec_state ON dynamic_step_executions(state_id);
+        CREATE INDEX IF NOT EXISTS idx_dynamic_exec_order ON dynamic_step_executions(state_id, execution_order);
+        
+        PRAGMA user_version = 5;
+      `);
+    }
+
+    // Version 6: Add replan_count to dynamic_workflow_state
+    if (version < 6) {
+      this.db.exec(`
+        ALTER TABLE dynamic_workflow_state ADD COLUMN replan_count INTEGER DEFAULT 0;
+        PRAGMA user_version = 6;
       `);
     }
   }
