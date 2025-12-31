@@ -57,6 +57,14 @@ class LocalEmbeddingModel {
     );
     return { embeddings };
   }
+
+  /**
+   * Dispose of the cached pipeline to free memory.
+   * Call this when the embedding model is no longer needed.
+   */
+  static dispose(): void {
+    LocalEmbeddingModel.pipelinePromise = null;
+  }
 }
 
 // Re-export specific AI SDK types
@@ -64,12 +72,23 @@ export type { LanguageModel, EmbeddingModel } from 'ai';
 
 const userRequire = createRequire(join(process.cwd(), 'package.json'));
 
+// Lazy-loaded global require to avoid blocking import time
 let globalRequire: NodeRequire | undefined;
-try {
-  const globalRoot = execSync('npm root -g', { encoding: 'utf-8' }).trim();
-  globalRequire = createRequire(join(globalRoot, 'package.json'));
-} catch (e) {
-  // Global npm root not found, fallback to silent
+let globalRequireResolved = false;
+
+function getGlobalRequire(): NodeRequire | undefined {
+  if (globalRequireResolved) {
+    return globalRequire;
+  }
+  globalRequireResolved = true;
+  try {
+    const globalRoot = execSync('npm root -g', { encoding: 'utf-8' }).trim();
+    globalRequire = createRequire(join(globalRoot, 'package.json'));
+  } catch {
+    // Global npm root not found - this is expected in some environments (e.g., containers, CI)
+    // Global package resolution will be disabled silently
+  }
+  return globalRequire;
 }
 
 // Compatibility types for Keystone
@@ -145,9 +164,10 @@ export class DynamicProviderRegistry {
             pkg = await import(pkgPath);
           } catch {
             // Try global if local resolution fails
-            if (globalRequire) {
+            const globalReq = getGlobalRequire();
+            if (globalReq) {
               try {
-                const globalPkgPath = globalRequire.resolve(config.package);
+                const globalPkgPath = globalReq.resolve(config.package);
                 pkg = await import(globalPkgPath);
               } catch {
                 throw new Error(
@@ -337,4 +357,12 @@ export async function getEmbeddingModel(model: string): Promise<EmbeddingModel> 
   throw new Error(
     `Provider for model '${model}' does not support embeddings (no .textEmbeddingModel, .embedding, or .textEmbedding method found).`
   );
+}
+
+/**
+ * Dispose of the local embedding model's cached pipeline to free memory.
+ * Call this during graceful shutdown or when embeddings are no longer needed.
+ */
+export function disposeLocalEmbeddingModel(): void {
+  LocalEmbeddingModel.dispose();
 }

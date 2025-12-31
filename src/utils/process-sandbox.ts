@@ -146,9 +146,21 @@ export class ProcessSandbox {
     };
     checkForDangerousKeys(context);
 
-    // Sanitize context by re-parsing to strip any inherited properties or prototype pollution
-    const sanitizedContext = JSON.parse(JSON.stringify(context));
-    const contextJson = JSON.stringify(sanitizedContext);
+    // Sanitize context and handle circular references
+    const safeStringify = (obj: unknown) => {
+      const seen = new WeakSet();
+      return JSON.stringify(obj, (key, value) => {
+        if (typeof value === 'object' && value !== null) {
+          if (seen.has(value)) return '[Circular]';
+          seen.add(value);
+        }
+        return value;
+      });
+    };
+
+    // We still want to parse/stringify to strip non-serializable values and ensure clean state
+    // but now we handle cycles safely
+    const contextJson = safeStringify(context);
 
     return `
 // Minimal sandbox environment

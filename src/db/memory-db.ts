@@ -4,7 +4,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import * as sqliteVec from 'sqlite-vec';
 import { ConsoleLogger } from '../utils/logger';
-import './sqlite-setup.ts';
+import { setupSqlite } from './sqlite-setup.ts';
 
 export interface MemoryEntry {
   id: string;
@@ -71,6 +71,9 @@ export class MemoryDb {
     public readonly dbPath = '.keystone/memory.db',
     private readonly embeddingDimension = 384
   ) {
+    // Ensure SQLite is set up with custom library on macOS (idempotent)
+    setupSqlite();
+
     this.tableName = `vec_memory_${embeddingDimension}`;
     const cached = MemoryDb.connectionCache.get(dbPath);
     if (cached) {

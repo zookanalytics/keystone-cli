@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import { dirname, join } from 'node:path';
 import { embed, generateText } from 'ai';
 import { MemoryDb } from '../db/memory-db.ts';
-import { type RunStatus, WorkflowDb } from '../db/workflow-db.ts';
+import { type RunStatus, type StepExecution, WorkflowDb } from '../db/workflow-db.ts';
 import type { ExpressionContext } from '../expression/evaluator.ts';
 import { ExpressionEvaluator } from '../expression/evaluator.ts';
 import type { LlmStep, PlanStep, Step, Workflow, WorkflowStep } from '../parser/schema.ts';
@@ -37,6 +37,7 @@ import {
 import { withTimeout } from './timeout.ts';
 import { WorkflowScheduler } from './workflow-scheduler.ts';
 import { type ForeachStepContext, type StepContext, WorkflowState } from './workflow-state.ts';
+import { formatTimingSummary, formatTokenUsageSummary } from './workflow-summary.ts';
 
 /**
  * A logger wrapper that redacts secrets from all log messages
@@ -165,6 +166,7 @@ export class WorkflowRunner {
   private abortController = new AbortController();
   private resourcePool!: ResourcePoolManager;
   private restored = false;
+  private stepEvents: WorkflowEvent[] = [];
 
   /**
    * Get the abort signal for cancellation checks
@@ -1974,6 +1976,12 @@ Revise the output to address the feedback. Return only the corrected output.`;
     try {
       const redactor = this.secretManager.getRedactor();
       const redacted = redactor.redactValue(event) as WorkflowEvent;
+
+      // Track step.end events for summary generation
+      if (redacted.type === 'step.end') {
+        this.stepEvents.push(redacted);
+      }
+
       if (redacted.type === 'llm.thought') {
         void this.db
           .storeThoughtEvent(
@@ -2287,7 +2295,22 @@ Revise the output to address the feedback. Return only the corrected output.`;
         this.secretManager.redactForStorage(outputs)
       );
 
-      this.logger.log('✨ Workflow completed successfully!\n');
+      this.logger.log('✨ Workflow completed successfully!');
+
+      // Display timing summary
+      const timingSummary = formatTimingSummary(this.stepEvents);
+      if (timingSummary) {
+        this.logger.log(timingSummary);
+      }
+
+      // Display token usage summary
+      const steps = await this.db.getStepsByRun(this.runId);
+      const tokenSummary = formatTokenUsageSummary(steps);
+      if (tokenSummary) {
+        this.logger.log(tokenSummary);
+      }
+
+      this.logger.log('');
 
       completionEvent = {
         type: 'workflow.complete',

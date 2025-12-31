@@ -2,7 +2,19 @@ import { Database } from 'bun:sqlite';
 import { existsSync } from 'node:fs';
 import { ConsoleLogger, type Logger } from '../utils/logger.ts';
 
-export function setupSqlite(logger: Logger = new ConsoleLogger()) {
+let sqliteSetupComplete = false;
+
+/**
+ * Setup SQLite with a custom library on macOS to support extensions.
+ * This is idempotent - calling it multiple times is safe.
+ */
+export function setupSqlite(logger: Logger = new ConsoleLogger()): void {
+  // Only run setup once
+  if (sqliteSetupComplete) {
+    return;
+  }
+  sqliteSetupComplete = true;
+
   // macOS typically comes with a system SQLite that doesn't support extensions
   // We need to try to load a custom one (e.g. from Homebrew) if on macOS
   if (process.platform === 'darwin') {
@@ -44,5 +56,16 @@ export function setupSqlite(logger: Logger = new ConsoleLogger()) {
   }
 }
 
-// Run setup immediately when imported
-setupSqlite();
+/**
+ * Reset SQLite setup state (mainly for testing).
+ */
+export function resetSqliteSetup(): void {
+  sqliteSetupComplete = false;
+}
+
+/**
+ * Check if SQLite setup has been completed.
+ */
+export function isSqliteSetupComplete(): boolean {
+  return sqliteSetupComplete;
+}

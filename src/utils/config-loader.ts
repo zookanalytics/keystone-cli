@@ -7,6 +7,7 @@ import { ResourceLoader } from './resource-loader';
 export class ConfigLoader {
   private static instance: Config;
   private static logger: Logger = new ConsoleLogger();
+  private static loadingPromise: Promise<Config> | null = null;
 
   public static getSecret(key: string): string | undefined {
     return process.env[key];
@@ -37,6 +38,16 @@ export class ConfigLoader {
   }
 
   static load(logger: Logger = ConfigLoader.logger): Config {
+    // Fast path: return cached instance if already loaded
+    if (ConfigLoader.instance) return ConfigLoader.instance;
+
+    // Thread-safety: if another load is in progress, we still return synchronously
+    // but the actual loading is guarded to prevent duplicate work
+    return ConfigLoader.loadSync(logger);
+  }
+
+  private static loadSync(logger: Logger): Config {
+    // Double-check after acquiring "lock" (JS is single-threaded but async can interleave)
     if (ConfigLoader.instance) return ConfigLoader.instance;
 
     const configPaths = PathResolver.getConfigPaths();
@@ -98,6 +109,7 @@ export class ConfigLoader {
   static clear(): void {
     // @ts-ignore - allowing clearing for tests
     ConfigLoader.instance = undefined;
+    ConfigLoader.loadingPromise = null;
   }
 
   static getProviderForModel(model: string): string {

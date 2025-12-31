@@ -10,6 +10,7 @@ import { ConfigLoader } from '../../utils/config-loader';
 import { LIMITS } from '../../utils/constants';
 import { extractJson } from '../../utils/json-parser';
 import { ConsoleLogger, type Logger } from '../../utils/logger';
+import { filterSensitiveEnv } from '../../utils/env-filter';
 import type { StepResult } from './types.ts';
 
 /**
@@ -18,7 +19,7 @@ import type { StepResult } from './types.ts';
 class LRUCache<K, V> {
   private cache = new Map<K, V>();
 
-  constructor(private maxSize: number) {}
+  constructor(private maxSize: number) { }
 
   get(key: K): V | undefined {
     const value = this.cache.get(key);
@@ -294,7 +295,10 @@ export async function executeEngineStep(
   // This means args are passed directly to the process without shell interpretation.
   // Combined with the allowlist and version check, this is secure against injection.
 
-  const env: Record<string, string> = {};
+  // Inherit safe host environment variables
+  const hostEnv = filterSensitiveEnv(process.env);
+  const env: Record<string, string> = { ...hostEnv };
+
   for (const [key, value] of Object.entries(step.env || {})) {
     env[key] = ExpressionEvaluator.evaluateString(value, context);
   }

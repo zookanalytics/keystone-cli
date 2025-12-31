@@ -2,7 +2,6 @@ import { Database, type Statement } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import './sqlite-setup.ts';
 import {
   StepStatus as StepStatusConst,
   type StepStatusType,
@@ -11,6 +10,7 @@ import {
 } from '../types/status';
 import { DB, LIMITS } from '../utils/constants';
 import { PathResolver } from '../utils/paths';
+import { setupSqlite } from './sqlite-setup.ts';
 
 export type RunStatus = WorkflowStatusType | 'pending';
 export type StepStatus = StepStatusType;
@@ -162,6 +162,9 @@ export class WorkflowDb {
   private isClosed = false;
 
   constructor(public readonly dbPath = PathResolver.resolveDbPath()) {
+    // Ensure SQLite is set up with custom library on macOS (idempotent)
+    setupSqlite();
+
     const dir = dirname(dbPath);
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
@@ -197,7 +200,11 @@ export class WorkflowDb {
       ORDER BY started_at DESC
       LIMIT ?
     `);
-    this.pruneRunsStmt = this.db.prepare('DELETE FROM workflow_runs WHERE started_at < ?');
+    this.pruneRunsStmt = this.db.prepare(`
+      DELETE FROM workflow_runs 
+      WHERE started_at < ? 
+      AND status IN ('success', 'failed', 'canceled')
+    `);
     this.createStepStmt = this.db.prepare(`
       INSERT INTO step_executions (id, run_id, step_id, iteration_index, status, retry_count)
       VALUES (?, ?, ?, ?, ?, ?)
@@ -469,7 +476,7 @@ export class WorkflowDb {
           const delayMs = Math.min(
             DB.RETRY_MAX_DELAY_MS,
             DB.RETRY_BASE_DELAY_MS * DB.RETRY_BACKOFF_MULTIPLIER ** attempt +
-              Math.random() * DB.RETRY_JITTER_MS
+            Math.random() * DB.RETRY_JITTER_MS
           );
           await Bun.sleep(delayMs);
           continue;

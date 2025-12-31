@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { ConsoleLogger, type Logger } from './logger';
@@ -27,8 +27,7 @@ export class AuthManager {
     }
     // Ensure dir perms are correct even if it exists
     try {
-      const fs = require('node:fs');
-      fs.chmodSync(dir, 0o700);
+      chmodSync(dir, 0o700);
     } catch (e) {
       AuthManager.logger.debug?.(`Failed to set directory permissions: ${e}`);
     }
@@ -36,7 +35,7 @@ export class AuthManager {
     const authPath = join(dir, 'auth.json');
     if (existsSync(authPath)) {
       try {
-        require('node:fs').chmodSync(authPath, 0o600);
+        chmodSync(authPath, 0o600);
       } catch (e) {
         AuthManager.logger.debug?.(`Failed to set auth file permissions: ${e}`);
       }
