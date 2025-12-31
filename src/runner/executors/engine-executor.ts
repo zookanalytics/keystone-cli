@@ -8,9 +8,9 @@ import { ExpressionEvaluator } from '../../expression/evaluator';
 import type { EngineStep } from '../../parser/schema';
 import { ConfigLoader } from '../../utils/config-loader';
 import { LIMITS } from '../../utils/constants';
+import { filterSensitiveEnv } from '../../utils/env-filter';
 import { extractJson } from '../../utils/json-parser';
 import { ConsoleLogger, type Logger } from '../../utils/logger';
-import { filterSensitiveEnv } from '../../utils/env-filter';
 import type { StepResult } from './types.ts';
 
 /**
@@ -19,7 +19,7 @@ import type { StepResult } from './types.ts';
 class LRUCache<K, V> {
   private cache = new Map<K, V>();
 
-  constructor(private maxSize: number) { }
+  constructor(private maxSize: number) {}
 
   get(key: K): V | undefined {
     const value = this.cache.get(key);

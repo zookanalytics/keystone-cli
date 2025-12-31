@@ -476,7 +476,7 @@ export class WorkflowDb {
           const delayMs = Math.min(
             DB.RETRY_MAX_DELAY_MS,
             DB.RETRY_BASE_DELAY_MS * DB.RETRY_BACKOFF_MULTIPLIER ** attempt +
-            Math.random() * DB.RETRY_JITTER_MS
+              Math.random() * DB.RETRY_JITTER_MS
           );
           await Bun.sleep(delayMs);
           continue;

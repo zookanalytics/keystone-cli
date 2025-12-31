@@ -73,14 +73,21 @@ describe('engine-executor', () => {
     });
 
     it('should reject if PATH is not in env for non-absolute command', async () => {
-      const step = createStep({
-        cwd: '/tmp',
-        env: { HOME: '/home' },
-      });
+      const originalPath = process.env.PATH;
+      process.env.PATH = undefined;
 
-      await expect(
-        executeEngineStep(step, { inputs: {}, secrets: {}, env: {}, steps: {} })
-      ).rejects.toThrow('requires env.PATH');
+      try {
+        const step = createStep({
+          cwd: '/tmp',
+          env: { HOME: '/home' },
+        });
+
+        await expect(
+          executeEngineStep(step, { inputs: {}, secrets: {}, env: {}, steps: {} })
+        ).rejects.toThrow('requires env.PATH');
+      } finally {
+        process.env.PATH = originalPath;
+      }
     });
 
     it('should reject if command is denied', async () => {
@@ -90,7 +97,7 @@ describe('engine-executor', () => {
           denylist: ['rm', 'dd'],
           allowlist: {},
         },
-      } as ReturnType<typeof ConfigLoader.ConfigLoader.load>);
+      } as unknown as ReturnType<typeof ConfigLoader.ConfigLoader.load>);
 
       try {
         const step = createStep({
@@ -117,7 +124,7 @@ describe('engine-executor', () => {
             python: { command: 'python3', version: '3.11', versionArgs: [], args: [] },
           },
         },
-      } as ReturnType<typeof ConfigLoader.ConfigLoader.load>);
+      } as unknown as ReturnType<typeof ConfigLoader.ConfigLoader.load>);
 
       try {
         const step = createStep({
@@ -143,7 +150,7 @@ describe('engine-executor', () => {
             echo: { command: 'echo', version: '', versionArgs: [], args: [] },
           },
         },
-      } as ReturnType<typeof ConfigLoader.ConfigLoader.load>);
+      } as unknown as ReturnType<typeof ConfigLoader.ConfigLoader.load>);
 
       try {
         mkdirSync(tempDir, { recursive: true });
@@ -175,7 +182,7 @@ describe('engine-executor', () => {
             echo: { command: 'echo', version: '999.0.0', versionArgs: [], args: [] },
           },
         },
-      } as ReturnType<typeof ConfigLoader.ConfigLoader.load>);
+      } as unknown as ReturnType<typeof ConfigLoader.ConfigLoader.load>);
 
       try {
         mkdirSync(tempDir, { recursive: true });
@@ -207,7 +214,7 @@ describe('engine-executor', () => {
             echo: { command: 'echo', version: '', versionArgs: [], args: [] },
           },
         },
-      } as ReturnType<typeof ConfigLoader.ConfigLoader.load>);
+      } as unknown as ReturnType<typeof ConfigLoader.ConfigLoader.load>);
 
       try {
         mkdirSync(tempDir, { recursive: true });
@@ -241,7 +248,7 @@ describe('engine-executor', () => {
             sh: { command: 'sh', version: '', versionArgs: [], args: [] },
           },
         },
-      } as ReturnType<typeof ConfigLoader.ConfigLoader.load>);
+      } as unknown as ReturnType<typeof ConfigLoader.ConfigLoader.load>);
 
       try {
         mkdirSync(tempDir, { recursive: true });
@@ -274,7 +281,7 @@ describe('engine-executor', () => {
             sh: { command: 'sh', version: '', versionArgs: [], args: [] },
           },
         },
-      } as ReturnType<typeof ConfigLoader.ConfigLoader.load>);
+      } as unknown as ReturnType<typeof ConfigLoader.ConfigLoader.load>);
 
       try {
         mkdirSync(tempDir, { recursive: true });
@@ -310,7 +317,7 @@ describe('engine-executor', () => {
             echo: { command: 'echo', version: '', versionArgs: [], args: [] },
           },
         },
-      } as ReturnType<typeof ConfigLoader.ConfigLoader.load>);
+      } as unknown as ReturnType<typeof ConfigLoader.ConfigLoader.load>);
 
       try {
         mkdirSync(tempDir, { recursive: true });
@@ -343,7 +350,7 @@ describe('engine-executor', () => {
             echo: { command: 'echo', version: '', versionArgs: [], args: [] },
           },
         },
-      } as ReturnType<typeof ConfigLoader.ConfigLoader.load>);
+      } as unknown as ReturnType<typeof ConfigLoader.ConfigLoader.load>);
 
       try {
         mkdirSync(tempDir, { recursive: true });
@@ -382,7 +389,7 @@ describe('engine-executor', () => {
             echo: { command: 'echo', version: '', versionArgs: [], args: [] },
           },
         },
-      } as ReturnType<typeof ConfigLoader.ConfigLoader.load>);
+      } as unknown as ReturnType<typeof ConfigLoader.ConfigLoader.load>);
 
       try {
         mkdirSync(tempDir, { recursive: true });
@@ -414,7 +421,7 @@ describe('engine-executor', () => {
             echo: { command: 'echo', version: 'test', versionArgs: ['test'], args: [] },
           },
         },
-      } as ReturnType<typeof ConfigLoader.ConfigLoader.load>);
+      } as unknown as ReturnType<typeof ConfigLoader.ConfigLoader.load>);
 
       try {
         mkdirSync(tempDir, { recursive: true });
