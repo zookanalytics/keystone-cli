@@ -112,7 +112,7 @@ export class MemoryDb {
           .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='${this.tableName}'`)
           .get();
         if (!specificTableExists) {
-          ConsoleLogger.warn(
+          new ConsoleLogger().warn(
             `\n⚠️  Vector DB: Found legacy table 'vec_memory' with dimension mismatch (expected ${this.embeddingDimension}).\n` +
               `Using new table '${this.tableName}' instead. Old data is preserved in 'vec_memory'.\n`
           );

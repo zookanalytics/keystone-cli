@@ -324,7 +324,7 @@ export async function getEmbeddingModel(model: string): Promise<EmbeddingModel> 
     // If explicit provider setup fails AND it's a default attempt, fallback to local
     const config = ConfigLoader.load();
     if (model === config.embedding_model || !model) {
-      ConsoleLogger.warn(
+      new ConsoleLogger().warn(
         `⚠️  Embedding provider for '${model}' failed, falling back to local embeddings: ${err instanceof Error ? err.message : String(err)}`
       );
       return new LocalEmbeddingModel();
