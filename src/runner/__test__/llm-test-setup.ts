@@ -5,8 +5,8 @@
  * tests to opt-in to mocking rather than having it applied globally.
  */
 import { mock, spyOn } from 'bun:test';
-import * as llmAdapter from '../llm-adapter';
 import { ConfigLoader } from '../../utils/config-loader';
+import * as llmAdapter from '../llm-adapter';
 
 // Create singleton mock functions that all test files share
 export const mockGetModel = mock();
