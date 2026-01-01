@@ -6,6 +6,7 @@
  */
 import { mock, spyOn } from 'bun:test';
 import * as llmAdapter from '../llm-adapter';
+import { ConfigLoader } from '../../utils/config-loader';
 
 // Create singleton mock functions that all test files share
 export const mockGetModel = mock();
@@ -234,6 +235,24 @@ import { resetProviderRegistry } from '../llm-adapter';
 
 export function setupLlmMocks() {
   resetProviderRegistry(); // Clear cache to ensure new mock is used
+
+  // Set a default mock configuration for tests to avoid interference from local config.yaml
+  ConfigLoader.setConfig({
+    default_provider: 'openai',
+    providers: {
+      openai: {
+        type: 'openai',
+        package: '@ai-sdk/openai',
+      },
+      anthropic: {
+        type: 'anthropic',
+        package: '@ai-sdk/anthropic',
+      },
+    },
+    model_mappings: {
+      'claude-*': 'anthropic',
+    },
+  } as any);
 
   // Provider factory (e.g. createOpenAI) returns a Provider Instance function
   const mockProviderInstance = (modelId: string) => createUnifiedMockModel();
