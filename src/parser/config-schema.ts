@@ -116,6 +116,12 @@ export const ConfigSchema = z.object({
         .optional(),
     })
     .optional(),
+  logging: z
+    .object({
+      suppress_security_warning: z.boolean().default(false),
+      suppress_ai_sdk_warnings: z.boolean().default(false),
+    })
+    .default({}),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

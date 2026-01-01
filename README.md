@@ -237,6 +237,10 @@ storage:
 
 expression:
   strict: false
+
+logging:
+  suppress_security_warning: false
+  suppress_ai_sdk_warnings: false
 ```
 
 ### Storage Configuration
@@ -245,6 +249,13 @@ The `storage` section controls data retention and security for workflow runs:
 
 - **`retention_days`**: Sets the default window used by `keystone maintenance` / `keystone prune` commands to clean up old run data.
 - **`redact_secrets_at_rest`**: Controls whether secret inputs and known secrets are redacted before storing run data (default `true`).
+
+### Logging Configuration
+
+The `logging` section allows you to suppress warnings:
+
+- **`suppress_security_warning`**: Silences the "Security Warning" about running workflows from untrusted sources (default `false`).
+- **`suppress_ai_sdk_warnings`**: Silences internal warnings from the Vercel AI SDK, such as compatibility mode messages (default `false`).
 
 ### Bring Your Own Provider (BYOP)
 
@@ -1246,6 +1257,8 @@ Request steps enforce SSRF protections and require HTTPS by default. Cross-origi
 graph TD
     CLI[CLI Entry Point] --> WR[WorkflowRunner]
     CLI --> MCPServer[MCP Server]
+    Config[ConfigLoader] --> WR
+    Config --> Adapter
 
     subgraph "Core Orchestration"
         WR --> Scheduler[WorkflowScheduler]

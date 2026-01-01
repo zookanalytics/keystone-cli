@@ -55,7 +55,7 @@ class LocalEmbeddingModel {
         return Array.from(output.data) as number[];
       })
     );
-    return { embeddings };
+    return { embeddings, warnings: [] };
   }
 
   /**
@@ -298,6 +298,11 @@ async function prepareProvider(
 }
 
 export async function getModel(model: string): Promise<LanguageModel> {
+  const configValues = ConfigLoader.load();
+  if (configValues.logging?.suppress_ai_sdk_warnings) {
+    process.env.AI_SDK_LOG_WARNINGS = 'false';
+  }
+
   const { provider, resolvedModel } = await prepareProvider(model);
 
   // AI SDK convention: provider(modelId)
@@ -321,6 +326,11 @@ export async function getModel(model: string): Promise<LanguageModel> {
 }
 
 export async function getEmbeddingModel(model: string): Promise<EmbeddingModel> {
+  const configValues = ConfigLoader.load();
+  if (configValues.logging?.suppress_ai_sdk_warnings) {
+    process.env.AI_SDK_LOG_WARNINGS = 'false';
+  }
+
   // 1. Check for local fallback
   if (model === 'local' || model === 'keystone-local') {
     return new LocalEmbeddingModel();
