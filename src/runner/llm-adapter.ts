@@ -307,6 +307,13 @@ export async function getModel(model: string): Promise<LanguageModel> {
 
   // AI SDK convention: provider(modelId)
   if (typeof provider === 'function') {
+    // Prefer explicit .chat() or .chatModel() if available to ensure correct protocol (Chat vs Completion)
+    if (typeof (provider as any).chat === 'function') {
+      return (provider as any).chat(resolvedModel);
+    }
+    if (typeof (provider as any).chatModel === 'function') {
+      return (provider as any).chatModel(resolvedModel);
+    }
     return (provider as any)(resolvedModel);
   }
 
