@@ -4,6 +4,7 @@ import { type ExpressionContext, ExpressionEvaluator } from '../../expression/ev
 import type { Step } from '../../parser/schema.ts';
 import { StepStatus, type StepStatusType, WorkflowStatus } from '../../types/status.ts';
 import { LIMITS } from '../../utils/constants.ts';
+import { ConfigLoader } from '../../utils/config-loader.ts';
 import type { Logger } from '../../utils/logger.ts';
 import type { ResourcePoolManager } from '../resource-pool.ts';
 import type { ForeachStepContext, StepContext } from '../workflow-state.ts';
@@ -24,7 +25,7 @@ export class ForeachExecutor {
     private executeStepFn: ExecuteStepCallback,
     private abortSignal?: AbortSignal,
     private resourcePool?: ResourcePoolManager
-  ) {}
+  ) { }
 
   /**
    * Aggregate outputs from multiple iterations of a foreach step
@@ -98,7 +99,7 @@ export class ForeachExecutor {
     if (items.length > LIMITS.MAX_FOREACH_ITERATIONS) {
       throw new Error(
         `Foreach step "${step.id}" exceeds maximum iteration limit of ${LIMITS.MAX_FOREACH_ITERATIONS}. ` +
-          `Got ${items.length} items. Consider batching or reducing the dataset.`
+        `Got ${items.length} items. Consider batching or reducing the dataset.`
       );
     }
 
@@ -113,7 +114,8 @@ export class ForeachExecutor {
 
     // Evaluate concurrency
     // Default to a safe limit (50) to prevent resource exhaustion/DoS, unless explicitly overridden.
-    const DEFAULT_MAX_CONCURRENCY = 50;
+    const config = ConfigLoader.load();
+    const DEFAULT_MAX_CONCURRENCY = config.concurrency?.default ?? 50;
     let concurrencyLimit = Math.min(items.length, DEFAULT_MAX_CONCURRENCY);
 
     if (step.concurrency !== undefined) {
@@ -293,6 +295,8 @@ export class ForeachExecutor {
                 }
 
                 this.logger.log(`  ⤷ [${i + 1}/${items.length}] Executing iteration...`);
+
+                // Execute step
                 itemResults[i] = await this.executeStepFn(step, itemContext, stepExecId);
 
                 // Track result size to prevent memory exhaustion
@@ -306,7 +310,7 @@ export class ForeachExecutor {
                   if (estimatedResultsBytes > LIMITS.MAX_FOREACH_RESULTS_BYTES) {
                     throw new Error(
                       `Foreach step "${step.id}" accumulated results exceed maximum size of ` +
-                        `${LIMITS.MAX_FOREACH_RESULTS_BYTES} bytes. Consider reducing output size or batching.`
+                      `${LIMITS.MAX_FOREACH_RESULTS_BYTES} bytes. Consider reducing output size or batching.`
                     );
                   }
                 }
