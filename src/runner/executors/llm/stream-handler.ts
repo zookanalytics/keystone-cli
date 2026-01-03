@@ -80,7 +80,7 @@ export class StreamHandler {
 
     if (thoughts.length > 0) {
       for (const t of thoughts) {
-        this.logger.log(`  💭 ${t}`);
+        this.logger.info(`  💭 ${t}`);
       }
     }
 
@@ -95,7 +95,7 @@ export class StreamHandler {
     const { output, thoughts } = this.parser.flush();
     if (thoughts.length > 0) {
       for (const t of thoughts) {
-        this.logger.log(`  💭 ${t}`);
+        this.logger.info(`  💭 ${t}`);
       }
     }
     return { text: output, thoughts };

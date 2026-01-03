@@ -66,6 +66,11 @@ export class MemoryDb {
   // Cache connections by path to avoid reloading extensions
   private static connectionCache = new Map<string, { db: Database; refCount: number }>();
   private tableName: string;
+  private vectorReady = false;
+
+  get isVectorReady(): boolean {
+    return this.vectorReady;
+  }
 
   /**
    * Acquire a MemoryDb instance. This handles reference counting automatically.
@@ -111,8 +116,16 @@ export class MemoryDb {
         this.db = new Database(dbPath, { create: true });
 
         // Load sqlite-vec extension
-        const extensionPath = resolveSqliteVecPath();
-        this.db.loadExtension(extensionPath);
+        try {
+          const extensionPath = resolveSqliteVecPath();
+          this.db.loadExtension(extensionPath);
+        } catch (error) {
+          // In some environments (e.g. standard Bun builds), dynamic extension loading might be disabled.
+          // We log a warning and proceed without vector support.
+          new ConsoleLogger().warn(
+            `⚠️  Vector DB: Failed to load sqlite-vec extension. Vector search will be unavailable. Error: ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
 
         this.initSchema();
 
@@ -160,12 +173,29 @@ export class MemoryDb {
       }
     }
 
-    this.db.run(`
-      CREATE VIRTUAL TABLE IF NOT EXISTS ${this.tableName} USING vec0(
-        id TEXT PRIMARY KEY,
-        embedding FLOAT[${this.embeddingDimension}]
+    try {
+      this.db.run(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS ${this.tableName} USING vec0(
+          id TEXT PRIMARY KEY,
+          embedding FLOAT[${this.embeddingDimension}]
+        );
+      `);
+
+      // Verify table actually exists (in case run() didn't throw but failed)
+      const tableExists = this.db
+        .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='${this.tableName}'`)
+        .get();
+      this.vectorReady = !!tableExists;
+
+      if (!this.vectorReady) {
+        new ConsoleLogger().warn(`⚠️  Vector DB: Vector table '${this.tableName}' was not created.`);
+      }
+    } catch (error) {
+      this.vectorReady = false;
+      new ConsoleLogger().warn(
+        `⚠️  Vector DB: Failed to create vector table. Vector search will be unavailable. Error: ${error}`
       );
-    `);
+    }
 
     this.db.run(`
       CREATE TABLE IF NOT EXISTS memory_metadata (

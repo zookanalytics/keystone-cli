@@ -8,6 +8,9 @@ import { mock, spyOn } from 'bun:test';
 import { ConfigLoader } from '../../utils/config-loader';
 import * as llmAdapter from '../llm-adapter';
 
+// Disable AI SDK warnings for cleaner test output
+(global as any).AI_SDK_LOG_WARNINGS = false;
+
 // Create singleton mock functions that all test files share
 export const mockGetModel = mock();
 export const mockGetEmbeddingModel = mock();
@@ -99,7 +102,7 @@ export function createUnifiedMockModel() {
       }));
 
       const finalToolCalls = toolCalls && toolCalls.length > 0 ? toolCalls : undefined;
-      const text = response.message.content || ' ';
+      const text = response.message.content || '';
 
       // Internal AI SDK v6.0.3+ seems to expect 'content' on the result object
       // during generateText processing, even if not in the official v2 spec.
@@ -113,8 +116,8 @@ export function createUnifiedMockModel() {
             type: 'tool-call',
             toolCallId: tc.toolCallId,
             toolName: tc.toolName,
-            args: tc.args,
-          });
+            input: tc.args || (tc as any).input || {},
+          } as any);
         }
       }
 
@@ -174,26 +177,34 @@ export function createUnifiedMockModel() {
 
       const stream = new ReadableStream({
         async start(controller) {
-          if (response.message.content) {
+          if (response.message.content !== undefined && response.message.content !== null) {
             controller.enqueue({
               type: 'text-delta',
               index: 0,
               textDelta: response.message.content,
-              delta: { text: response.message.content }, // legacy compatibility
-            });
+              delta: response.message.content,
+            } as any);
           }
 
           const toolCalls = response.message.tool_calls?.map((tc: any) => ({
-            type: 'tool-call' as const,
+            type: 'tool-call',
             toolCallId: tc.id,
             toolName: tc.function.name,
             args:
               typeof tc.function.arguments === 'string'
                 ? JSON.parse(tc.function.arguments)
                 : tc.function.arguments,
-            // Add these for v1/compatibility if needed by some internal AI SDK checks
+            input:
+              typeof tc.function.arguments === 'string'
+                ? JSON.parse(tc.function.arguments)
+                : tc.function.arguments,
             id: tc.id,
             name: tc.function.name,
+            delta: JSON.stringify(
+              typeof tc.function.arguments === 'string'
+                ? JSON.parse(tc.function.arguments)
+                : tc.function.arguments
+            ),
           }));
 
           if (toolCalls?.length) {
@@ -202,6 +213,7 @@ export function createUnifiedMockModel() {
             }
           }
 
+          // Finish event
           controller.enqueue({
             type: 'finish',
             finishReason: toolCalls?.length ? 'tool-calls' : 'stop',

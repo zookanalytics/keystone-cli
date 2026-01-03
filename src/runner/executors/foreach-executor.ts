@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { StepBatchUpdate, WorkflowDb } from '../../db/workflow-db.ts';
+import type { StepBatchUpdate, StepExecution, WorkflowDb } from '../../db/workflow-db.ts';
 import { type ExpressionContext, ExpressionEvaluator } from '../../expression/evaluator.ts';
 import type { Step } from '../../parser/schema.ts';
 import { StepStatus, type StepStatusType, WorkflowStatus } from '../../types/status.ts';
@@ -186,7 +186,7 @@ export class ForeachExecutor {
 
       // Optimization: Fetch all existing iterations in one query
       // This avoids N queries in the loop
-      const existingIterations = new Map<number, any>();
+      const existingIterations = new Map<number, StepExecution>();
       if (shouldCheckDb) {
         try {
           // Check count first to decide if we should load outputs
@@ -473,7 +473,7 @@ export class ForeachExecutor {
           }
         });
 
-      let workerResults: PromiseSettledResult<any>[];
+      let workerResults: PromiseSettledResult<void>[];
       try {
         workerResults = await Promise.allSettled(workers);
       } finally {

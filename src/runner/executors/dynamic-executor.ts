@@ -402,6 +402,17 @@ async function handlePlanningPhase(
   }
 
   state.generatedPlan = planResult.output as DynamicPlan;
+  // Early validation of plan structure and dependencies
+  try {
+    topologicalSort(state.generatedPlan.steps);
+  } catch (err) {
+    state.status = 'failed';
+    state.error = err instanceof Error ? err.message : String(err);
+    if (stateManager && dbState && dbState.id)
+      await stateManager.finish(dbState.id, 'failed', state.error);
+    throw new Error(state.error);
+  }
+
   state.status = step.confirmPlan ? 'awaiting_confirmation' : 'executing';
 
   logger.log(`  📋 Plan generated with ${state.generatedPlan.steps.length} steps:`);
@@ -459,6 +470,8 @@ async function handleConfirmationPhase(
       try {
         const modifiedPlan = JSON.parse(response) as DynamicPlan;
         if (modifiedPlan.steps && Array.isArray(modifiedPlan.steps)) {
+          // Validate modified plan
+          topologicalSort(modifiedPlan.steps);
           state.generatedPlan = modifiedPlan;
           logger.log('  ✓ Using modified plan');
         }
@@ -533,6 +546,9 @@ async function handleExecutionPhase(
         1;
   logger.log(`  🚀 Starting parallel execution (concurrency: ${maxConcurrency})`);
 
+  // Track running promises to avoid busy wait
+  const executionPromises = new Set<Promise<void>>();
+
   while (completed.size + failed.size < state.generatedPlan.steps.length) {
     if (abortSignal?.aborted) throw new Error('Dynamic step execution canceled');
 
@@ -561,9 +577,6 @@ async function handleExecutionPhase(
       }
       break;
     }
-
-    // Track running promises to avoid busy wait
-    const executionPromises = new Set<Promise<void>>();
 
     // Helper to wrap execution with cleanup
     const executeWrapper = async (genStep: GeneratedStep, i: number) => {

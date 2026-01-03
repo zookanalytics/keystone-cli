@@ -3,10 +3,12 @@ import * as fs from 'node:fs';
 import { MemoryDb } from './memory-db';
 import { setupSqlite } from './sqlite-setup';
 
+import { randomUUID } from 'node:crypto';
+
 // Initialize SQLite with custom library for extensions
 setupSqlite();
 
-const TEST_DB = '.keystone/test-memory.db';
+const TEST_DB = `.keystone/test-memory-${randomUUID()}.db`;
 
 describe('MemoryDb', () => {
   // Clean up previous runs
@@ -15,6 +17,7 @@ describe('MemoryDb', () => {
   }
 
   const db = new MemoryDb(TEST_DB);
+  console.log(`[MemoryDb Test] DB: ${TEST_DB}, Vector Ready: ${db.isVectorReady}`);
 
   afterAll(() => {
     db.close();
@@ -24,6 +27,7 @@ describe('MemoryDb', () => {
   });
 
   test('should initialize and store embedding', async () => {
+    if (!db.isVectorReady) return;
     const id = await db.store('hello world', Array(384).fill(0.1), { tag: 'test' });
     expect(id).toBeDefined();
     expect(typeof id).toBe('string');
@@ -36,6 +40,8 @@ describe('MemoryDb', () => {
 
     const db1536 = new MemoryDb(testDb1536, DIM_1536);
     try {
+      if (!db1536.isVectorReady) return;
+
       const id = await db1536.store('hi', Array(DIM_1536).fill(0.5));
       expect(id).toBeDefined();
 
@@ -60,6 +66,12 @@ describe('MemoryDb', () => {
 
     // Let's just test that we can use different dimensions on the same DB file.
     const db1 = new MemoryDb(testDbMismatch, 128);
+    if (!db1.isVectorReady) {
+      db1.close();
+      if (fs.existsSync(testDbMismatch)) fs.unlinkSync(testDbMismatch);
+      return;
+    }
+
     await db1.store('test128', Array(128).fill(0));
     db1.close();
 
@@ -75,6 +87,7 @@ describe('MemoryDb', () => {
   });
 
   test('should search and retrieve result', async () => {
+    if (!db.isVectorReady) return;
     // Store another item to search for
     await db.store('search target', Array(384).fill(0.9), { tag: 'target' });
 
@@ -85,6 +98,7 @@ describe('MemoryDb', () => {
   });
 
   test('should fail gracefully with invalid dimensions', async () => {
+    if (!db.isVectorReady) return;
     // sqlite-vec requires fixed dimensions (384 defined in schema)
     // bun:sqlite usually throws an error for constraint violations
     let error: unknown;

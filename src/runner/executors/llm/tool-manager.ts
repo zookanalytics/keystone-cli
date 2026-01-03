@@ -316,9 +316,10 @@ export class ToolManager {
       execute: async (args: any) => {
         const actualArgs = args || {};
         if (name !== 'ask') {
-          this.ctx.logger.log(
-            `  🛠️  Tool Call: ${name} ${Object.keys(actualArgs).length ? safeJsonStringify(actualArgs) : ''}`
-          );
+          const argsText = Object.keys(actualArgs).length
+            ? ` ${safeJsonStringify(actualArgs)}`
+            : '';
+          this.ctx.logger.log(`  🛠️  Tool Call: ${name}${argsText}`);
         } else {
           this.ctx.logger.debug('  🛠️  Tool Call: ask');
         }

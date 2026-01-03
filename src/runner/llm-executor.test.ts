@@ -259,21 +259,25 @@ describe('llm-executor', () => {
       needs: [],
       maxIterations: 10,
     };
-    const logger = { log: mock(), error: mock(), warn: mock(), info: mock(), debug: mock() };
+    const loggerSpy = { log: mock(), error: mock(), warn: mock(), info: mock(), debug: mock() };
+
+    const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
 
     await executeLlmStep(
       step,
       { inputs: {}, steps: {} },
       async () => ({ status: 'success', output: 'ok' }),
-      logger
+      loggerSpy
     );
 
-    expect(logger.log).toHaveBeenCalledWith(
+    consoleSpy.mockRestore();
+
+    expect(loggerSpy.log).toHaveBeenCalledWith(
       expect.stringContaining('  🛠️  Tool Call: test-tool {"val":123}')
     );
   });
 
-  it('should throw error if schema validation fails and JSON cannot be extracted', async () => {
+  it('should return failed status if schema validation fails and JSON cannot be extracted', async () => {
     setupMockModel(defaultMockChat as any);
     const step: LlmStep = {
       id: 'l1',
@@ -288,12 +292,13 @@ describe('llm-executor', () => {
     // Case 1: Model returns text that is NOT valid JSON
     setupMockModel(async () => ({ message: { role: 'assistant', content: 'Not JSON' } }));
 
-    await expect(
-      executeLlmStep(step, { inputs: {}, steps: {} }, async () => ({
-        status: 'success',
-        output: 'ok',
-      }))
-    ).rejects.toThrow('Failed to extract valid JSON');
+    const result = await executeLlmStep(step, { inputs: {}, steps: {} }, async () => ({
+      status: 'success',
+      output: 'ok',
+    }));
+
+    expect(result.status).toBe('failed');
+    expect(result.error).toContain('Failed to extract valid JSON');
   });
 
   it('should handle tool not found', async () => {
@@ -306,10 +311,14 @@ describe('llm-executor', () => {
       maxIterations: 10,
     };
 
+    const consoleSpy = spyOn(console, 'error').mockImplementation(() => {});
+
     const result = await executeLlmStep(step, { inputs: {}, steps: {} }, async () => ({
       status: 'success',
       output: 'ok',
     }));
+
+    consoleSpy.mockRestore();
 
     expect(result.status).toBe('success');
   });

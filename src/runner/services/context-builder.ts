@@ -1,6 +1,6 @@
 import type { ExpressionContext } from '../../expression/evaluator.ts';
 import { ExpressionEvaluator } from '../../expression/evaluator.ts';
-import type { Workflow } from '../../parser/schema.ts';
+import type { Step, Workflow } from '../../parser/schema.ts';
 import type { Logger } from '../../utils/logger.ts';
 import type { WorkflowState } from '../workflow-state.ts';
 
@@ -92,7 +92,7 @@ export class ContextBuilder {
   /**
    * Builds input object for a specific step.
    */
-  public buildStepInputs(step: any, context: ExpressionContext): Record<string, unknown> {
+  public buildStepInputs(step: Step, context: ExpressionContext): Record<string, unknown> {
     const stripUndefined = (value: Record<string, unknown>) => {
       const result: Record<string, unknown> = {};
       for (const [key, val] of Object.entries(value)) {
@@ -165,8 +165,17 @@ export class ContextBuilder {
           inputType: step.inputType,
         });
       case 'sleep': {
-        const evaluated = ExpressionEvaluator.evaluate(step.duration.toString(), context);
-        return { duration: Number(evaluated) };
+        return stripUndefined({
+          duration:
+            step.duration !== undefined
+              ? Number(ExpressionEvaluator.evaluate(step.duration.toString(), context))
+              : undefined,
+          until:
+            step.until !== undefined
+              ? ExpressionEvaluator.evaluateString(step.until, context)
+              : undefined,
+          durable: step.durable,
+        });
       }
       case 'llm':
         return stripUndefined({

@@ -123,7 +123,7 @@ describe('Join Scheduling & Resume', () => {
   });
 
   it('should resume and retry a step that previously exhausted retries', async () => {
-    const dbPath = 'test-resume-retry.db';
+    const dbPath = `test-resume-retry-${Date.now()}.db`;
     if (existsSync(dbPath)) rmSync(dbPath);
 
     const counterFile = `/tmp/keystone-test-resume-${Date.now()}.txt`;
@@ -177,6 +177,7 @@ describe('Join Scheduling & Resume', () => {
     // Verify it failed twice (initial + 1 retry)
     let val = await Bun.file(counterFile).text();
     expect(val.trim()).toBe('2');
+    await runner1.stop();
 
     // Now resume. It should try again (Run 3) and succeed.
     const runner2 = new WorkflowRunner(workflow, {

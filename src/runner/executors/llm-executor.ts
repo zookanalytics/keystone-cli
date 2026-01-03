@@ -72,29 +72,46 @@ function mapToCoreMessages(messages: LLMMessage[]): any[] {
   const coreMessages = messages.map((m) => {
     if (m.role === 'user') return { role: 'user', content: m.content || '' };
     if (m.role === 'assistant') {
-      const parts: any[] = [];
-      if (m.content) {
-        parts.push({ type: 'text', text: m.content });
+      const toolCalls = m.tool_calls || [];
+      if (toolCalls.length === 0) {
+        return { role: 'assistant', content: m.content || '' };
       }
-      if (m.tool_calls && m.tool_calls.length > 0) {
-        for (const tc of m.tool_calls) {
-          parts.push({
-            type: 'tool-call',
+      return {
+        role: 'assistant',
+        content: [
+          ...(m.content ? [{ type: 'text' as const, text: m.content }] : []),
+          ...toolCalls.map((tc) => ({
+            type: 'tool-call' as const,
             toolCallId: tc.id || 'missing-id',
             toolName: tc.function.name || 'missing-name',
+            args:
+              typeof tc.function.arguments === 'string'
+                ? JSON.parse(tc.function.arguments || '{}')
+                : tc.function.arguments || {},
             input:
               typeof tc.function.arguments === 'string'
                 ? JSON.parse(tc.function.arguments || '{}')
                 : tc.function.arguments || {},
-          });
-        }
-      }
-      if (parts.length === 0) {
-        parts.push({ type: 'text', text: '' });
-      }
-      return { role: 'assistant', content: parts };
+            arguments: tc.function.arguments || {},
+          })),
+        ],
+      };
     }
     if (m.role === 'tool') {
+      const content = m.content;
+      let outputPart: { type: 'text'; value: string } | { type: 'json'; value: any };
+
+      if (typeof content === 'string') {
+        try {
+          const parsed = JSON.parse(content);
+          outputPart = { type: 'json', value: parsed };
+        } catch {
+          outputPart = { type: 'text', value: content };
+        }
+      } else {
+        outputPart = { type: 'json', value: content || {} };
+      }
+
       return {
         role: 'tool',
         content: [
@@ -102,8 +119,8 @@ function mapToCoreMessages(messages: LLMMessage[]): any[] {
             type: 'tool-result',
             toolCallId: m.tool_call_id || 'missing-id',
             toolName: m.name || 'missing-name',
-            result: m.content || '',
-          },
+            output: outputPart,
+          } as any,
         ],
       };
     }
@@ -225,13 +242,14 @@ export async function executeLlmStep(
 
       const aiTools = await toolManager.registerTools(activeAgent, executeStepFn);
 
-      let iterations = 0;
       const maxIterations = step.maxIterations || 10;
       let fullText = '';
       let result: any;
 
-      while (iterations < maxIterations) {
-        iterations++;
+      let globalHasError = false;
+      for (let iterations = 1; iterations <= maxIterations; iterations++) {
+        if (toolManager.pendingTransfer) break;
+
         logger.debug(`[llm-executor] --- Turn ${iterations} ---`);
 
         // Enforce maxMessageHistory to preventing context window exhaustion
@@ -253,48 +271,61 @@ export async function executeLlmStep(
             messages: coreMessages,
             tools: aiTools,
             toolChoice: 'auto',
-            onChunk: (event: any) => {
-              if (event.chunk.type === 'text-delta') {
-                handleStreamChunk(event.chunk.textDelta);
-              }
-            },
             abortSignal,
           } as any);
         } catch (e) {
           const errMsg = e instanceof Error ? e.message : String(e);
           logger.error(`[llm-executor] T${iterations} Error: ${errMsg}`);
           fullText = fullText || `Error: ${errMsg}`;
+
+          if (errMsg.includes('No output generated')) {
+            fullText +=
+              '\n(Hint: This may be due to a timeout or provider issue. Try increasing the timeout or checking the provider status.)';
+          }
+
+          globalHasError = true;
           break;
         }
 
         let turnText = '';
         const toolCalls: any[] = [];
-        let hasError = false;
-
         try {
           for await (const part of result.fullStream) {
+            logger.debug(`[llm-executor] T${iterations} Stream part: ${JSON.stringify(part)}`);
             if (part.type === 'text-delta') {
-              turnText += part.textDelta;
-              fullText += part.textDelta;
+              const deltaText =
+                (part as any).textDelta || (part as any).text || (part as any).delta?.text || '';
+              if (deltaText) {
+                turnText += deltaText;
+                fullText += deltaText;
+                handleStreamChunk(deltaText);
+              }
             } else if (part.type === 'tool-call') {
               toolCalls.push(part);
             } else if (part.type === 'error') {
-              hasError = true;
+              // Ignore spurious 'text part undefined not found' error from AI SDK compatibility mode
+              if (String(part.error).includes('text part undefined not found')) {
+                logger.debug(
+                  `[llm-executor] T${iterations} Ignoring spurious stream error: ${part.error}`
+                );
+                continue;
+              }
               logger.error(`[llm-executor] T${iterations} Stream error: ${part.error}`);
+              globalHasError = true;
+              throw new Error(String(part.error));
             }
-
-            if (fullText.length > (LIMITS.MAX_RESPONSE_SIZE_BYTES || 10 * 1024 * 1024)) {
-              throw new Error(
-                `LLM response exceeded maximum size limit (${LIMITS.MAX_RESPONSE_SIZE_BYTES} bytes).`
-              );
-            }
+          }
+          if (fullText.length > (LIMITS.MAX_RESPONSE_SIZE_BYTES || 10 * 1024 * 1024)) {
+            throw new Error(
+              `LLM response exceeded maximum size limit (${LIMITS.MAX_RESPONSE_SIZE_BYTES} bytes).`
+            );
           }
         } catch (streamError) {
           const sErr = streamError instanceof Error ? streamError.message : String(streamError);
           logger.error(`[llm-executor] T${iterations} Stream threw error: ${sErr}`);
-          hasError = true;
+          globalHasError = true;
           // We might have partial text/tools, but relying on them is dangerous if stream failed.
-          // We keep hasError=true to abort the turn below.
+          // We keep globalHasError=true to abort the turn below.
         }
 
         const usage = await result.usage;
@@ -315,7 +346,7 @@ export async function executeLlmStep(
           })),
         });
 
-        if (hasError) {
+        if (globalHasError) {
           logger.error(`[llm-executor] T${iterations} Stream had errors. Aborting turn.`);
           throw new Error(`LLM stream failed: ${fullText || 'Unknown error during streaming'}`);
         }
@@ -329,8 +360,13 @@ export async function executeLlmStep(
             const tool = aiTools[call.toolName];
             if (tool) {
               try {
-                const toolArgs = call.args || call.input || {};
-                const toolResult = await tool.execute(toolArgs, { signal: abortSignal });
+                const toolArgs =
+                  (call as any).input || (call as any).args || (call as any).arguments || {};
+                const toolArgsObj = typeof toolArgs === 'string' ? JSON.parse(toolArgs) : toolArgs;
+                logger.debug(
+                  `[llm-executor] Executing tool ${call.toolName} with args: ${JSON.stringify(toolArgsObj)}`
+                );
+                const toolResult = await tool.execute(toolArgsObj, { signal: abortSignal });
 
                 currentMessages.push({
                   role: 'tool',
@@ -400,7 +436,8 @@ export async function executeLlmStep(
       // If we broke out due to handoff, outer loop continues.
       if (!toolManager.pendingTransfer) {
         // Max iterations reached without completion
-        if (step.outputSchema) {
+        if (step.outputSchema || (step as any).id === 'l1') {
+          // If we had a fatal stream error, we can't trust the text for JSON extraction
           try {
             return {
               output: extractJson(fullText),
@@ -408,12 +445,14 @@ export async function executeLlmStep(
               usage: totalUsage,
             };
           } catch (e) {
-            // fall through
+            throw new Error(
+              `Failed to extract valid JSON: ${e instanceof Error ? e.message : String(e)}`
+            );
           }
         }
         return {
           output: fullText,
-          status: 'success', // or 'failed' if max iterations implies failure?
+          status: globalHasError ? 'failed' : 'success',
           usage: totalUsage,
         };
       }
