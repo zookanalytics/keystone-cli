@@ -86,13 +86,13 @@ describe('Workflow Memoization (Auto-Hashing)', () => {
 
     // We can check if `executeLlmStep` was called.
     let called = false;
-    const trackingExecute = async (s: any, c: any) => {
+    // Match signature of executeLlmStep (at least the required args)
+    const trackingExecute = async (s: any, c: any, _execFn: any, ..._args: any[]) => {
       called = true;
       return mockExecuteLlmStep(s, c);
     };
 
     // Override the executor for runner2 to track calls
-    // @ts-ignore - hacking private property or constructor option
     // Actually we passed it in constructor option.
     const runner2Tracked = new WorkflowRunner(workflow, {
       dbPath,
