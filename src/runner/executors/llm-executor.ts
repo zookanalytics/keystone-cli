@@ -130,6 +130,36 @@ function mapToCoreMessages(messages: LLMMessage[]): any[] {
   return coreMessages;
 }
 
+// --- Helper Functions ---
+
+/**
+ * Prunes the message history to the last N messages, ensuring that tool calls and tool results
+ * are kept together.
+ */
+export function pruneMessages(messages: LLMMessage[], maxHistory: number): LLMMessage[] {
+  if (messages.length <= maxHistory) {
+    return messages;
+  }
+
+  let startIndex = messages.length - maxHistory;
+
+  // Loop to backtrack if we landed on a tool message
+  while (startIndex > 0 && messages[startIndex].role === 'tool') {
+    startIndex--;
+  }
+
+  // Check if we landed on a valid parent (Assistant with tool_calls)
+  const candidate = messages[startIndex];
+  if (candidate.role === 'assistant' && candidate.tool_calls && candidate.tool_calls.length > 0) {
+    // Found the parent, include it and everything after
+    return messages.slice(startIndex);
+  }
+
+  // Fallback to naive slicing if we can't find a clean parent connection
+  // (This matches current behavior for edge cases, preventing regressions in weird states)
+  return messages.slice(messages.length - maxHistory);
+}
+
 // --- Main Execution Logic ---
 
 export async function executeLlmStep(
@@ -255,11 +285,11 @@ export async function executeLlmStep(
         // Enforce maxMessageHistory to preventing context window exhaustion
         let messagesForTurn = currentMessages;
         if (step.maxMessageHistory && currentMessages.length > step.maxMessageHistory) {
-          // Keep the last N messages
-          // Note: This naive slicing might cut off a tool_call that corresponds to a tool_result
-          // but robust models should handle it or we accept the degradation for stability.
-          messagesForTurn = currentMessages.slice(-step.maxMessageHistory);
-          logger.debug(`  ✂️ Pruned context to last ${step.maxMessageHistory} messages`);
+          // Keep the last N messages (with robust pruning to keep tool pairs together)
+          messagesForTurn = pruneMessages(currentMessages, step.maxMessageHistory);
+          logger.debug(
+            `  ✂️ Pruned context to last ${messagesForTurn.length} messages (maxHistory=${step.maxMessageHistory})`
+          );
         }
 
         const coreMessages = mapToCoreMessages(messagesForTurn);
