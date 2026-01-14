@@ -44,6 +44,9 @@ export async function executeShellStep(
   abortSignal?: AbortSignal
 ): Promise<StepResult> {
   if (step.args) {
+    if (step.args.length === 0) {
+      throw new Error('Shell step args must contain at least one element');
+    }
     // args are inherently safe from shell injection as they skip the shell
     // and pass the array directly to the OS via Bun.spawn.
 
@@ -56,7 +59,15 @@ export async function executeShellStep(
       };
     }
 
-    const result = await executeShellArgs(step.args, context, logger, abortSignal, step.dir);
+    const result = await executeShellArgs(
+      step.args,
+      context,
+      logger,
+      abortSignal,
+      step.dir,
+      step.env,
+      step.allowOutsideCwd
+    );
     return formatShellResult(result, logger);
   }
 
@@ -417,11 +428,43 @@ export async function executeShellArgs(
   context: ExpressionContext,
   logger: Logger = new ConsoleLogger(),
   abortSignal?: AbortSignal,
-  dir?: string
+  dir?: string,
+  stepEnv?: Record<string, string>,
+  allowOutsideCwd?: boolean
 ): Promise<ShellResult> {
+  if (argsTemplates.length === 0) {
+    throw new Error('Shell args must contain at least one element');
+  }
   const args = argsTemplates.map((t) => ExpressionEvaluator.evaluateString(t, context));
   const cwd = dir ? ExpressionEvaluator.evaluateString(dir, context) : undefined;
+  if (cwd) {
+    PathResolver.assertWithinCwd(cwd, allowOutsideCwd, 'Directory');
+  }
+
+  // Security Check: Enforce Denylist for direct args execution
+  const config = ConfigLoader.load();
+  if (config.engines?.denylist && config.engines.denylist.length > 0) {
+    const firstArg = args[0];
+    if (firstArg) {
+      let bin = firstArg;
+      if (bin.includes('/')) {
+        const parts = bin.split(/[/\\]/);
+        bin = parts[parts.length - 1];
+      }
+      if (config.engines.denylist.includes(bin)) {
+        throw new Error(
+          `Security Error: Command "${bin}" is in the denylist and cannot be executed.`
+        );
+      }
+    }
+  }
+
   const env: Record<string, string> = context.env ? { ...context.env } : {};
+  if (stepEnv) {
+    for (const [key, value] of Object.entries(stepEnv)) {
+      env[key] = ExpressionEvaluator.evaluateString(value, context);
+    }
+  }
   const hostEnv = filterSensitiveEnv(Bun.env);
   const mergedEnv = { ...hostEnv, ...env };
   const maxOutputBytes = LIMITS.MAX_PROCESS_OUTPUT_BYTES;

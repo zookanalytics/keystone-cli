@@ -1,9 +1,17 @@
 import { describe, expect, it } from 'bun:test';
+import { realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, resolve as resolvePath, sep } from 'node:path';
 import type { ExpressionContext } from '../expression/evaluator';
+import { ConfigSchema } from '../parser/config-schema';
 import type { ShellStep } from '../parser/schema';
-import { escapeShellArg, executeShell } from './executors/shell-executor.ts';
+import { ConfigLoader } from '../utils/config-loader';
+import { ConsoleLogger } from '../utils/logger';
+import { escapeShellArg, executeShell, executeShellStep } from './executors/shell-executor.ts';
 
 describe('shell-executor', () => {
+  const logger = new ConsoleLogger();
+
   describe('escapeShellArg', () => {
     it('should wrap in single quotes', () => {
       expect(escapeShellArg('hello')).toBe("'hello'");
@@ -172,6 +180,104 @@ describe('shell-executor', () => {
       const result = await executeShell(step, context);
       expect(result.exitCode).toBe(0);
       expect(result.stdout.trim()).toBe('match');
+    });
+  });
+
+  describe('executeShellStep (args)', () => {
+    const context: ExpressionContext = {
+      inputs: {},
+      steps: {},
+      env: {},
+    };
+
+    it('should reject empty args', async () => {
+      const step: ShellStep = {
+        id: 'test',
+        type: 'shell',
+        needs: [],
+        args: [],
+      };
+
+      await expect(executeShellStep(step, context, logger)).rejects.toThrow(
+        /args must contain at least one element/
+      );
+    });
+
+    it('should apply step env for args execution', async () => {
+      const bunPath = process.execPath;
+      const step: ShellStep = {
+        id: 'test',
+        type: 'shell',
+        needs: [],
+        args: [bunPath, '-e', 'console.log(process.env.TEST_VAR ?? "")'],
+        env: { TEST_VAR: 'args-env' },
+      };
+
+      const result = await executeShellStep(step, context, logger);
+      expect(result.output?.stdout?.trim()).toBe('args-env');
+    });
+
+    it('should enforce denylist for args execution', async () => {
+      const bunPath = process.execPath;
+      const denied = basename(bunPath);
+
+      ConfigLoader.setConfig(
+        ConfigSchema.parse({
+          engines: { denylist: [denied] },
+        })
+      );
+
+      try {
+        const step: ShellStep = {
+          id: 'test',
+          type: 'shell',
+          needs: [],
+          args: [bunPath, '-e', 'console.log("nope")'],
+        };
+
+        await expect(executeShellStep(step, context, logger)).rejects.toThrow(/denylist/);
+      } finally {
+        ConfigLoader.clear();
+      }
+    });
+
+    it('should enforce allowOutsideCwd for args execution', async () => {
+      const bunPath = process.execPath;
+      const cwd = resolvePath(process.cwd());
+      let outsideDir = resolvePath(tmpdir());
+
+      if (outsideDir.startsWith(`${cwd}${sep}`)) {
+        const parent = resolvePath(cwd, '..');
+        if (parent !== cwd) {
+          outsideDir = parent;
+        }
+      }
+
+      if (outsideDir === cwd) {
+        return;
+      }
+
+      const step: ShellStep = {
+        id: 'test',
+        type: 'shell',
+        needs: [],
+        args: [bunPath, '-e', 'console.log(process.cwd())'],
+        dir: outsideDir,
+      };
+
+      await expect(executeShellStep(step, context, logger)).rejects.toThrow(
+        /outside the project directory/
+      );
+
+      const allowedStep: ShellStep = {
+        ...step,
+        allowOutsideCwd: true,
+      };
+
+      const result = await executeShellStep(allowedStep, context, logger);
+      const resolvedOutput = realpathSync(resolvePath(result.output?.stdout?.trim() || ''));
+      const resolvedOutside = realpathSync(outsideDir);
+      expect(resolvedOutput).toBe(resolvedOutside);
     });
   });
 });

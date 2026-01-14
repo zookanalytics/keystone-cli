@@ -108,8 +108,8 @@ program
     const logger = eventsEnabled ? new SilentLogger() : new ConsoleLogger();
     const onEvent = eventsEnabled
       ? (event: unknown) => {
-        process.stdout.write(`${JSON.stringify(event)}\n`);
-      }
+          process.stdout.write(`${JSON.stringify(event)}\n`);
+        }
       : undefined;
     const debounceMs = Number.parseInt(options.debounce, 10);
 
@@ -245,7 +245,8 @@ program
             if (!warned.has(warningKey)) {
               warned.add(warningKey);
               logWarn(
-                `⚠️  Failed to load sub-workflow for step "${step.id}": ${error instanceof Error ? error.message : String(error)
+                `⚠️  Failed to load sub-workflow for step "${step.id}": ${
+                  error instanceof Error ? error.message : String(error)
                 }`
               );
             }
@@ -510,8 +511,8 @@ program
       const logger = eventsEnabled ? new SilentLogger() : new ConsoleLogger();
       const onEvent = eventsEnabled
         ? (event: unknown) => {
-          process.stdout.write(`${JSON.stringify(event)}\n`);
-        }
+            process.stdout.write(`${JSON.stringify(event)}\n`);
+          }
         : undefined;
       const inputs = parseInputs(options.input);
       const runner = new WorkflowRunner(workflow, {
@@ -605,8 +606,8 @@ program
       const logger = eventsEnabled ? new SilentLogger() : new ConsoleLogger();
       const onEvent = eventsEnabled
         ? (event: unknown) => {
-          process.stdout.write(`${JSON.stringify(event)}\n`);
-        }
+            process.stdout.write(`${JSON.stringify(event)}\n`);
+          }
         : undefined;
       const runner = new WorkflowRunner(workflow, {
         resumeRunId: run.id,

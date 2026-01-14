@@ -148,7 +148,7 @@ export const BaseStepSchema = z.object({
 const ShellStepSchema = BaseStepSchema.extend({
   type: z.literal('shell'),
   run: z.string().optional(),
-  args: z.array(z.string()).optional(),
+  args: z.array(z.string()).min(1).optional(),
   dir: z.string().optional(),
   env: z.record(z.string()).optional(),
   allowOutsideCwd: z.boolean().optional(),
