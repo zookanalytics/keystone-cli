@@ -683,6 +683,7 @@ program
   .description('Show logs for a specific workflow run')
   .argument('<run_id>', 'Run ID to show logs for')
   .option('-v, --verbose', 'Show detailed step outputs')
+  .option('-i, --inputs', 'Show workflow inputs')
   .action(async (runId, options) => {
     try {
       const db = new WorkflowDb();
@@ -695,7 +696,7 @@ program
         if (matching) {
           const detailedRun = await db.getRun(matching.id);
           if (detailedRun) {
-            await showRunLogs(detailedRun, db, !!options.verbose);
+            await showRunLogs(detailedRun, db, !!options.verbose, !!options.inputs);
             db.close();
             return;
           }
@@ -706,7 +707,7 @@ program
         process.exit(1);
       }
 
-      await showRunLogs(run, db, !!options.verbose);
+      await showRunLogs(run, db, !!options.verbose, !!options.inputs);
       db.close();
     } catch (error) {
       console.error('✗ Failed to show logs:', error instanceof Error ? error.message : error);
@@ -997,12 +998,27 @@ program
     console.log('');
   });
 
-async function showRunLogs(run: WorkflowRun, db: WorkflowDb, verbose: boolean) {
+async function showRunLogs(
+  run: WorkflowRun,
+  db: WorkflowDb,
+  verbose: boolean,
+  showInputs: boolean
+) {
   console.log(`\n🏛️  Run: ${run.workflow_name} (${run.id})`);
   console.log(`   Status: ${run.status}`);
   console.log(`   Started: ${new Date(run.started_at).toLocaleString()}`);
   if (run.completed_at) {
     console.log(`   Completed: ${new Date(run.completed_at).toLocaleString()}`);
+  }
+
+  if (showInputs && run.inputs) {
+    console.log('\nInputs:');
+    try {
+      const parsed = JSON.parse(run.inputs);
+      console.log(JSON.stringify(parsed, null, 2));
+    } catch {
+      console.log(run.inputs);
+    }
   }
 
   const steps = await db.getStepsByRun(run.id);
