@@ -1311,9 +1311,9 @@ graph TD
     subgraph "LLM Subsystem"
         LLM --> ToolManager[Tool Manager]
         LLM --> StreamHandler[Stream Handler]
-        ToolManager --> Adapter[LLM Adapter (AI SDK)]
+        ToolManager --> Adapter["LLM Adapter (AI SDK)"]
     end
-    Adapter --> Providers[OpenAI, Anthropic, Gemini, Copilot, etc.]
+    Adapter --> Providers["OpenAI, Anthropic, Gemini, Copilot, etc."]
     LLM --> MCPClient[MCP Client]
 ```
 
