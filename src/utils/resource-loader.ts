@@ -1,12 +1,13 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import * as path from 'node:path';
 import { join } from 'node:path';
-import { bundleAssets } from './assets.macro.ts' with { type: 'macro' };
 
 // These are bundled at build-time (macro). If macros are unavailable at runtime,
 // fall back to an empty set so local filesystem reads still work.
 const EMBEDDED_ASSETS = (() => {
   try {
+    // Dynamic import to avoid Bun's security restrictions in node_modules
+    const { bundleAssets } = require('./assets.macro.ts');
     return bundleAssets();
   } catch (e) {
     return {};
