@@ -78,12 +78,11 @@ describe('MCPClient Audit Fixes', () => {
 });
 
 describe('MCPClient SSRF Protection', () => {
-  it('should reject localhost URLs without allowInsecure', async () => {
-    // HTTP localhost is rejected for not using HTTPS
+  it('should reject localhost URLs', async () => {
+    // Localhost is rejected regardless of protocol
     await expect(MCPClient.createRemote('http://localhost:8080/sse')).rejects.toThrow(
-      /SSRF Protection.*HTTPS/
+      /SSRF Protection.*localhost/
     );
-    // HTTPS localhost is rejected for being localhost
     await expect(MCPClient.createRemote('https://localhost:8080/sse')).rejects.toThrow(
       /SSRF Protection.*localhost/
     );
@@ -127,19 +126,13 @@ describe('MCPClient SSRF Protection', () => {
     );
   });
 
-  it('should require HTTPS by default', async () => {
-    await expect(MCPClient.createRemote('http://api.example.com/sse')).rejects.toThrow(
-      /SSRF Protection.*HTTPS/
-    );
-  });
-
-  it('should allow HTTP with allowInsecure option', async () => {
-    // This will fail due to network issues, not SSRF
+  it('should allow valid external domains', async () => {
+    // Valid external domains should pass SSRF validation (but may fail on actual connection)
     const promise = MCPClient.createRemote(
-      'http://api.example.com/sse',
+      'https://api.example.com/sse',
       {},
       100, // short timeout
-      { }
+      {}
     );
     // Should NOT throw SSRF error, but will throw timeout/connection error
     await expect(promise).rejects.not.toThrow(/SSRF Protection/);

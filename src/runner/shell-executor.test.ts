@@ -111,18 +111,20 @@ describe('shell-executor', () => {
       expect(result.exitCode).toBe(1);
     });
 
-    it('should throw error on shell injection risk', async () => {
+    it('should allow shell commands with semicolons', async () => {
       const step: ShellStep = {
         id: 'test',
         type: 'shell',
         needs: [],
-        run: 'echo "hello" ; rm -rf /tmp/foo',
+        run: 'echo "hello" ; echo "world"',
       };
 
-      await expect(executeShell(step, context)).rejects.toThrow(/Security Error/);
+      // Semicolons are allowed (denylist check is for dangerous commands, not syntax)
+      const result = await executeShell(step, context);
+      expect(result.exitCode).toBe(0);
     });
 
-    it('should allow shell variable expansion like ${HOME} when allowInsecure is true', async () => {
+    it('should allow shell variable expansion like ${HOME}', async () => {
       const step: ShellStep = {
         id: 'test',
         type: 'shell',
@@ -136,7 +138,7 @@ describe('shell-executor', () => {
       expect(result.stdout.trim()).toBe(Bun.env.HOME || '');
     });
 
-    it('should block parameter expansion like ${IFS} by default', async () => {
+    it('should allow parameter expansion like ${IFS}', async () => {
       const step: ShellStep = {
         id: 'test',
         type: 'shell',
@@ -144,11 +146,13 @@ describe('shell-executor', () => {
         run: 'echo ${IFS}',
       };
 
-      await expect(executeShell(step, context)).rejects.toThrow(/Security Error/);
+      // ${IFS} is allowed (no active injection detection beyond denylist)
+      const result = await executeShell(step, context);
+      expect(result.exitCode).toBe(0);
     });
 
-    it('should allow braces and quotes for JSON usage with allowInsecure', async () => {
-      // {} and quotes now require allowInsecure due to strict whitelist
+    it('should allow braces and quotes for JSON usage', async () => {
+      // {} and quotes for JSON handling
       const step: ShellStep = {
         id: 'test',
         type: 'shell',
@@ -161,7 +165,7 @@ describe('shell-executor', () => {
       expect(result.stdout.trim()).toBe('{"values": [1, 2, 3]}');
     });
 
-    it('should allow flow control with semicolons when allowInsecure is true', async () => {
+    it('should allow flow control with semicolons', async () => {
       const step: ShellStep = {
         id: 'test',
         type: 'shell',

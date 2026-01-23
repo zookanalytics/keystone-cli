@@ -203,9 +203,6 @@
                       },
                       "allowOutsideCwd": {
                         "type": "boolean"
-                      },
-                      "allowInsecure": {
-                        "type": "boolean"
                       }
                     },
                     "required": ["id", "type"],
@@ -416,9 +413,6 @@
                         "type": "boolean"
                       },
                       "allowOutsideCwd": {
-                        "type": "boolean"
-                      },
-                      "allowInsecure": {
                         "type": "boolean"
                       },
                       "handoff": {
@@ -664,9 +658,6 @@
                         "type": "boolean"
                       },
                       "allowOutsideCwd": {
-                        "type": "boolean"
-                      },
-                      "allowInsecure": {
                         "type": "boolean"
                       },
                       "handoff": {
@@ -987,9 +978,6 @@
                         "additionalProperties": {
                           "type": "string"
                         }
-                      },
-                      "allowInsecure": {
-                        "type": "boolean"
                       }
                     },
                     "required": ["id", "type", "url"],
@@ -1279,10 +1267,6 @@
                       },
                       "allowOutsideCwd": {
                         "type": "boolean"
-                      },
-                      "allowInsecure": {
-                        "type": "boolean",
-                        "default": false
                       }
                     },
                     "required": ["id", "type", "run"],

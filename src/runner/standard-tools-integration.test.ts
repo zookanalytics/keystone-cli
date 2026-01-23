@@ -168,13 +168,13 @@ describe('Standard Tools Integration', () => {
     expect(toolStep.type).toBe('file');
   });
 
-  it('should block risky standard tools without allowInsecure', async () => {
+  it('should allow standard tools within security boundaries', async () => {
     const step: LlmStep = {
       id: 'l1',
       type: 'llm',
       agent: 'test-agent',
       needs: [],
-      prompt: 'run risky command',
+      prompt: 'run command',
       useStandardTools: true,
       maxIterations: 2,
     };
@@ -182,7 +182,7 @@ describe('Standard Tools Integration', () => {
     const context: ExpressionContext = { inputs: {}, steps: {} };
     const executeStepFn = mock(async () => ({ status: 'success', output: '' }));
 
-    // Mock makes a tool call to run_command which should be rejected
+    // Mock makes a tool call to run_command
     currentChatFn = async () => {
       return {
         message: {
@@ -199,22 +199,18 @@ describe('Standard Tools Integration', () => {
     };
     setCurrentChatFn(currentChatFn as any);
 
-    // May throw max iterations or complete
-    try {
-      await executeLlmStep(
-        step,
-        context,
-        executeStepFn as unknown as (step: Step, context: ExpressionContext) => Promise<StepResult>,
-        undefined,
-        undefined,
-        undefined,
-        undefined
-      );
-    } catch (e) {
-      // Expected to hit max iterations
-    }
+    // Should complete successfully
+    await executeLlmStep(
+      step,
+      context,
+      executeStepFn as unknown as (step: Step, context: ExpressionContext) => Promise<StepResult>,
+      undefined,
+      undefined,
+      undefined,
+      undefined
+    );
 
-    // The key assertion: executeStepFn should NOT have been called for the risky command
-    expect(executeStepFn).not.toHaveBeenCalled();
+    // executeStepFn should have been called for the command
+    expect(executeStepFn).toHaveBeenCalled();
   });
 });

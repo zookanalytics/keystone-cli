@@ -17,23 +17,13 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": [
-                  "string",
-                  "number",
-                  "boolean",
-                  "array",
-                  "object"
-                ]
+                "enum": ["string", "number", "boolean", "array", "object"]
               },
               "default": {},
               "values": {
                 "type": "array",
                 "items": {
-                  "type": [
-                    "string",
-                    "number",
-                    "boolean"
-                  ]
+                  "type": ["string", "number", "boolean"]
                 }
               },
               "secret": {
@@ -43,9 +33,7 @@
                 "type": "string"
               }
             },
-            "required": [
-              "type"
-            ],
+            "required": ["type"],
             "additionalProperties": false
           }
         },
@@ -109,10 +97,7 @@
                     "default": []
                   },
                   "if": {
-                    "type": [
-                      "string",
-                      "boolean"
-                    ]
+                    "type": ["string", "boolean"]
                   },
                   "timeout": {
                     "type": "integer",
@@ -128,10 +113,7 @@
                       },
                       "backoff": {
                         "type": "string",
-                        "enum": [
-                          "linear",
-                          "exponential"
-                        ],
+                        "enum": ["linear", "exponential"],
                         "default": "linear"
                       },
                       "baseDelay": {
@@ -157,9 +139,7 @@
                         "default": 1
                       }
                     },
-                    "required": [
-                      "agent"
-                    ],
+                    "required": ["agent"],
                     "additionalProperties": false
                   },
                   "reflexion": {
@@ -184,10 +164,7 @@
                   },
                   "idempotencyScope": {
                     "type": "string",
-                    "enum": [
-                      "run",
-                      "global"
-                    ]
+                    "enum": ["run", "global"]
                   },
                   "idempotencyTtlSeconds": {
                     "type": "integer",
@@ -221,18 +198,12 @@
                         "additionalProperties": {
                           "type": "array",
                           "items": {
-                            "type": [
-                              "string",
-                              "number",
-                              "boolean"
-                            ]
+                            "type": ["string", "number", "boolean"]
                           }
                         }
                       }
                     },
-                    "required": [
-                      "matrix"
-                    ],
+                    "required": ["matrix"],
                     "additionalProperties": false
                   },
                   "transform": {
@@ -256,11 +227,7 @@
                   },
                   "repairStrategy": {
                     "type": "string",
-                    "enum": [
-                      "reask",
-                      "repair",
-                      "hybrid"
-                    ]
+                    "enum": ["reask", "repair", "hybrid"]
                   },
                   "compensate": {
                     "$ref": "#/definitions/keystone-workflow/properties/steps/items"
@@ -291,10 +258,7 @@
                     "type": "boolean"
                   }
                 },
-                "required": [
-                  "id",
-                  "type"
-                ],
+                "required": ["id", "type"],
                 "additionalProperties": false
               },
               {
@@ -410,10 +374,7 @@
                           "$ref": "#/definitions/keystone-workflow/properties/steps/items"
                         }
                       },
-                      "required": [
-                        "name",
-                        "execution"
-                      ],
+                      "required": ["name", "execution"],
                       "additionalProperties": false
                     }
                   },
@@ -434,11 +395,7 @@
                   },
                   "contextStrategy": {
                     "type": "string",
-                    "enum": [
-                      "truncate",
-                      "summary",
-                      "auto"
-                    ]
+                    "enum": ["truncate", "summary", "auto"]
                   },
                   "qualityGate": {
                     "type": "object",
@@ -461,9 +418,7 @@
                         "default": 1
                       }
                     },
-                    "required": [
-                      "agent"
-                    ],
+                    "required": ["agent"],
                     "additionalProperties": false
                   },
                   "useGlobalMcp": {
@@ -487,10 +442,7 @@
                             },
                             "type": {
                               "type": "string",
-                              "enum": [
-                                "local",
-                                "remote"
-                              ]
+                              "enum": ["local", "remote"]
                             },
                             "command": {
                               "type": "string"
@@ -521,9 +473,7 @@
                               "exclusiveMinimum": 0
                             }
                           },
-                          "required": [
-                            "name"
-                          ],
+                          "required": ["name"],
                           "additionalProperties": false
                         }
                       ]
@@ -573,26 +523,15 @@
                           },
                           "outputSchema": {}
                         },
-                        "required": [
-                          "command",
-                          "env",
-                          "cwd"
-                        ],
+                        "required": ["command", "env", "cwd"],
                         "additionalProperties": false
                       }
                     },
-                    "required": [
-                      "engine"
-                    ],
+                    "required": ["engine"],
                     "additionalProperties": false
                   }
                 },
-                "required": [
-                  "id",
-                  "type",
-                  "agent",
-                  "prompt"
-                ],
+                "required": ["id", "type", "agent", "prompt"],
                 "additionalProperties": false
               },
               {
@@ -725,11 +664,7 @@
                   },
                   "contextStrategy": {
                     "type": "string",
-                    "enum": [
-                      "truncate",
-                      "summary",
-                      "auto"
-                    ]
+                    "enum": ["truncate", "summary", "auto"]
                   },
                   "qualityGate": {
                     "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/1/properties/qualityGate"
@@ -755,10 +690,7 @@
                             },
                             "type": {
                               "type": "string",
-                              "enum": [
-                                "local",
-                                "remote"
-                              ]
+                              "enum": ["local", "remote"]
                             },
                             "command": {
                               "type": "string"
@@ -789,9 +721,7 @@
                               "exclusiveMinimum": 0
                             }
                           },
-                          "required": [
-                            "name"
-                          ],
+                          "required": ["name"],
                           "additionalProperties": false
                         }
                       ]
@@ -807,11 +737,7 @@
                     "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/1/properties/handoff"
                   }
                 },
-                "required": [
-                  "id",
-                  "type",
-                  "goal"
-                ],
+                "required": ["id", "type", "goal"],
                 "additionalProperties": false
               },
               {
@@ -923,20 +849,14 @@
                             },
                             "default": {}
                           },
-                          "required": [
-                            "from"
-                          ],
+                          "required": ["from"],
                           "additionalProperties": false
                         }
                       ]
                     }
                   }
                 },
-                "required": [
-                  "id",
-                  "type",
-                  "path"
-                ],
+                "required": ["id", "type", "path"],
                 "additionalProperties": false
               },
               {
@@ -1032,23 +952,13 @@
                   },
                   "op": {
                     "type": "string",
-                    "enum": [
-                      "read",
-                      "write",
-                      "append",
-                      "patch"
-                    ]
+                    "enum": ["read", "write", "append", "patch"]
                   },
                   "allowOutsideCwd": {
                     "type": "boolean"
                   }
                 },
-                "required": [
-                  "id",
-                  "type",
-                  "path",
-                  "op"
-                ],
+                "required": ["id", "type", "path", "op"],
                 "additionalProperties": false
               },
               {
@@ -1141,14 +1051,7 @@
                   },
                   "method": {
                     "type": "string",
-                    "enum": [
-                      "GET",
-                      "POST",
-                      "PUT",
-                      "PATCH",
-                      "DELETE",
-                      "HEAD"
-                    ],
+                    "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"],
                     "default": "GET"
                   },
                   "body": {},
@@ -1159,11 +1062,7 @@
                     }
                   }
                 },
-                "required": [
-                  "id",
-                  "type",
-                  "url"
-                ],
+                "required": ["id", "type", "url"],
                 "additionalProperties": false
               },
               {
@@ -1256,18 +1155,11 @@
                   },
                   "inputType": {
                     "type": "string",
-                    "enum": [
-                      "confirm",
-                      "text"
-                    ],
+                    "enum": ["confirm", "text"],
                     "default": "confirm"
                   }
                 },
-                "required": [
-                  "id",
-                  "type",
-                  "message"
-                ],
+                "required": ["id", "type", "message"],
                 "additionalProperties": false
               },
               {
@@ -1373,10 +1265,7 @@
                     "type": "boolean"
                   }
                 },
-                "required": [
-                  "id",
-                  "type"
-                ],
+                "required": ["id", "type"],
                 "additionalProperties": false
               },
               {
@@ -1471,11 +1360,7 @@
                     "type": "boolean"
                   }
                 },
-                "required": [
-                  "id",
-                  "type",
-                  "run"
-                ],
+                "required": ["id", "type", "run"],
                 "additionalProperties": false
               },
               {
@@ -1579,13 +1464,7 @@
                     "$ref": "#/definitions/keystone-workflow/properties/steps/items/anyOf/1/properties/handoff/properties/engine/properties/cwd"
                   }
                 },
-                "required": [
-                  "id",
-                  "type",
-                  "command",
-                  "env",
-                  "cwd"
-                ],
+                "required": ["id", "type", "command", "env", "cwd"],
                 "additionalProperties": false
               },
               {
@@ -1675,10 +1554,7 @@
                   },
                   "op": {
                     "type": "string",
-                    "enum": [
-                      "search",
-                      "store"
-                    ]
+                    "enum": ["search", "store"]
                   },
                   "query": {
                     "type": "string"
@@ -1700,11 +1576,7 @@
                     "default": 5
                   }
                 },
-                "required": [
-                  "id",
-                  "type",
-                  "op"
-                ],
+                "required": ["id", "type", "op"],
                 "additionalProperties": false
               },
               {
@@ -1794,10 +1666,7 @@
                   },
                   "target": {
                     "type": "string",
-                    "enum": [
-                      "steps",
-                      "branches"
-                    ],
+                    "enum": ["steps", "branches"],
                     "default": "steps"
                   },
                   "condition": {
@@ -1818,10 +1687,7 @@
                     "default": "all"
                   }
                 },
-                "required": [
-                  "id",
-                  "type"
-                ],
+                "required": ["id", "type"],
                 "additionalProperties": false
               },
               {
@@ -1917,11 +1783,7 @@
                     "default": "keystone-architect"
                   }
                 },
-                "required": [
-                  "id",
-                  "type",
-                  "prompt"
-                ],
+                "required": ["id", "type", "prompt"],
                 "additionalProperties": false
               },
               {
@@ -2011,10 +1873,7 @@
                   },
                   "op": {
                     "type": "string",
-                    "enum": [
-                      "upload",
-                      "download"
-                    ]
+                    "enum": ["upload", "download"]
                   },
                   "name": {
                     "type": "string"
@@ -2032,12 +1891,7 @@
                     "type": "boolean"
                   }
                 },
-                "required": [
-                  "id",
-                  "type",
-                  "op",
-                  "name"
-                ],
+                "required": ["id", "type", "op", "name"],
                 "additionalProperties": false
               },
               {
@@ -2133,11 +1987,7 @@
                     "default": true
                   }
                 },
-                "required": [
-                  "id",
-                  "type",
-                  "event"
-                ],
+                "required": ["id", "type", "event"],
                 "additionalProperties": false
               },
               {
@@ -2262,11 +2112,7 @@
                     "type": "boolean"
                   }
                 },
-                "required": [
-                  "id",
-                  "type",
-                  "op"
-                ],
+                "required": ["id", "type", "op"],
                 "additionalProperties": false
               },
               {
@@ -2423,11 +2269,7 @@
                           "type": "array"
                         }
                       },
-                      "required": [
-                        "name",
-                        "description",
-                        "steps"
-                      ],
+                      "required": ["name", "description", "steps"],
                       "additionalProperties": false
                     }
                   },
@@ -2441,11 +2283,7 @@
                     "default": 3
                   }
                 },
-                "required": [
-                  "id",
-                  "type",
-                  "goal"
-                ],
+                "required": ["id", "type", "goal"],
                 "additionalProperties": false
               }
             ]
@@ -2471,10 +2309,7 @@
           "properties": {
             "scorer": {
               "type": "string",
-              "enum": [
-                "llm",
-                "script"
-              ]
+              "enum": ["llm", "script"]
             },
             "agent": {
               "type": "string"
@@ -2489,16 +2324,11 @@
               "type": "boolean"
             }
           },
-          "required": [
-            "scorer"
-          ],
+          "required": ["scorer"],
           "additionalProperties": false
         }
       },
-      "required": [
-        "name",
-        "steps"
-      ],
+      "required": ["name", "steps"],
       "additionalProperties": false
     }
   },

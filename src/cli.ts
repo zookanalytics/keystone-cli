@@ -962,7 +962,6 @@ program
         inputs: { task, auto_approve: options.auto_approve },
         workflowDir: dirname(devPath),
         logger,
-        allowInsecure: true, // Trusted internal workflow
       });
 
       const outputs = await runner.run();

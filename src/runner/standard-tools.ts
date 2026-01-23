@@ -140,8 +140,7 @@ export const STANDARD_TOOLS: AgentTool[] = [
       },
       required: ['pattern'],
     },
-    execution: {
-    },
+    execution: {},
   },
   {
     name: 'search_content',

@@ -133,14 +133,13 @@ describe('MCPClient', () => {
       });
 
       const fetchMock = spyOn(global, 'fetch').mockImplementation((url) => {
-        if (url === 'http://localhost:8080/sse') {
+        if (url === 'https://api.example.com/sse') {
           return Promise.resolve(new Response(stream));
         }
         return Promise.resolve(new Response(JSON.stringify({ ok: true })));
       });
 
-      const clientPromise = MCPClient.createRemote('http://localhost:8080/sse', {}, 60000, {
-      });
+      const clientPromise = MCPClient.createRemote('https://api.example.com/sse', {}, 60000, {});
 
       const client = await clientPromise;
       expect(client).toBeDefined();
@@ -162,7 +161,10 @@ describe('MCPClient', () => {
 
       const response = await initPromise;
       expect(response.result?.protocolVersion).toBe('2024-11-05');
-      expect(fetchMock).toHaveBeenCalledWith('http://localhost:8080/endpoint', expect.any(Object));
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://api.example.com/endpoint',
+        expect.any(Object)
+      );
 
       client.stop();
       fetchMock.mockRestore();
@@ -180,14 +182,13 @@ describe('MCPClient', () => {
       });
 
       const fetchMock = spyOn(global, 'fetch').mockImplementation((url) => {
-        if (url === 'http://localhost:8080/sse') {
+        if (url === 'https://api.example.com/sse') {
           return Promise.resolve(new Response(stream));
         }
         return Promise.resolve(new Response(JSON.stringify({ ok: true })));
       });
 
-      const client = await MCPClient.createRemote('http://localhost:8080/sse', {}, 60000, {
-      });
+      const client = await MCPClient.createRemote('https://api.example.com/sse', {}, 60000, {});
 
       // We can't easily hook into onMessage without reaching into internals
       // Instead, we'll test that initialize resolves correctly when the response arrives
@@ -230,8 +231,7 @@ describe('MCPClient', () => {
         )
       );
 
-      const clientPromise = MCPClient.createRemote('http://localhost:8080/sse', {}, 60000, {
-      });
+      const clientPromise = MCPClient.createRemote('https://api.example.com/sse', {}, 60000, {});
 
       await expect(clientPromise).rejects.toThrow(/SSE connection failed: 500/);
 

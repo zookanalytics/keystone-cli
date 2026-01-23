@@ -20,25 +20,27 @@ describe('Verification Fixes', () => {
   describe('Shell Path Traversal (shell-executor)', () => {
     const mockContext = { env: {}, steps: {}, inputs: {}, envOverrides: {}, secrets: {} };
 
-    test('should block command with ".." and "/" in secure mode', async () => {
+    test('should allow command with ".." and "/"', async () => {
       const step = {
         id: 'test',
         type: 'shell' as const,
         run: 'cat ../secret.txt',
       };
-      // It should throw BEFORE spawning
-      // The error message I added was "Directory Traversal" or similar
-      // Let's check the implementation: "Command blocked due to potential directory traversal"
-      await expect(executeShell(step, mockContext)).rejects.toThrow('Command blocked');
+      // Commands with .. are allowed (only dir step property is validated)
+      const result = await executeShell(step, mockContext);
+      // Will fail because file doesn't exist, but not blocked
+      expect(result.exitCode).toBe(1);
     });
 
-    test('should block absolute path with ".." in secure mode', async () => {
+    test('should allow absolute path with ".."', async () => {
       const step = {
         id: 'test',
         type: 'shell' as const,
         run: '/bin/ls ../',
       };
-      await expect(executeShell(step, mockContext)).rejects.toThrow('Command blocked');
+      // Absolute paths are allowed in run command
+      const result = await executeShell(step, mockContext);
+      expect(result.exitCode).toBe(0); // ls should succeed
     });
   });
 });

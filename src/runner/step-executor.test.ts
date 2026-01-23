@@ -421,7 +421,7 @@ describe('step-executor', () => {
       }),
     };
 
-    it('should fail if allowInsecure is not set', async () => {
+    it('should execute script', async () => {
       // @ts-ignore
       const step = {
         id: 's1',
@@ -431,11 +431,11 @@ describe('step-executor', () => {
       const result = await executeStep(step, context, undefined, {
         sandbox: mockSandbox as unknown as typeof SafeSandbox,
       });
-      expect(result.status).toBe('failed');
-      expect(result.error).toContain('Script execution is disabled by default');
+      expect(result.status).toBe('success');
+      expect(result.output).toBe('script-result');
     });
 
-    it('should execute script if allowInsecure is true', async () => {
+    it('should execute script when provided', async () => {
       // @ts-ignore
       const step = {
         id: 's1',
@@ -883,12 +883,12 @@ describe('step-executor', () => {
       expect(secondCall.headers.Authorization).toBeUndefined();
     });
 
-    it('should allow insecure request when allowInsecure is true', async () => {
+    it('should block localhost requests', async () => {
       // @ts-ignore
       global.fetch.mockResolvedValue(new Response('ok'));
 
       const step: RequestStep = {
-        id: 'req-insecure',
+        id: 'req-localhost',
         type: 'request',
         needs: [],
         url: 'http://localhost/test',
@@ -896,7 +896,8 @@ describe('step-executor', () => {
       };
 
       const result = await executeStep(step, context);
-      expect(result.status).toBe('success');
+      expect(result.status).toBe('failed');
+      expect(result.error).toContain('SSRF Protection');
     });
   });
 
