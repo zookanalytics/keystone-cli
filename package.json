@@ -1,6 +1,6 @@
 {
   "name": "keystone-cli",
-  "version": "2.1.10",
+  "version": "2.1.11",
   "description": "A local-first, declarative, agentic workflow orchestrator built on Bun",
   "type": "module",
   "bin": {
