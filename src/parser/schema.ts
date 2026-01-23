@@ -152,7 +152,6 @@ const ShellStepSchema = BaseStepSchema.extend({
   dir: z.string().optional(),
   env: z.record(z.string()).optional(),
   allowOutsideCwd: z.boolean().optional(),
-  allowInsecure: z.boolean().optional(),
 });
 
 // Forward declaration for AgentToolSchema which depends on StepSchema
@@ -230,7 +229,6 @@ const LlmStepSchema = BaseStepSchema.extend({
     .optional(),
   useStandardTools: z.boolean().optional(),
   allowOutsideCwd: z.boolean().optional(),
-  allowInsecure: z.boolean().optional(),
   handoff: EngineHandoffSchema.optional(),
 });
 
@@ -270,7 +268,6 @@ const PlanStepSchema = BaseStepSchema.extend({
     .optional(),
   useStandardTools: z.boolean().optional(),
   allowOutsideCwd: z.boolean().optional(),
-  allowInsecure: z.boolean().optional(),
   handoff: EngineHandoffSchema.optional(),
 });
 
@@ -303,7 +300,6 @@ const RequestStepSchema = BaseStepSchema.extend({
   method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD']).default('GET'),
   body: z.any().optional(),
   headers: z.record(z.string()).optional(),
-  allowInsecure: z.boolean().optional(),
 });
 
 const HumanStepSchema = BaseStepSchema.extend({
@@ -323,7 +319,6 @@ const ScriptStepSchema = BaseStepSchema.extend({
   type: z.literal('script'),
   run: z.string(),
   allowOutsideCwd: z.boolean().optional(),
-  allowInsecure: z.boolean().optional().default(false),
 });
 
 const EngineStepSchema = BaseStepSchema.extend({
@@ -406,7 +401,6 @@ const GitStepSchema = BaseStepSchema.extend({
   cwd: z.string().optional(), // Working directory for the git command
   env: z.record(z.string()).optional(),
   allowOutsideCwd: z.boolean().optional(),
-  allowInsecure: z.boolean().optional(),
 });
 
 const WaitStepSchema = BaseStepSchema.extend({
@@ -442,7 +436,6 @@ const DynamicStepSchema = BaseStepSchema.extend({
     .optional(), // Library of pre-defined step patterns
   confirmPlan: z.boolean().optional().default(false), // Review and approve plan before execution
   maxReplans: z.number().int().nonnegative().default(3), // Max automatic recovery attempts
-  allowInsecure: z.boolean().optional(), // Allow generated steps to use insecure commands (e.g. shell redirects)
 });
 
 // Note: `as any` casts are required here because of circular type references:
@@ -478,7 +471,6 @@ const EvalSchema = z.object({
   agent: z.string().optional(),
   prompt: z.string().optional(),
   run: z.string().optional(), // for script scorer
-  allowInsecure: z.boolean().optional(),
   allowSecrets: z.boolean().optional(),
 });
 

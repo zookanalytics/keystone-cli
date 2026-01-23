@@ -5,7 +5,6 @@ description: "Demonstrate artifact upload and download between steps"
 steps:
   - id: create_content
     type: shell
-    allowInsecure: true
     run: |
       mkdir -p src/templates/features/test-output
       echo "Hello from step 1" > src/templates/features/test-output/file1.txt
@@ -33,7 +32,6 @@ steps:
   - id: verify
     type: shell
     needs: [download_files]
-    allowInsecure: true
     run: |
       ls -R src/templates/features/downloaded
       cat src/templates/features/downloaded/file1.txt

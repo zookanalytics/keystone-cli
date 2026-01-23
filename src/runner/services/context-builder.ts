@@ -117,7 +117,6 @@ export class ContextBuilder {
           args: step.args?.map((arg: string) => ExpressionEvaluator.evaluateString(arg, context)),
           dir: step.dir ? ExpressionEvaluator.evaluateString(step.dir, context) : undefined,
           env,
-          allowInsecure: step.allowInsecure,
         });
       }
       case 'file':
@@ -156,7 +155,6 @@ export class ContextBuilder {
             step.body !== undefined
               ? ExpressionEvaluator.evaluateObject(step.body, context)
               : undefined,
-          allowInsecure: step.allowInsecure,
         });
       }
       case 'human':
@@ -192,7 +190,6 @@ export class ContextBuilder {
           mcpServers: step.mcpServers,
           useStandardTools: step.useStandardTools,
           allowOutsideCwd: step.allowOutsideCwd,
-          allowInsecure: step.allowInsecure,
         });
       case 'workflow':
         return stripUndefined({
@@ -204,7 +201,6 @@ export class ContextBuilder {
       case 'script':
         return stripUndefined({
           run: step.run,
-          allowInsecure: step.allowInsecure,
         });
       case 'engine': {
         const env: Record<string, string> = {};

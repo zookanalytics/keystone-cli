@@ -14,5 +14,4 @@ steps:
   - id: print_result
     type: shell
     needs: [run_child]
-    allowInsecure: true
     run: echo "Child workflow result - ${{ escape(steps.run_child.outputs.result) }}"

@@ -25,7 +25,6 @@ describe('Verification Fixes', () => {
         id: 'test',
         type: 'shell' as const,
         run: 'cat ../secret.txt',
-        allowInsecure: false,
       };
       // It should throw BEFORE spawning
       // The error message I added was "Directory Traversal" or similar
@@ -38,7 +37,6 @@ describe('Verification Fixes', () => {
         id: 'test',
         type: 'shell' as const,
         run: '/bin/ls ../',
-        allowInsecure: false,
       };
       await expect(executeShell(step, mockContext)).rejects.toThrow('Command blocked');
     });

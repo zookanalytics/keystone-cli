@@ -31,7 +31,6 @@ describe('Workflow Memoization Leak (Args Check)', () => {
           id: 's1',
           type: 'shell',
           args: ['echo', '${{ inputs.arg }}'],
-          allowInsecure: true,
           memoize: true,
           needs: [],
         },

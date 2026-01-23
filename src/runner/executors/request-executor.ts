@@ -74,7 +74,7 @@ export async function executeRequestStep(
 
   try {
     // Validate URL to prevent SSRF
-    await validateRemoteUrl(url, { allowInsecure: step.allowInsecure });
+    await validateRemoteUrl(url);
 
     // Evaluate headers
     const headers: Record<string, string> = {};
@@ -171,7 +171,7 @@ export async function executeRequestStep(
         }
 
         const nextUrl = new URL(location, currentUrl).href;
-        await validateRemoteUrl(nextUrl, { allowInsecure: step.allowInsecure });
+        await validateRemoteUrl(nextUrl);
 
         let nextMethod = currentMethod;
         let nextBody = currentBody;
@@ -192,14 +192,6 @@ export async function executeRequestStep(
           removeHeader('authorization');
           removeHeader('proxy-authorization');
           removeHeader('cookie');
-          if (!step.allowInsecure) {
-            if (nextMethod !== 'GET' && nextMethod !== 'HEAD') {
-              throw new Error(
-                `Cross-origin redirect blocked for ${nextMethod} request. Set allowInsecure to true to override.`
-              );
-            }
-            stripCrossOriginHeaders();
-          }
         }
 
         currentMethod = nextMethod;

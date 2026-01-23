@@ -11,7 +11,6 @@ steps:
   # Generate test data
   - id: generate_items
     type: shell
-    allowInsecure: true
     run: "echo 'item1\nitem2\nitem3\nitem4\nitem5'"
     transform: "stdout.split('\\n').filter(Boolean)"
 
@@ -21,8 +20,7 @@ steps:
     needs: [generate_items]
     foreach: ${{ steps.generate_items.output }}
     concurrency: 3
-    allowInsecure: true
-    run: "echo 'Processing: ${{ item }}' && sleep 0.1"
+    run: "echo 'Processing: ${{ escape(item) }}' && sleep 0.1"
     transform: "stdout.trim()"
 
   # Test conditional using .every() (tests aggregation fix)

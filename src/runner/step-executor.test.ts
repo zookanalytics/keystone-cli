@@ -441,7 +441,6 @@ describe('step-executor', () => {
         id: 's1',
         type: 'script',
         run: 'console.log("hello")',
-        allowInsecure: true,
       };
       const result = await executeStep(step, context, undefined, {
         sandbox: mockSandbox as unknown as typeof SafeSandbox,
@@ -456,7 +455,6 @@ describe('step-executor', () => {
         id: 's1',
         type: 'script',
         run: 'fail',
-        allowInsecure: true,
       };
       const result = await executeStep(step, context, undefined, {
         sandbox: mockSandbox as unknown as typeof SafeSandbox,
@@ -472,7 +470,6 @@ describe('step-executor', () => {
         id: 's1',
         type: 'script',
         run: 'return 1',
-        allowInsecure: true,
       };
 
       const mockSandbox = {
@@ -896,7 +893,6 @@ describe('step-executor', () => {
         needs: [],
         url: 'http://localhost/test',
         method: 'GET',
-        allowInsecure: true,
       };
 
       const result = await executeStep(step, context);

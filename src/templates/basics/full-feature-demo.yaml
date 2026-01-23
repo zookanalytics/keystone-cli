@@ -16,15 +16,13 @@ steps:
   # Test shell execution
   - id: greet
     type: shell
-    run: echo "${{ inputs.message }}"
-    allowInsecure: true
+    run: echo "${{ escape(inputs.message) }}"
 
   # Test shell with transform
   - id: get_date
     type: shell
     run: date +%s
     transform: parseInt(stdout.trim())
-    allowInsecure: true
 
   # Test file write
   - id: write_file
@@ -46,7 +44,6 @@ steps:
     needs: [write_file]
     run: ls ./tmp/keystone-*.txt | wc -l
     transform: parseInt(stdout.trim())
-    allowInsecure: true
 
   # Test conditional execution
   - id: success_message
@@ -54,7 +51,6 @@ steps:
     if: ${{ steps.count_files.output > 0 }}
     needs: [count_files]
     run: echo "Found files!"
-    allowInsecure: true
 
   # Test HTTP request
   - id: api_test
@@ -72,4 +68,3 @@ finally:
   - id: cleanup
     type: shell
     run: rm ./tmp/keystone-test.txt
-    allowInsecure: true

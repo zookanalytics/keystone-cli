@@ -75,34 +75,7 @@ export async function executeShellStep(
     throw new Error('Shell step must have either "run" or "args"');
   }
 
-  // Strict Mode Check: Detect unescaped expressions in the raw template
-  // We check if there are any ${{ }} blocks that don't start with escape(
-  const hasUnescapedExpr = (s: string) => {
-    // Finds ${{ ... }} blocks
-    const matches = s.match(/\${{.*?}}/g);
-    if (!matches) return false;
-
-    // Check if the expression is strictly wrapped in escape(...)
-    // Matches: ${{ escape(...) }} or ${{ escape( ... ) }}
-    // Does NOT match: ${{ "foo" + escape(...) }}
-    return matches.some((m) => {
-      const content = m.slice(3, -2).trim(); // Remove ${{ and }}
-      return !/^escape\s*\(.*\)$/.test(content);
-    });
-  };
-
-  if (!step.allowInsecure && hasUnescapedExpr(step.run)) {
-    throw new Error(
-      `Security Error: Shell command contains unescaped expressions which are vulnerable to injection.\nUse \${{ escape(...) }} to safely interpolate values, or set 'allowInsecure: true' if you trust the source.\nCommand template: ${step.run}`
-    );
-  }
-
   const command = ExpressionEvaluator.evaluateString(step.run, context);
-  if (!step.allowInsecure && detectShellInjectionRisk(command)) {
-    throw new Error(
-      `Security Error: Evaluated command contains shell metacharacters that require 'allowInsecure: true'.\n   Command: ${command.substring(0, 100)}${command.length > 100 ? '...' : ''}\n   Metacharacters detected. Please use 'allowInsecure: true' if this is intended.`
-    );
-  }
 
   const result = await executeShell(step, context, logger, abortSignal, command);
   return formatShellResult(result, logger);
@@ -246,31 +219,7 @@ export async function executeShell(
   // Evaluate the command string
   const command = commandOverride ?? ExpressionEvaluator.evaluateString(step.run, context);
 
-  // Security Check: Enforce whitelist
-  // If we haven't enabled insecure mode, we MUST be able to use spawn (no shell)
-  // or the command must be strictly composed of safe characters.
-  if (!step.allowInsecure) {
-    if (detectShellInjectionRisk(command)) {
-      throw new Error(
-        `Security Error: Command execution blocked to prevent potential shell injection.\nCommand: "${command.substring(0, 100)}${
-          command.length > 100 ? '...' : ''
-        }"\nReason: Contains characters not in the strict whitelist (alphanumeric, whitespace, and _./:@,+=~-).\nThis protects against chaining malicious commands (e.g. '; rm -rf /'). It does NOT evaluate if the command itself is destructive.\nFix: either simplify your command or set 'allowInsecure: true' in your step definition if you trust the input.`
-      );
-    }
-
-    // Additional Check: Prevent Directory Traversal in Binary Path
-    // Even if it passes the whitelist, we don't want to allow 'cat ../../../etc/passwd'
-    // or executing '../../../../bin/malice'.
-    // We check for '..' characters which might indicate directory traversal.
-    if (command.includes('..') && (command.includes('/') || command.includes('\\'))) {
-      throw new Error(
-        `Security Error: Command blocked due to potential directory traversal ('..').\nCommand: "${command.substring(0, 100)}"\nTo allow relative paths outside the current directory, set 'allowInsecure: true'.`
-      );
-    }
-  }
-
   // Security Check: Enforce Denylist (e.g. rm, mkfs, etc.)
-  // We check this even if allowInsecure is true, because these are explicitly banned by policy.
   const config = ConfigLoader.load();
   if (config.engines?.denylist && config.engines.denylist.length > 0) {
     // Robust parsing to get the command binary
@@ -322,19 +271,8 @@ export async function executeShell(
   const hostEnv = filterSensitiveEnv(Bun.env);
   const mergedEnv = Object.keys(env).length > 0 ? { ...hostEnv, ...env } : hostEnv;
 
-  // If secure (whitelist passed) OR insecure mode is explicitly allowed...
-  // We prefer direct spawn if possible, but fall back to shell if needed (e.g. for pipelines in insecure mode)
-
+  // Use 'sh -c' to execute the command
   try {
-    // If we are in secure mode (allowInsecure: false), we KNOW the command is safe.
-    // However, it might still benefit from running directly via spawn to avoid even theoretical shell issues.
-    // But simplified splitting by space might break if we allowed quotes (which we don't in the whitelist).
-
-    // For now, if insecure is allowed, we use 'sh -c'.
-    // If secure (whitelist valid), we can also use 'sh -c' relatively safely, or split and spawn.
-    // Using 'sh -c' is robust for arguments. Since we validated the string against a strict whitelist,
-    // 'sh -c' shouldn't be able to do anything funky like variable expansion or subshells because appropriate chars are banned.
-
     let stdoutString = '';
     let stderrString = '';
     let exitCode = 0;
@@ -343,8 +281,7 @@ export async function executeShell(
     const maxOutputBytes = LIMITS.MAX_PROCESS_OUTPUT_BYTES;
 
     // Use 'sh -c' (POSIX) or 'cmd.exe /d /s /c' (Windows)
-    // Security is guaranteed by the strict whitelist check above for allowInsecure: false
-    // which prevents injection of metacharacters, quotes, escapes, etc.
+    // The denylist check above prevents dangerous commands like 'rm -rf'
     const isWindows = process.platform === 'win32';
     const shellCommand = isWindows ? 'cmd.exe' : 'sh';
     const shellArgs = isWindows ? ['/d', '/s', '/c'] : ['-c'];

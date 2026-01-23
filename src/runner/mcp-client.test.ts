@@ -139,9 +139,7 @@ describe('MCPClient', () => {
         return Promise.resolve(new Response(JSON.stringify({ ok: true })));
       });
 
-      // Use allowInsecure for testing with localhost (fetch is mocked anyway)
       const clientPromise = MCPClient.createRemote('http://localhost:8080/sse', {}, 60000, {
-        allowInsecure: true,
       });
 
       const client = await clientPromise;
@@ -188,9 +186,7 @@ describe('MCPClient', () => {
         return Promise.resolve(new Response(JSON.stringify({ ok: true })));
       });
 
-      // Use allowInsecure for testing with localhost (fetch is mocked anyway)
       const client = await MCPClient.createRemote('http://localhost:8080/sse', {}, 60000, {
-        allowInsecure: true,
       });
 
       // We can't easily hook into onMessage without reaching into internals
@@ -234,9 +230,7 @@ describe('MCPClient', () => {
         )
       );
 
-      // Use allowInsecure for testing with localhost (fetch is mocked anyway)
       const clientPromise = MCPClient.createRemote('http://localhost:8080/sse', {}, 60000, {
-        allowInsecure: true,
       });
 
       await expect(clientPromise).rejects.toThrow(/SSE connection failed: 500/);

@@ -116,11 +116,6 @@ export class OptimizationRunner {
     if (!evalConfig) return 0;
 
     if (evalConfig.scorer === 'script') {
-      if (!evalConfig.allowInsecure) {
-        throw new Error(
-          'Eval script execution is disabled by default. Set eval.allowInsecure: true to enable.'
-        );
-      }
       const allowSecrets = evalConfig.allowSecrets === true;
 
       // Create a context with outputs available

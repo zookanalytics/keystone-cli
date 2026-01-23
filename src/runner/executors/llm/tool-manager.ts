@@ -96,7 +96,6 @@ export class ToolManager {
           async (args) => {
             validateStandardToolSecurity(tool.name, args, {
               allowOutsideCwd: step.allowOutsideCwd,
-              allowInsecure: step.allowInsecure,
             });
             if (tool.execution) {
               // Standard tools usually have .execute method directly on them in STANDARD_TOOLS definition?

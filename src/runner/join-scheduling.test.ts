@@ -95,7 +95,6 @@ describe('Join Scheduling & Resume', () => {
             if [ "$val" -lt "2" ]; then exit 1; else exit 0; fi
           `,
           retry: { count: 3 },
-          allowInsecure: true,
           needs: [],
         },
         {
@@ -148,7 +147,6 @@ describe('Join Scheduling & Resume', () => {
             if [ "$val" -lt "2" ]; then exit 1; else exit 0; fi
           `,
           retry: { count: 1 },
-          allowInsecure: true,
           needs: [],
         },
         {

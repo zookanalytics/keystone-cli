@@ -447,7 +447,6 @@ Keystone supports several specialized step types:
   - `maxMessageHistory`: Number (default `50`). Max messages to retain in history before truncation/summary.
   - `contextStrategy`: `'truncate'|'summary'|'auto'` (default `truncate`). Summarizes older history into a system message when limits are exceeded.
   - `qualityGate`: Optional reviewer config `{ agent, prompt?, provider?, model?, maxAttempts? }`. If review fails, the step is refined and re-run.
-  - `allowInsecure`: Boolean (default `false`). Set `true` to allow risky tool execution.
   - `allowOutsideCwd`: Boolean (default `false`). Set `true` to allow tools to access files outside of the current working directory.
   - `handoff`: Optional engine tool definition that lets the LLM delegate work to an allowlisted external CLI with structured inputs.
 - `plan`: Create a dynamic task list for orchestration.
@@ -456,8 +455,7 @@ Keystone supports several specialized step types:
   - `prompt`: Optional override of the planning prompt.
   - Plan steps accept the same LLM options as `llm`, including tools, handoffs, and `allowedHandoffs`.
 - `request`: Make HTTP requests (GET, POST, etc.).
-  - `allowInsecure`: Boolean (default `false`). If `true`, skips SSRF protections and allows non-HTTPS/local URLs.
-  - Cross-origin redirects are blocked for non-GET/HEAD requests unless `allowInsecure: true`; on cross-origin redirects, non-essential headers are stripped.
+  - Cross-origin redirects are blocked for non-GET/HEAD requests; on cross-origin redirects, non-essential headers are stripped for security.
 - `file`: Read, write, append, or patch files.
   - `allowOutsideCwd`: Boolean (default `false`). Set `true` to allow reading/writing files outside of the current working directory.
   - `op: patch`: Apply a unified diff or search/replace blocks via `content`.
@@ -481,7 +479,7 @@ Keystone supports several specialized step types:
   - `condition`: `'all'` (default), `'any'`, or a number.
   - `target`: Reserved for future use; currently ignored.
 - `blueprint`: Generate a structured system blueprint with an agent (persisted as an artifact).
-- `script`: Run JavaScript in a sandboxed subprocess. Requires `allowInsecure: true`.
+- `script`: Run JavaScript in a sandboxed subprocess.
 - `sleep`: Pause execution for a specified duration or until a timestamp.
   - `duration`: Milliseconds (number or expression).
   - `until`: Date/time string (evaluated), parsed by `Date`.
@@ -728,8 +726,6 @@ When a step fails, the specified agent is invoked with the error details. The ag
 ```yaml
 - id: list_files
   type: shell
-  # Globbing (*) requires allowInsecure: true
-  allowInsecure: true
   run: ls *.txt
   # Post-process stdout into an array of filenames
   transform: ${{ stdout.trim().split('\n') }}
@@ -755,7 +751,6 @@ Until `strategy.matrix` is wired end-to-end, use explicit `foreach` with an arra
     { node: 22, os: "ubuntu" },
     { node: 22, os: "macos" }
   ] }}
-  allowInsecure: true # Required for '=' in arguments
   run: echo "node=${{ item.node }} os=${{ item.os }}"
 ```
 
@@ -763,7 +758,6 @@ Until `strategy.matrix` is wired end-to-end, use explicit `foreach` with an arra
 ```yaml
 - id: calculate
   type: script
-  allowInsecure: true
   run: |
     const data = steps.fetch_data.output;
     return data.map(i => i.value * 2).reduce((a, b) => a + b, 0);
@@ -862,7 +856,6 @@ Upload outputs include `artifactPath` and `files` for downstream references.
   - `message`: Commit message.
   - `cwd`: Directory to run the git command in.
   - `allowOutsideCwd`: Boolean (default `false`). Set `true` to allow operations outside the project root.
-  - `allowInsecure`: Boolean (default `false`). Set `true` to allow git commands that fail the security whitelist.
 
 ```yaml
 - id: setup_feat
@@ -1014,7 +1007,7 @@ Keystone comes with a set of **Standard Tools** that can be enabled for any agen
 - `list_files`: List files in a directory (arguments: `path`)
 - `search_files`: Search for files by glob pattern (arguments: `pattern`, `dir`)
 - `search_content`: Search for string or regex within files (arguments: `query`, `dir`, `pattern`)
-- `run_command`: Run a shell command (arguments: `command`, `dir`). Risky commands require `allowInsecure: true` on the LLM step.
+- `run_command`: Run a shell command (arguments: `command`, `dir`).
 - `ast_grep_search`: Search for structural code patterns using AST matching (arguments: `pattern`, `language`, `paths`). More precise than regex for code refactoring.
 - `ast_grep_replace`: Replace structural code patterns using AST-aware rewriting (arguments: `pattern`, `rewrite`, `language`, `paths`). Safer than regex for code refactoring.
 - `fetch`: Fetch content from a URL via GET request (arguments: `url`).
@@ -1231,40 +1224,171 @@ Input keys passed via `-i key=val` must be alphanumeric/underscore and cannot be
 
 ## <a id="security">🛡️ Security</a>
 
-### Shell Execution
-Keystone strictly enforces an allowlist of characters (`alphanumeric`, `whitespace`, and `_./:@,+=~-`) to prevent shell injection.
+### ⚠️ Security Warning
 
-- **Directory Traversal**: Commands containing `..` in a path are blocked by default for security.
-- **Denylist**: Commands like `rm`, `mkfs`, or `alias` are blocked via a configurable denylist in `config.yaml`, even if `allowInsecure: true` is set.
-- **Windows Support**: Keystone uses `cmd.exe /d /s /c` on Windows and `sh -c` on other platforms for consistent behavior.
+**Keystone workflows can execute arbitrary code on your system.** Always review and trust the source of workflows before running them. Think of YAML workflows like shell scripts - they have full access to your filesystem, environment variables, and network.
 
-To run complex commands or bypass allowlist checks, set `allowInsecure: true` on the step. Prefer `${{ escape(...) }}` when interpolating user input.
+**Key Security Principles:**
+1. **Trust the Source**: Only run workflows from trusted sources (official templates, your team, verified repositories)
+2. **Review Before Running**: Read through workflow files, especially shell commands and file operations
+3. **Isolate Sensitive Operations**: Use separate environments for production credentials
+4. **Validate Inputs**: Use input schemas to constrain user-provided values
+5. **Mark Secrets**: Use `secret: true` on sensitive inputs for automatic redaction
 
-```yaml
-- id: deploy
-  type: shell
-  run: ./deploy.sh ${{ inputs.env }}
-  # Required if inputs.env might contain special characters or for complex scripts
-  allowInsecure: true
+### Runtime Security Warnings
+
+Keystone displays security warnings when running workflows:
+```
+⚠️  Security Warning: Only run workflows from trusted sources.
+   Workflows can execute arbitrary shell commands and access your environment.
 ```
 
-#### Troubleshooting Security Errors
-If you see a `Security Error: Evaluated command contains shell metacharacters`, it means your command contains characters like `\n`, `|`, `&`, or quotes that are not in the strict allowlist.
-- **Fix 1**: Use `${{ escape(steps.id.output) }}` for any dynamic values.
-- **Fix 2**: Set `allowInsecure: true` if the command naturally uses special characters.
+You can suppress this warning in `.keystone/config.yaml` if needed:
+```yaml
+logging:
+  suppress_security_warning: true
+```
+
+### Shell Command Security
+
+Keystone executes shell commands using `sh -c` (POSIX) or `cmd.exe /d /s /c` (Windows). While this provides flexibility, it also means workflows can run **any command** your user can run.
+
+**Security Measures:**
+- **Command Denylist**: Dangerous commands like `rm -rf`, `dd`, `mkfs`, and `format` are blocked by default
+- **Escape Function**: Use `${{ escape(...) }}` when interpolating untrusted input into shell commands
+- **Review Commands**: Always inspect shell steps in workflows from untrusted sources
+
+**Configurable Denylist:**
+Add or remove blocked commands in `.keystone/config.yaml`:
+```yaml
+shell:
+  denylist:
+    - rm        # Block all rm commands
+    - sudo      # Block privilege escalation
+    - curl -X   # Block non-GET HTTP requests (optional)
+```
+
+**Safe Command Example:**
+```yaml
+- id: safe_echo
+  type: shell
+  # Safe: escape() prevents injection
+  run: echo ${{ escape(inputs.user_message) }}
+```
+
+**Unsafe Command Example:**
+```yaml
+- id: unsafe_echo
+  type: shell
+  # UNSAFE: Could execute arbitrary code if user_message contains "; rm -rf /"
+  run: echo ${{ inputs.user_message }}
+```
+
+### HTTP Request Security
+
+Request steps include SSRF (Server-Side Request Forgery) protection to prevent workflows from accessing internal network resources.
+
+**Blocked by Default:**
+- `localhost` and `127.0.0.1`
+- Private IP ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`)
+- Link-local addresses (`169.254.0.0/16`)
+- Cloud metadata endpoints (AWS, GCP, Azure, etc.)
+
+**Note**: SSRF protection provides defense-in-depth but is **not foolproof** against DNS rebinding attacks. For high-security environments, use network-level isolation (firewalls, egress proxies).
+
+**Example:**
+```yaml
+- id: fetch_data
+  type: request
+  url: https://api.example.com/data  # OK: external HTTPS
+  # url: http://localhost:8080/admin  # BLOCKED: localhost access
+```
+
+### File Access Security
+
+File operations are restricted to the current working directory by default.
+
+**Enable External Access:**
+```yaml
+- id: read_config
+  type: file
+  op: read
+  path: /etc/app/config.yaml
+  allowOutsideCwd: true  # Required for paths outside project root
+```
+
+### Script Execution Security
+
+Script steps run JavaScript in a subprocess. While this provides some isolation, it is **not a security sandbox**.
+
+**Risk**: Scripts have full access to Node.js APIs and can perform any action.
+
+**Example:**
+```yaml
+- id: calculate
+  type: script
+  run: |
+    const data = steps.fetch_data.output;
+    return data.map(i => i.value * 2).reduce((a, b) => a + b, 0);
+```
+
+### Secret Management
+
+Mark sensitive inputs as secrets to enable automatic redaction:
+
+```yaml
+inputs:
+  api_key:
+    type: string
+    secret: true  # Redacted in logs, UI, and database
+
+  database_password:
+    type: string
+    secret: true
+
+steps:
+  - id: deploy
+    type: shell
+    # Secrets are available but redacted in output
+    run: ./deploy.sh --api-key="${{ secrets.api_key }}"
+```
+
+**Secret Redaction:**
+- Secrets are redacted from logs and step outputs
+- Stored encrypted at rest (when `redact_secrets_at_rest: true` in config)
+- May require re-entry when resuming workflows
 
 ### Expression Safety
-Expressions `${{ }}` are evaluated using a safe AST parser (`jsep`) which:
-- Prevents arbitrary code execution (no `eval` or `Function`).
-- Whitelists safe global objects (`Math`, `JSON`, `Date`, etc.).
-- Blocks access to sensitive properties (`constructor`, `__proto__`).
-- Enforces a maximum template length to prevent ReDoS attacks.
 
-### Script Sandboxing
-Script steps run in a separate subprocess by default. This reduces risk but is **not a security boundary** for malicious code. Script steps are disabled by default; set `allowInsecure: true` to run them.
+Expressions `${{ }}` are evaluated using a safe AST parser that:
+- **Prevents arbitrary code execution** (no `eval` or `Function`)
+- **Whitelists safe globals** (`Math`, `JSON`, `Date`)
+- **Blocks dangerous properties** (`constructor`, `__proto__`, `prototype`)
+- **Enforces length limits** to prevent ReDoS attacks
 
-### HTTP Requests
-Request steps enforce SSRF protections and require HTTPS by default. Cross-origin redirects are blocked for non-GET/HEAD requests unless `allowInsecure: true`, and non-essential headers are stripped on cross-origin redirects.
+**Safe:**
+```yaml
+${{ steps.build.status == 'success' ? '✅' : '❌' }}
+${{ Math.max(steps.test.outputs.score, 0) }}
+${{ JSON.stringify({ result: steps.data.output }) }}
+```
+
+**Blocked:**
+```yaml
+${{ constructor.constructor('return process')().exit() }}  # ❌ Blocked
+${{ __proto__.polluted = true }}  # ❌ Blocked
+```
+
+### Best Practices Summary
+
+1. ✅ **Review all workflows** before running, especially from external sources
+2. ✅ **Use `escape()`** when interpolating user input in shell commands
+3. ✅ **Mark secrets** with `secret: true` on inputs
+4. ✅ **Enable `allowOutsideCwd`** only when absolutely necessary
+5. ✅ **Use input validation** with JSON Schema to constrain values
+6. ✅ **Test in isolated environments** before running in production
+7. ✅ **Keep credentials in `.env`** files, never hardcode in workflows
+8. ✅ **Use network isolation** (firewalls) for high-security deployments
 
 ---
 

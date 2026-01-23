@@ -132,11 +132,7 @@ Return a JSON object with the steps array. Each step should be independently exe
 /**
  * Convert a generated step definition into an executable Step
  */
-function convertToExecutableStep(
-  generated: GeneratedStep,
-  parentStepId: string,
-  allowInsecure?: boolean
-): Step {
+function convertToExecutableStep(generated: GeneratedStep, parentStepId: string): Step {
   const baseProps = {
     id: `${parentStepId}_${generated.id}`,
     needs: generated.needs?.map((n) => `${parentStepId}_${n}`) || [],
@@ -157,7 +153,6 @@ function convertToExecutableStep(
         ...baseProps,
         type: 'shell' as const,
         run: generated.run || 'echo "No command specified"',
-        allowInsecure: allowInsecure ?? false,
       };
 
     case 'workflow':
@@ -181,7 +176,6 @@ function convertToExecutableStep(
       return {
         ...baseProps,
         type: 'request' as const,
-        allowInsecure: allowInsecure ?? false,
         url: generated.path || '',
         method: 'GET' as const,
       };
@@ -585,7 +579,7 @@ async function handleExecutionPhase(
           `  ⚡ [${i + 1}/${state.generatedPlan.steps.length}] Executing step: ${genStep.name}`
         );
 
-        const executableStep = convertToExecutableStep(genStep, step.id, step.allowInsecure);
+        const executableStep = convertToExecutableStep(genStep, step.id);
         const stepContext = {
           ...dynamicContext,
           steps: {

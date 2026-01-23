@@ -17,7 +17,6 @@ steps:
     idempotencyScope: global
     # Expire the record after 1 day
     idempotencyTtlSeconds: 86400
-    allowInsecure: true
     run: |
       echo "Processing order ${{ inputs.order_id }}..."
       # Simulate a side effect

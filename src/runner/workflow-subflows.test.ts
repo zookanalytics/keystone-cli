@@ -166,7 +166,6 @@ describe('WorkflowRunner - Subflows & Compensations', () => {
           id: 'slow',
           type: 'shell',
           run: 'sleep 0.1 && echo "slow"',
-          allowInsecure: true,
           needs: [],
         },
         { id: 'fast', type: 'shell', run: 'echo "fast"', needs: [] },

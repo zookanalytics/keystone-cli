@@ -43,7 +43,6 @@ function splitLines(str: string): string[] {
  * Validate a URL to prevent SSRF attacks
  * Blocks private IP ranges, localhost, and other internal addresses
  * @param url The URL to validate
- * @param options.allowInsecure If true, skips all security checks (use only for development/testing)
  * @throws Error if the URL is potentially dangerous
  */
 function isPrivateIpAddress(address: string): boolean {
@@ -102,30 +101,13 @@ function isPrivateIpAddress(address: string): boolean {
 
 export async function validateRemoteUrl(
   url: string,
-  options: { allowInsecure?: boolean; logger?: Logger } = {}
+  options: { logger?: Logger } = {}
 ): Promise<void> {
   let parsed: URL;
   try {
     parsed = new URL(url);
   } catch {
     throw new Error(`Invalid URL: ${url}`);
-  }
-
-  // Skip all security checks if allowInsecure is set (for development/testing)
-  if (options.allowInsecure) {
-    return;
-  }
-
-  // Require HTTPS in production
-  // SECURITY WARNING: This check is susceptible to TOCTOU (Time-of-Check to Time-of-Use)
-  // DNS rebinding attacks. A malicious domain could resolve to a public IP during this check
-  // and then switch to a private IP (e.g. 127.0.0.1) when the connection is actually made.
-  // Full protection requires resolving the IP once and using that IP for the connection,
-  // or using a proxy that enforces these rules.
-  if (parsed.protocol !== 'https:') {
-    throw new Error(
-      `SSRF Protection: URL must use HTTPS. Got: ${parsed.protocol}. Set allowInsecure option to true if you trust this server.`
-    );
   }
 
   const hostname = parsed.hostname.toLowerCase();
@@ -169,8 +151,6 @@ export async function validateRemoteUrl(
   // CRITICAL SECURITY NOTE: In high-security environments, do NOT rely solely on this check.
   // Use network-level isolation (e.g. firewalls, service meshes, or egress proxies) to strictly block
   // internal traffic from the Keystone process.
-  //
-  // Recommendation: Use 'allowInsecure: true' only in trusted environments.
   if (!isIP(hostname)) {
     try {
       // WARNING: This check is vulnerable to DNS Rebinding (TOCTOU)
@@ -718,7 +698,7 @@ export class MCPClient {
     url: string,
     headers: Record<string, string> = {},
     timeout = 60000,
-    options: { allowInsecure?: boolean; logger?: Logger } = {}
+    options: { logger?: Logger } = {}
   ): Promise<MCPClient> {
     // Validate URL to prevent SSRF attacks
     await validateRemoteUrl(url, options);

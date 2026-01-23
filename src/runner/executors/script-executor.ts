@@ -14,14 +14,6 @@ export async function executeScriptStep(
   logger: Logger,
   options: { sandbox?: typeof SafeSandbox; abortSignal?: AbortSignal } = {}
 ): Promise<StepResult> {
-  if (!step.allowInsecure) {
-    return {
-      status: 'failed',
-      output: null,
-      error: 'Script execution is disabled by default. Set allowInsecure: true to run scripts.',
-    };
-  }
-
   try {
     const sandbox = options.sandbox || DefaultSandbox;
     const result = await sandbox.execute(step.run, context as any, {

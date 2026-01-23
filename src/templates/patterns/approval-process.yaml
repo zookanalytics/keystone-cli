@@ -33,5 +33,5 @@ steps:
   - id: finalize_rejection
     type: shell
     if: ${{ steps.request_approval.output == false }}
-    run: echo "Rejection reason - ${{ steps.get_rejection_reason.output }}"
+    run: echo "Rejection reason - ${{ escape(steps.get_rejection_reason.output) }}"
     needs: [get_rejection_reason]

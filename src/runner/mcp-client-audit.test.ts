@@ -139,7 +139,7 @@ describe('MCPClient SSRF Protection', () => {
       'http://api.example.com/sse',
       {},
       100, // short timeout
-      { allowInsecure: true }
+      { }
     );
     // Should NOT throw SSRF error, but will throw timeout/connection error
     await expect(promise).rejects.not.toThrow(/SSRF Protection/);

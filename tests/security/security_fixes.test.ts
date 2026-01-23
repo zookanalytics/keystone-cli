@@ -43,7 +43,7 @@ describe('Security Fixes Verification', () => {
       // Note: We can't easily mock lookup in bun:test without more setup,
       // but we can test the IP validation logic if we extract it or test known IPs.
       // Testing literal IP blocking:
-      const validate = async (url: string) => validateRemoteUrl(url, { allowInsecure: false });
+      const validate = async (url: string) => validateRemoteUrl(url, { });
 
       await expect(validate('https://127.0.0.1')).rejects.toThrow('localhost/loopback');
       await expect(validate('https://10.0.0.1')).rejects.toThrow('private/internal');

@@ -15,8 +15,7 @@ steps:
   # 1. Dynamic Input Generation
   - id: list_files
     type: shell
-    allowInsecure: true
-    run: "ls ${{ inputs.target_dir }}/*.txt"
+    run: "ls ${{ escape(inputs.target_dir) }}/*.txt"
     # Extract stdout lines into an array
     transform: "stdout.split('\\n').filter(Boolean)"
 

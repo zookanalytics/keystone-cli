@@ -77,7 +77,6 @@ steps:
     agent: software-engineer
     needs: [approve_plan]
     useStandardTools: true
-    allowInsecure: true
     prompt: |
       Implement the following plan for the task:
       ${{ inputs.task }}
@@ -101,7 +100,6 @@ steps:
     agent: tester
     needs: [implement]
     useStandardTools: true
-    allowInsecure: true
     prompt: |
       Verify the changes made for the task:
       ${{ inputs.task }}

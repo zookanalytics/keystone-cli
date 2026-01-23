@@ -5,12 +5,10 @@ description: "Demonstrate sandboxed JavaScript execution"
 steps:
   - id: generate_data
     type: shell
-    allowInsecure: true
     run: echo '{"values":[1,2,3,4,5]}'
 
   - id: process_data
     type: script
-    allowInsecure: true
     needs: [generate_data]
     run: |
       const data = JSON.parse(steps.generate_data.output.stdout);
@@ -22,7 +20,6 @@ steps:
   - id: print_result
     type: shell
     needs: [process_data]
-    allowInsecure: true
     run: |
       echo "Sum: ${{ steps.process_data.output.sum }}"
       echo "Average: ${{ steps.process_data.output.avg }}"

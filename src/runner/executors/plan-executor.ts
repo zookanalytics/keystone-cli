@@ -80,7 +80,6 @@ export async function executePlanStep(
     mcpServers: step.mcpServers,
     useStandardTools: step.useStandardTools,
     allowOutsideCwd: step.allowOutsideCwd,
-    allowInsecure: step.allowInsecure,
     handoff: step.handoff,
     outputSchema: step.outputSchema ?? DEFAULT_PLAN_OUTPUT_SCHEMA,
     needs: [],

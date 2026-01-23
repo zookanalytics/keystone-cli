@@ -49,7 +49,6 @@ steps:
   - id: summary
     type: shell
     needs: [confirm_memory]
-    allowInsecure: true
     run: |
       echo "Memory Service Demo Complete"
       echo "Recalled: ${{ steps.recall_preference.output[0].content }}"

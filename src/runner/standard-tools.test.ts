@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import { STANDARD_TOOLS, validateStandardToolSecurity } from './standard-tools';
 
 describe('Standard Tools Security', () => {
-  const options = { allowOutsideCwd: false, allowInsecure: false };
+  const options = { allowOutsideCwd: false };
 
   it('should allow paths within CWD', () => {
     expect(() => {
@@ -37,12 +37,6 @@ describe('Standard Tools Security', () => {
     }).not.toThrow();
   });
 
-  it('should block risky commands by default', () => {
-    expect(() => {
-      validateStandardToolSecurity('run_command', { command: 'ls; rm -rf /' }, options);
-    }).toThrow(/Security Error/);
-  });
-
   it('should block run_command outside CWD by default', () => {
     const outsideDir = path.resolve(path.parse(process.cwd()).root, 'tmp');
     expect(() => {
@@ -57,16 +51,6 @@ describe('Standard Tools Security', () => {
         'run_command',
         { command: 'pwd', dir: outsideDir },
         { allowOutsideCwd: true }
-      );
-    }).not.toThrow();
-  });
-
-  it('should allow risky commands if allowInsecure is true', () => {
-    expect(() => {
-      validateStandardToolSecurity(
-        'run_command',
-        { command: 'ls; rm -rf /' },
-        { allowInsecure: true }
       );
     }).not.toThrow();
   });

@@ -33,7 +33,6 @@ steps:
         execution:
           id: remember_context
           type: script
-          allowInsecure: true
           run: |
             (function() {
               return {
@@ -48,6 +47,5 @@ steps:
   - id: show_context
     type: shell
     needs: [route]
-    allowInsecure: true
     run: |
       echo "Memory: ${{ memory.user }} on ${{ memory.topic }} (env=${{ env.CURRENT_TOPIC }})"

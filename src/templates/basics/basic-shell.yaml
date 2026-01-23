@@ -12,12 +12,10 @@ outputs:
 steps:
   - id: create_message
     type: shell
-    allowInsecure: true
     run: echo "${{ escape(inputs.greeting) }}, ${{ escape(inputs.name) }}!"
     transform: "stdout.trim()"
 
   - id: print_message
     type: shell
     needs: [create_message]
-    allowInsecure: true
     run: echo "Generated message - ${{ escape(steps.create_message.output) }}"

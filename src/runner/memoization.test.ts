@@ -128,7 +128,6 @@ describe('Workflow Memoization (Auto-Hashing)', () => {
           id: 's1',
           type: 'shell',
           run: 'echo ${{ inputs.val }}',
-          allowInsecure: true,
           memoize: true,
           needs: [],
         },

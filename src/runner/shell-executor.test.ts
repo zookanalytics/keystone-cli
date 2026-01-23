@@ -35,7 +35,6 @@ describe('shell-executor', () => {
         type: 'shell',
         needs: [],
         run: 'echo "hello world"',
-        allowInsecure: true,
       };
 
       const result = await executeShell(step, context);
@@ -49,7 +48,6 @@ describe('shell-executor', () => {
         type: 'shell',
         needs: [],
         run: 'echo "${{ inputs.name }}"',
-        allowInsecure: true,
       };
       const customContext: ExpressionContext = {
         ...context,
@@ -66,7 +64,6 @@ describe('shell-executor', () => {
         type: 'shell',
         needs: [],
         run: 'echo $TEST_VAR',
-        allowInsecure: true,
         env: {
           TEST_VAR: 'env-value',
         },
@@ -96,7 +93,6 @@ describe('shell-executor', () => {
         type: 'shell',
         needs: [],
         run: 'echo "error" >&2',
-        allowInsecure: true,
       };
 
       const result = await executeShell(step, context);
@@ -109,7 +105,6 @@ describe('shell-executor', () => {
         type: 'shell',
         needs: [],
         run: 'exit 1',
-        allowInsecure: true,
       };
 
       const result = await executeShell(step, context);
@@ -133,7 +128,6 @@ describe('shell-executor', () => {
         type: 'shell',
         needs: [],
         run: 'echo ${HOME}',
-        allowInsecure: true,
       };
 
       // Should NOT throw - ${HOME} is legitimate
@@ -160,7 +154,6 @@ describe('shell-executor', () => {
         type: 'shell',
         needs: [],
         run: 'echo \'{"values": [1, 2, 3]}\'',
-        allowInsecure: true,
       };
 
       const result = await executeShell(step, context);
@@ -174,7 +167,6 @@ describe('shell-executor', () => {
         type: 'shell',
         needs: [],
         run: 'if [ "1" = "1" ]; then echo "match"; fi',
-        allowInsecure: true,
       };
 
       const result = await executeShell(step, context);

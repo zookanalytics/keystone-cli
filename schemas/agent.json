@@ -48,7 +48,10 @@
                         "default": []
                       },
                       "if": {
-                        "type": ["string", "boolean"]
+                        "type": [
+                          "string",
+                          "boolean"
+                        ]
                       },
                       "timeout": {
                         "type": "integer",
@@ -64,7 +67,10 @@
                           },
                           "backoff": {
                             "type": "string",
-                            "enum": ["linear", "exponential"],
+                            "enum": [
+                              "linear",
+                              "exponential"
+                            ],
                             "default": "linear"
                           },
                           "baseDelay": {
@@ -90,7 +96,9 @@
                             "default": 1
                           }
                         },
-                        "required": ["agent"],
+                        "required": [
+                          "agent"
+                        ],
                         "additionalProperties": false
                       },
                       "reflexion": {
@@ -115,7 +123,10 @@
                       },
                       "idempotencyScope": {
                         "type": "string",
-                        "enum": ["run", "global"]
+                        "enum": [
+                          "run",
+                          "global"
+                        ]
                       },
                       "idempotencyTtlSeconds": {
                         "type": "integer",
@@ -149,12 +160,18 @@
                             "additionalProperties": {
                               "type": "array",
                               "items": {
-                                "type": ["string", "number", "boolean"]
+                                "type": [
+                                  "string",
+                                  "number",
+                                  "boolean"
+                                ]
                               }
                             }
                           }
                         },
-                        "required": ["matrix"],
+                        "required": [
+                          "matrix"
+                        ],
                         "additionalProperties": false
                       },
                       "transform": {
@@ -178,10 +195,17 @@
                       },
                       "repairStrategy": {
                         "type": "string",
-                        "enum": ["reask", "repair", "hybrid"]
+                        "enum": [
+                          "reask",
+                          "repair",
+                          "hybrid"
+                        ]
                       },
                       "compensate": {
                         "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution"
+                      },
+                      "failFast": {
+                        "type": "boolean"
                       },
                       "run": {
                         "type": "string"
@@ -190,7 +214,8 @@
                         "type": "array",
                         "items": {
                           "type": "string"
-                        }
+                        },
+                        "minItems": 1
                       },
                       "dir": {
                         "type": "string"
@@ -203,12 +228,12 @@
                       },
                       "allowOutsideCwd": {
                         "type": "boolean"
-                      },
-                      "allowInsecure": {
-                        "type": "boolean"
                       }
                     },
-                    "required": ["id", "type"],
+                    "required": [
+                      "id",
+                      "type"
+                    ],
                     "additionalProperties": false
                   },
                   {
@@ -293,6 +318,9 @@
                       "compensate": {
                         "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/compensate"
                       },
+                      "failFast": {
+                        "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/failFast"
+                      },
                       "agent": {
                         "type": "string"
                       },
@@ -328,7 +356,11 @@
                       },
                       "contextStrategy": {
                         "type": "string",
-                        "enum": ["truncate", "summary", "auto"]
+                        "enum": [
+                          "truncate",
+                          "summary",
+                          "auto"
+                        ]
                       },
                       "qualityGate": {
                         "type": "object",
@@ -351,7 +383,9 @@
                             "default": 1
                           }
                         },
-                        "required": ["agent"],
+                        "required": [
+                          "agent"
+                        ],
                         "additionalProperties": false
                       },
                       "useGlobalMcp": {
@@ -375,7 +409,10 @@
                                 },
                                 "type": {
                                   "type": "string",
-                                  "enum": ["local", "remote"]
+                                  "enum": [
+                                    "local",
+                                    "remote"
+                                  ]
                                 },
                                 "command": {
                                   "type": "string"
@@ -406,7 +443,9 @@
                                   "exclusiveMinimum": 0
                                 }
                               },
-                              "required": ["name"],
+                              "required": [
+                                "name"
+                              ],
                               "additionalProperties": false
                             }
                           ]
@@ -416,9 +455,6 @@
                         "type": "boolean"
                       },
                       "allowOutsideCwd": {
-                        "type": "boolean"
-                      },
-                      "allowInsecure": {
                         "type": "boolean"
                       },
                       "handoff": {
@@ -459,15 +495,26 @@
                               },
                               "outputSchema": {}
                             },
-                            "required": ["command", "env", "cwd"],
+                            "required": [
+                              "command",
+                              "env",
+                              "cwd"
+                            ],
                             "additionalProperties": false
                           }
                         },
-                        "required": ["engine"],
+                        "required": [
+                          "engine"
+                        ],
                         "additionalProperties": false
                       }
                     },
-                    "required": ["id", "type", "agent", "prompt"],
+                    "required": [
+                      "id",
+                      "type",
+                      "agent",
+                      "prompt"
+                    ],
                     "additionalProperties": false
                   },
                   {
@@ -552,6 +599,9 @@
                       "compensate": {
                         "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/compensate"
                       },
+                      "failFast": {
+                        "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/failFast"
+                      },
                       "goal": {
                         "type": "string"
                       },
@@ -597,7 +647,11 @@
                       },
                       "contextStrategy": {
                         "type": "string",
-                        "enum": ["truncate", "summary", "auto"]
+                        "enum": [
+                          "truncate",
+                          "summary",
+                          "auto"
+                        ]
                       },
                       "qualityGate": {
                         "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/1/properties/qualityGate"
@@ -623,7 +677,10 @@
                                 },
                                 "type": {
                                   "type": "string",
-                                  "enum": ["local", "remote"]
+                                  "enum": [
+                                    "local",
+                                    "remote"
+                                  ]
                                 },
                                 "command": {
                                   "type": "string"
@@ -654,7 +711,9 @@
                                   "exclusiveMinimum": 0
                                 }
                               },
-                              "required": ["name"],
+                              "required": [
+                                "name"
+                              ],
                               "additionalProperties": false
                             }
                           ]
@@ -666,14 +725,15 @@
                       "allowOutsideCwd": {
                         "type": "boolean"
                       },
-                      "allowInsecure": {
-                        "type": "boolean"
-                      },
                       "handoff": {
                         "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/1/properties/handoff"
                       }
                     },
-                    "required": ["id", "type", "goal"],
+                    "required": [
+                      "id",
+                      "type",
+                      "goal"
+                    ],
                     "additionalProperties": false
                   },
                   {
@@ -758,6 +818,9 @@
                       "compensate": {
                         "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/compensate"
                       },
+                      "failFast": {
+                        "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/failFast"
+                      },
                       "path": {
                         "type": "string"
                       },
@@ -782,14 +845,20 @@
                                 },
                                 "default": {}
                               },
-                              "required": ["from"],
+                              "required": [
+                                "from"
+                              ],
                               "additionalProperties": false
                             }
                           ]
                         }
                       }
                     },
-                    "required": ["id", "type", "path"],
+                    "required": [
+                      "id",
+                      "type",
+                      "path"
+                    ],
                     "additionalProperties": false
                   },
                   {
@@ -874,6 +943,9 @@
                       "compensate": {
                         "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/compensate"
                       },
+                      "failFast": {
+                        "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/failFast"
+                      },
                       "path": {
                         "type": "string"
                       },
@@ -882,13 +954,23 @@
                       },
                       "op": {
                         "type": "string",
-                        "enum": ["read", "write", "append", "patch"]
+                        "enum": [
+                          "read",
+                          "write",
+                          "append",
+                          "patch"
+                        ]
                       },
                       "allowOutsideCwd": {
                         "type": "boolean"
                       }
                     },
-                    "required": ["id", "type", "path", "op"],
+                    "required": [
+                      "id",
+                      "type",
+                      "path",
+                      "op"
+                    ],
                     "additionalProperties": false
                   },
                   {
@@ -973,12 +1055,22 @@
                       "compensate": {
                         "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/compensate"
                       },
+                      "failFast": {
+                        "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/failFast"
+                      },
                       "url": {
                         "type": "string"
                       },
                       "method": {
                         "type": "string",
-                        "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"],
+                        "enum": [
+                          "GET",
+                          "POST",
+                          "PUT",
+                          "PATCH",
+                          "DELETE",
+                          "HEAD"
+                        ],
                         "default": "GET"
                       },
                       "body": {},
@@ -987,12 +1079,13 @@
                         "additionalProperties": {
                           "type": "string"
                         }
-                      },
-                      "allowInsecure": {
-                        "type": "boolean"
                       }
                     },
-                    "required": ["id", "type", "url"],
+                    "required": [
+                      "id",
+                      "type",
+                      "url"
+                    ],
                     "additionalProperties": false
                   },
                   {
@@ -1077,16 +1170,26 @@
                       "compensate": {
                         "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/compensate"
                       },
+                      "failFast": {
+                        "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/failFast"
+                      },
                       "message": {
                         "type": "string"
                       },
                       "inputType": {
                         "type": "string",
-                        "enum": ["confirm", "text"],
+                        "enum": [
+                          "confirm",
+                          "text"
+                        ],
                         "default": "confirm"
                       }
                     },
-                    "required": ["id", "type", "message"],
+                    "required": [
+                      "id",
+                      "type",
+                      "message"
+                    ],
                     "additionalProperties": false
                   },
                   {
@@ -1171,6 +1274,9 @@
                       "compensate": {
                         "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/compensate"
                       },
+                      "failFast": {
+                        "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/failFast"
+                      },
                       "duration": {
                         "anyOf": [
                           {
@@ -1189,7 +1295,10 @@
                         "type": "boolean"
                       }
                     },
-                    "required": ["id", "type"],
+                    "required": [
+                      "id",
+                      "type"
+                    ],
                     "additionalProperties": false
                   },
                   {
@@ -1274,18 +1383,21 @@
                       "compensate": {
                         "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/compensate"
                       },
+                      "failFast": {
+                        "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/failFast"
+                      },
                       "run": {
                         "type": "string"
                       },
                       "allowOutsideCwd": {
                         "type": "boolean"
-                      },
-                      "allowInsecure": {
-                        "type": "boolean",
-                        "default": false
                       }
                     },
-                    "required": ["id", "type", "run"],
+                    "required": [
+                      "id",
+                      "type",
+                      "run"
+                    ],
                     "additionalProperties": false
                   },
                   {
@@ -1370,6 +1482,9 @@
                       "compensate": {
                         "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/compensate"
                       },
+                      "failFast": {
+                        "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/failFast"
+                      },
                       "command": {
                         "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/1/properties/handoff/properties/engine/properties/command"
                       },
@@ -1386,7 +1501,13 @@
                         "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/1/properties/handoff/properties/engine/properties/cwd"
                       }
                     },
-                    "required": ["id", "type", "command", "env", "cwd"],
+                    "required": [
+                      "id",
+                      "type",
+                      "command",
+                      "env",
+                      "cwd"
+                    ],
                     "additionalProperties": false
                   },
                   {
@@ -1471,9 +1592,15 @@
                       "compensate": {
                         "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/compensate"
                       },
+                      "failFast": {
+                        "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/failFast"
+                      },
                       "op": {
                         "type": "string",
-                        "enum": ["search", "store"]
+                        "enum": [
+                          "search",
+                          "store"
+                        ]
                       },
                       "query": {
                         "type": "string"
@@ -1495,7 +1622,11 @@
                         "default": 5
                       }
                     },
-                    "required": ["id", "type", "op"],
+                    "required": [
+                      "id",
+                      "type",
+                      "op"
+                    ],
                     "additionalProperties": false
                   },
                   {
@@ -1580,9 +1711,15 @@
                       "compensate": {
                         "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/compensate"
                       },
+                      "failFast": {
+                        "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/failFast"
+                      },
                       "target": {
                         "type": "string",
-                        "enum": ["steps", "branches"],
+                        "enum": [
+                          "steps",
+                          "branches"
+                        ],
                         "default": "steps"
                       },
                       "condition": {
@@ -1603,7 +1740,10 @@
                         "default": "all"
                       }
                     },
-                    "required": ["id", "type"],
+                    "required": [
+                      "id",
+                      "type"
+                    ],
                     "additionalProperties": false
                   },
                   {
@@ -1688,6 +1828,9 @@
                       "compensate": {
                         "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/compensate"
                       },
+                      "failFast": {
+                        "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/failFast"
+                      },
                       "prompt": {
                         "type": "string"
                       },
@@ -1696,7 +1839,11 @@
                         "default": "keystone-architect"
                       }
                     },
-                    "required": ["id", "type", "prompt"],
+                    "required": [
+                      "id",
+                      "type",
+                      "prompt"
+                    ],
                     "additionalProperties": false
                   },
                   {
@@ -1781,9 +1928,15 @@
                       "compensate": {
                         "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/compensate"
                       },
+                      "failFast": {
+                        "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/failFast"
+                      },
                       "op": {
                         "type": "string",
-                        "enum": ["upload", "download"]
+                        "enum": [
+                          "upload",
+                          "download"
+                        ]
                       },
                       "name": {
                         "type": "string"
@@ -1801,7 +1954,12 @@
                         "type": "boolean"
                       }
                     },
-                    "required": ["id", "type", "op", "name"],
+                    "required": [
+                      "id",
+                      "type",
+                      "op",
+                      "name"
+                    ],
                     "additionalProperties": false
                   },
                   {
@@ -1886,6 +2044,9 @@
                       "compensate": {
                         "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/compensate"
                       },
+                      "failFast": {
+                        "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/failFast"
+                      },
                       "event": {
                         "type": "string"
                       },
@@ -1894,7 +2055,11 @@
                         "default": true
                       }
                     },
-                    "required": ["id", "type", "event"],
+                    "required": [
+                      "id",
+                      "type",
+                      "event"
+                    ],
                     "additionalProperties": false
                   },
                   {
@@ -1979,6 +2144,9 @@
                       "compensate": {
                         "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/compensate"
                       },
+                      "failFast": {
+                        "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/failFast"
+                      },
                       "op": {
                         "type": "string",
                         "enum": [
@@ -2014,12 +2182,13 @@
                       },
                       "allowOutsideCwd": {
                         "type": "boolean"
-                      },
-                      "allowInsecure": {
-                        "type": "boolean"
                       }
                     },
-                    "required": ["id", "type", "op"],
+                    "required": [
+                      "id",
+                      "type",
+                      "op"
+                    ],
                     "additionalProperties": false
                   },
                   {
@@ -2066,7 +2235,16 @@
                         "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/foreach"
                       },
                       "concurrency": {
-                        "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/concurrency"
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "exclusiveMinimum": 0
+                          },
+                          {
+                            "type": "string"
+                          }
+                        ],
+                        "default": 1
                       },
                       "pool": {
                         "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/pool"
@@ -2103,6 +2281,9 @@
                       },
                       "compensate": {
                         "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/compensate"
+                      },
+                      "failFast": {
+                        "$ref": "#/definitions/keystone-agent/properties/tools/items/properties/execution/anyOf/0/properties/failFast"
                       },
                       "goal": {
                         "type": "string"
@@ -2148,21 +2329,62 @@
                       },
                       "stateFile": {
                         "type": "string"
+                      },
+                      "library": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string"
+                            },
+                            "description": {
+                              "type": "string"
+                            },
+                            "steps": {
+                              "type": "array"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "description",
+                            "steps"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "confirmPlan": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "maxReplans": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 3
                       }
                     },
-                    "required": ["id", "type", "goal"],
+                    "required": [
+                      "id",
+                      "type",
+                      "goal"
+                    ],
                     "additionalProperties": false
                   }
                 ]
               }
             },
-            "required": ["name", "execution"],
+            "required": [
+              "name",
+              "execution"
+            ],
             "additionalProperties": false
           },
           "default": []
         }
       },
-      "required": ["name"],
+      "required": [
+        "name"
+      ],
       "additionalProperties": false
     }
   },

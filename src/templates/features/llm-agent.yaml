@@ -1,9 +1,68 @@
 $schema: https://raw.githubusercontent.com/mhingston/keystone-cli/main/schemas/workflow.json
 name: llm-agent
-description: "Test LLM step"
+description: "Interactive LLM workflow with human-in-the-loop collaboration"
+
+inputs:
+  topic:
+    type: string
+    default: "workflow automation"
 
 steps:
-  - id: ask_llm
+  # LLM generates initial suggestions
+  - id: generate_ideas
     type: llm
     agent: summarizer
-    prompt: "Hello, who are you?"
+    prompt: |
+      Generate 3 creative ideas related to "${{ inputs.topic }}".
+      Format your response as a numbered list.
+
+  # Human reviews and selects an idea
+  - id: review_ideas
+    type: human
+    message: |
+      The LLM generated these ideas:
+      
+      ${{ steps.generate_ideas.output }}
+      
+      Press Enter to continue with the first idea, or provide your own selection.
+    inputType: text
+
+  # LLM elaborates on the selected idea
+  - id: elaborate
+    type: llm
+    agent: summarizer
+    prompt: |
+      The user selected this idea: "${{ steps.review_ideas.output || 'Use the first idea from the list' }}"
+      
+      Please provide a detailed explanation of how to implement this idea,
+      including key considerations and potential challenges.
+
+  # Final human confirmation
+  - id: confirm
+    type: human
+    message: |
+      Here's the detailed plan:
+      
+      ${{ steps.elaborate.output }}
+      
+      Press Enter to confirm and save this plan.
+    inputType: confirm
+
+  # Save the plan to a file
+  - id: save_plan
+    type: file
+    if: ${{ steps.confirm.output }}
+    op: write
+    path: ./plan.md
+    content: |
+      # Plan for ${{ inputs.topic }}
+      
+      ## Selected Idea
+      ${{ steps.review_ideas.output || 'First idea from generated list' }}
+      
+      ## Detailed Plan
+      ${{ steps.elaborate.output }}
+
+outputs:
+  plan: ${{ steps.elaborate.output }}
+  saved: ${{ steps.save_plan.outputs.path || 'not saved' }}

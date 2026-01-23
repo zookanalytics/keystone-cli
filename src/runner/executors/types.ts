@@ -61,7 +61,6 @@ export interface StepExecutorOptions {
   dryRun?: boolean;
   abortSignal?: AbortSignal;
   debug?: boolean;
-  allowInsecure?: boolean;
   emitEvent?: (event: WorkflowEvent) => void;
   depth?: number;
 

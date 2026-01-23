@@ -120,7 +120,6 @@ export interface RunOptions {
   depth?: number;
   allowSuccessResume?: boolean;
   resourcePoolManager?: ResourcePoolManager;
-  allowInsecure?: boolean;
   artifactRoot?: string;
   db?: WorkflowDb;
   memoryDb?: MemoryDb;
@@ -1572,7 +1571,6 @@ Do not change the 'id' or 'type' or 'auto_heal' fields.
       runId: this.runId,
       artifactRoot: this.options.artifactRoot,
       redactForStorage: this.secretManager.redactForStorage.bind(this.secretManager),
-      allowInsecure: this.options.allowInsecure,
       executeStep: this.options.executeStep || executeStep,
       emitEvent: this.emitEvent.bind(this),
       workflowName: this.workflow.name,
@@ -2765,7 +2763,6 @@ Revise the output to address the feedback. Return only the corrected output.`;
         depth: this.depth + 1,
         allowSuccessResume: true, // Internal workflows might need this
         resourcePoolManager: this.resourcePool,
-        allowInsecure: this.options.allowInsecure,
       });
 
       // Restore sub-workflow state

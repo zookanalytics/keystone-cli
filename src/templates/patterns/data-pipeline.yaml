@@ -21,7 +21,6 @@ steps:
 
   - id: process_data
     type: shell
-    allowInsecure: true
     run: |
       echo "${{ steps.read_data.output }}" | tr '[:lower:]' '[:upper:]'
     transform: "stdout.trim()"

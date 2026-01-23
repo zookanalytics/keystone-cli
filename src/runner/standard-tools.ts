@@ -55,7 +55,6 @@ export const STANDARD_TOOLS: AgentTool[] = [
           return lines.slice(start - 1, start - 1 + count).join('\\n');
         })();
       `,
-      allowInsecure: true,
     },
   },
   {
@@ -128,7 +127,6 @@ export const STANDARD_TOOLS: AgentTool[] = [
           throw new Error('Directory not found: ' + dir);
         })();
       `,
-      allowInsecure: true,
     },
   },
   {
@@ -143,7 +141,6 @@ export const STANDARD_TOOLS: AgentTool[] = [
       required: ['pattern'],
     },
     execution: {
-      allowInsecure: true,
     },
   },
   {
@@ -309,7 +306,6 @@ export const STANDARD_TOOLS: AgentTool[] = [
           });
         })();
       `,
-      allowInsecure: true,
     },
   },
   {
@@ -410,7 +406,6 @@ export const STANDARD_TOOLS: AgentTool[] = [
           return results;
         })();
       `,
-      allowInsecure: true,
     },
   },
   {
@@ -493,7 +488,6 @@ export const STANDARD_TOOLS: AgentTool[] = [
           return results;
         })();
       `,
-      allowInsecure: true,
     },
   },
   {
@@ -521,7 +515,7 @@ export const STANDARD_TOOLS: AgentTool[] = [
 export function validateStandardToolSecurity(
   toolName: string,
   args: unknown,
-  options: { allowOutsideCwd?: boolean; allowInsecure?: boolean }
+  options: { allowOutsideCwd?: boolean }
 ): void {
   const cwd = process.cwd();
   const realCwd = fs.realpathSync(cwd);
@@ -579,13 +573,8 @@ export function validateStandardToolSecurity(
     }
   }
 
-  // 2. Check shell risk for run_command and guard working directory
+  // 2. Guard working directory for run_command
   if (toolName === 'run_command') {
     assertWithinCwd((args as any).dir, 'Directory');
-    if (!options.allowInsecure && detectShellInjectionRisk((args as any).command)) {
-      throw new Error(
-        `Security Error: Command contains risky shell characters. Use 'allowInsecure: true' on the llm step to execute this.`
-      );
-    }
   }
 }

@@ -7,7 +7,6 @@ steps:
   # This step attempts to run a broken command, but the agent should fix it
   - id: auto_heal_demo
     type: shell
-    allowInsecure: true
     run: |
       # This command has a typo and should fail
       ech "Hello World"
@@ -40,7 +39,6 @@ steps:
   - id: summary
     type: shell
     needs: [reflexion_demo]
-    allowInsecure: true
     run: |
       echo "Robust automation demo complete."
       echo "Healed Command Output: ${{ steps.auto_heal_demo.output.stdout }}"

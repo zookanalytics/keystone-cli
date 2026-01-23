@@ -176,7 +176,6 @@ describe('Standard Tools Integration', () => {
       needs: [],
       prompt: 'run risky command',
       useStandardTools: true,
-      allowInsecure: false, // Explicitly false
       maxIterations: 2,
     };
 
