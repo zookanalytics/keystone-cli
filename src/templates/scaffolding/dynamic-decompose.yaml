@@ -28,7 +28,6 @@ steps:
       tester: "tester"
       summarizer: "summarizer"
     maxSteps: 15
-    concurrency: "${{ inputs.concurrency }}"
     confirmPlan: true
     maxReplans: 3
     allowStepFailure: false
