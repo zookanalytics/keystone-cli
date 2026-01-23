@@ -1,4 +1,5 @@
 import type { ExpressionContext } from '../../expression/evaluator.ts';
+import { ExpressionEvaluator } from '../../expression/evaluator.ts';
 import type { ScriptStep } from '../../parser/schema.ts';
 import type { Logger } from '../../utils/logger.ts';
 import type { SafeSandbox } from '../../utils/sandbox.ts';
@@ -16,7 +17,11 @@ export async function executeScriptStep(
 ): Promise<StepResult> {
   try {
     const sandbox = options.sandbox || DefaultSandbox;
-    const result = await sandbox.execute(step.run, context as any, {
+
+    // Process template expressions in the script code
+    const processedScript = ExpressionEvaluator.evaluateString(step.run, context);
+
+    const result = await sandbox.execute(processedScript, context as any, {
       logger,
       signal: options.abortSignal,
     });

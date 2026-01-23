@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import * as readlinePromises from 'node:readline/promises';
 import type { MemoryDb } from '../db/memory-db';
 import type { ExpressionContext } from '../expression/evaluator';
+import { ExpressionEvaluator } from '../expression/evaluator';
 import type {
   ArtifactStep,
   EngineStep,
@@ -461,6 +462,46 @@ describe('step-executor', () => {
       });
       expect(result.status).toBe('failed');
       expect(result.error).toBe('Script failed');
+    });
+
+    it('should process template expressions in script code', async () => {
+      const contextWithSteps = {
+        ...context,
+        steps: {
+          test: { output: { value: 42 } },
+        },
+      };
+
+      // Mock ExpressionEvaluator to process templates
+      const evaluateStringSpy = mock(() => 'return 84');
+      const spy = spyOn(ExpressionEvaluator, 'evaluateString').mockImplementation(
+        evaluateStringSpy
+      );
+
+      try {
+        // @ts-ignore
+        const step = {
+          id: 's1',
+          type: 'script',
+          run: 'return steps.test.output.value * 2',
+        };
+
+        const result = await executeStep(step, contextWithSteps, undefined, {
+          sandbox: mockSandbox as unknown as typeof SafeSandbox,
+        });
+        expect(result.status).toBe('success');
+        expect(evaluateStringSpy).toHaveBeenCalledWith(
+          'return steps.test.output.value * 2',
+          contextWithSteps
+        );
+        expect(mockSandbox.execute).toHaveBeenCalledWith(
+          'return 84', // Template expression should be evaluated
+          expect.any(Object),
+          expect.any(Object)
+        );
+      } finally {
+        spy.mockRestore();
+      }
     });
 
     it('should pass logger to sandbox execution', async () => {
