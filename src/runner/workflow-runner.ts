@@ -2021,6 +2021,20 @@ Revise the output to address the feedback. Return only the corrected output.`;
     abortSignal?: AbortSignal,
     stepExecutionId?: string
   ): Promise<StepResult> {
+    // Check for existing child run from previous attempt
+    let existingSubRunId: string | undefined;
+    if (stepExecutionId) {
+      const stepExec = await this.db.getStepById(stepExecutionId);
+      if (stepExec?.metadata) {
+        try {
+          const metadata = JSON.parse(stepExec.metadata);
+          existingSubRunId = metadata.__subRunId;
+        } catch {
+          /* ignore parse errors */
+        }
+      }
+    }
+
     const factory: RunnerFactory = {
       create: (workflow, options) => new WorkflowRunner(workflow, options),
     };
@@ -2036,6 +2050,7 @@ Revise the output to address the feedback. Return only the corrected output.`;
       abortSignal,
       stepExecutionId,
       parentDb: this.db,
+      existingSubRunId, // Pass existing child run ID if found
     });
   }
 

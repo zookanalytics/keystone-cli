@@ -21,7 +21,7 @@ export function registerRunCommand(program: Command): void {
     .option('--debug', 'Enable interactive debug mode on failure')
     .option('--events', 'Emit structured JSON events (NDJSON) to stdout')
     .option('--no-dedup', 'Disable idempotency/deduplication')
-    .option('--resume', 'Resume the last run of this workflow if it failed or was paused')
+    .option('--resume', 'Resume the last run (including any failed child workflows)')
     .option('--explain', 'Show detailed error context with suggestions on failure')
     .action(async (workflowPathArg, options) => {
       // Security Warning

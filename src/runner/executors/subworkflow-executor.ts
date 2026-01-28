@@ -37,6 +37,7 @@ export async function executeSubWorkflow(
     abortSignal?: AbortSignal;
     stepExecutionId?: string;
     parentDb?: any; // WorkflowDb
+    existingSubRunId?: string; // From step metadata if resuming
   }
 ): Promise<StepResult> {
   if (options.abortSignal?.aborted) {
@@ -54,10 +55,31 @@ export async function executeSubWorkflow(
     }
   }
 
-  // Create a new runner for the sub-workflow via factory to avoid circular imports
+  // Check if we should resume an existing child run
+  let resumeRunId: string | undefined;
+  if (options.existingSubRunId && options.parentDb) {
+    const existingRun = await options.parentDb.getRun(options.existingSubRunId);
+    if (existingRun && ['failed', 'paused', 'running'].includes(existingRun.status)) {
+      options.parentLogger.log(`  ↪ Resuming existing child run: ${existingRun.id}`);
+
+      // Warn if status is 'running' (could indicate active process)
+      if (existingRun.status === 'running') {
+        options.parentLogger.warn(
+          `  ⚠️  Child has status 'running'. This usually means the previous process crashed. ` +
+            `If another process is actively running this workflow, abort now to avoid conflicts.`
+        );
+      }
+
+      resumeRunId = existingRun.id;
+    }
+  }
+
+  // Create runner - either resuming existing or starting fresh
   const subRunner = options.runnerFactory.create(workflow, {
     ...options.parentOptions,
-    inputs,
+    inputs: resumeRunId ? undefined : inputs, // Don't override inputs if resuming
+    resumeRunId, // Resume this run if set
+    resumeInputs: resumeRunId ? inputs : undefined,
     dbPath: options.parentDbPath,
     db: options.parentDb, // Reuse existing DB connection
     logger: options.parentLogger,
@@ -65,6 +87,7 @@ export async function executeSubWorkflow(
     workflowDir: subWorkflowDir,
     depth: options.parentDepth + 1,
     signal: options.abortSignal,
+    workflowPath: workflowPath,
   });
 
   // Track sub-workflow run ID in parent step metadata for rollback safety

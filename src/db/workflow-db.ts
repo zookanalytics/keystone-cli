@@ -138,6 +138,7 @@ export class WorkflowDb {
   private getStepIterationsStmt!: Statement;
   private getStepIterationsMetadataStmt!: Statement;
   private countStepIterationsStmt!: Statement;
+  private getStepByIdStmt!: Statement;
   private getStepsByRunStmt!: Statement;
   private getSuccessfulRunsStmt!: Statement;
   private getLastRunStmt!: Statement;
@@ -273,6 +274,9 @@ export class WorkflowDb {
     this.countStepIterationsStmt = this.db.prepare(`
       SELECT count(*) as count FROM step_executions
       WHERE run_id = ? AND step_id = ? AND iteration_index IS NOT NULL
+    `);
+    this.getStepByIdStmt = this.db.prepare(`
+      SELECT * FROM step_executions WHERE id = ?
     `);
     this.getStepsByRunStmt = this.db.prepare(`
       SELECT * FROM step_executions
@@ -1043,6 +1047,15 @@ export class WorkflowDb {
   }
 
   /**
+   * Get a step execution by its UUID
+   */
+  public async getStepById(id: string): Promise<StepExecution | null> {
+    return this.withRetry(() => {
+      return this.getStepByIdStmt.get(id) as StepExecution | null;
+    });
+  }
+
+  /**
    * Get all step executions for a workflow run
    * @note Synchronous method - wrapped in sync retry logic
    */
@@ -1507,6 +1520,7 @@ export class WorkflowDb {
       this.incrementRetryStmt,
       this.getStepByIterationStmt,
       this.getMainStepStmt,
+      this.getStepByIdStmt,
       this.getStepsByRunStmt,
       this.getSuccessfulRunsStmt,
       this.getLastRunStmt,
